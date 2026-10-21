@@ -162,6 +162,33 @@ export class Broker {
     return new Promise((resolve, reject) => this.pending.push({ kind: "close", userId, sym: f.sym, posId, pct, reason: "user", resolve, reject }));
   }
 
+  /** 보유 현물·선물 포지션 일괄 100% 시장가 매도·종료 */
+  closeAll(userId: number, scope: "spot" | "futures" | "all" = "all"): Promise<Fill[]> {
+    const acc = this.account(userId);
+    const r = this.recent.get(userId);
+    const count = r && r.tick === this.market.tick ? r.count : 0;
+    if (count >= ORDERS_PER_TICK) throw new OrderError("주문이 너무 빠릅니다. 잠시 후 다시 시도하세요.");
+    const tasks: Promise<Fill>[] = [];
+    if (scope === "spot" || scope === "all") {
+      for (const [sym, p] of acc.positions) {
+        if (p.qty > 0 && this.market.quote(sym)) {
+          tasks.push(new Promise((resolve, reject) => this.pending.push({ kind: "spot", userId, sym, side: "sell", pct: 100, resolve, reject })));
+        }
+      }
+    }
+    if (scope === "futures" || scope === "all") {
+      for (const f of acc.futures.values()) {
+        if (!f.closing && this.market.quote(f.sym)) {
+          f.closing = true;
+          tasks.push(new Promise((resolve, reject) => this.pending.push({ kind: "close", userId, sym: f.sym, posId: f.id, pct: 100, reason: "user", resolve, reject })));
+        }
+      }
+    }
+    if (!tasks.length) throw new OrderError("정리할 보유종목이나 선물 포지션이 없습니다.");
+    this.recent.set(userId, { tick: this.market.tick, count: count + 1 });
+    return Promise.all(tasks);
+  }
+
   /** 스탑로스 설정·해제 (price = null). 롱은 현재가 아래, 숏은 현재가 위여야 한다 */
   setStop(userId: number, posId: number, price: number | null) {
     const f = this.account(userId).futures.get(posId);

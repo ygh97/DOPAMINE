@@ -378,3 +378,22 @@ test("SQLite 무중단 온라인 백업 및 순환 슬롯 유지", async () => {
   restored.close();
   assert.equal(u?.name, "backup_user");
 });
+
+
+test("일괄매도·일괄종료(closeAll): 현물 다종목과 선물 포지션을 한 tick에 전량 정리", async () => {
+  const s = setup();
+  const u = s.user("bulk_trader");
+  await order(s, u, "NVDA", "buy", 20);
+  await order(s, u, "AAPL", "buy", 20);
+  await openFut(s, u, "TSLA", "long", 3, 20);
+  assert.equal(s.broker.me(u).positions.length, 2);
+  assert.equal(s.broker.me(u).futures.length, 1);
+
+  const p = s.broker.closeAll(u, "all");
+  s.tick();
+  const fills = await p;
+  assert.equal(fills.length, 3);
+  const after = s.broker.me(u);
+  assert.equal(after.positions.length, 0);
+  assert.equal(after.futures.length, 0);
+});

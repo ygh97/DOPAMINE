@@ -1,18 +1,13 @@
 <script setup lang="ts">
-import { reactive, ref } from "vue";
+import { computed, reactive } from "vue";
 import { clock, money, pct } from "../format";
 import { useAccount } from "../stores/account";
 import { useMarket } from "../stores/market";
 
 const a = useAccount();
 const m = useMarket();
-const tab = ref<"hold" | "fut" | "fills">("hold");
 const stops = reactive<Record<number, string>>({});
-const TABS = [
-  { id: "hold", label: "보유종목" },
-  { id: "fut", label: "선물 포지션" },
-  { id: "fills", label: "체결 내역" },
-] as const;
+
 const SIDE: Record<string, string> = {
   buy: "매수",
   sell: "매도",
@@ -28,6 +23,27 @@ const SIDE: Record<string, string> = {
 const sideClass = (s: string) =>
   s === "buy" || s === "long-open" ? "up" : s === "sell" || s === "short-open" || s === "liquidation" ? "down" : "muted";
 const qtyText = (sym: string, q: number) => (m.quotes[sym]?.market === "coin" || !Number.isInteger(q) ? +q.toFixed(6) : q.toLocaleString());
+const signedMoney = (v: number) => `${v >= 0 ? "+" : "-"}${money(Math.abs(v))}`;
+
+// 내 거래 실시간 요약 데이터
+const spotStats = computed(() => {
+  const value = a.positions.reduce((s, p) => s + p.value, 0);
+  const pnl = a.positions.reduce((s, p) => s + p.pnl, 0);
+  return { value, pnl };
+});
+const futStats = computed(() => {
+  const value = a.futures.reduce((s, f) => s + f.value, 0);
+  const pnl = a.futures.reduce((s, f) => s + f.pnl, 0);
+  return { value, pnl };
+});
+const fillStats = computed(() => {
+  const fills = a.me?.fills ?? [];
+  const closed = fills.filter(f => f.pnl != null);
+  const realized = closed.reduce((s, f) => s + (f.pnl ?? 0), 0);
+  const wins = closed.filter(f => (f.pnl ?? 0) > 0).length;
+  const winRate = closed.length ? Math.round((wins / closed.length) * 100) : 0;
+  return { total: fills.length, closed: closed.length, wins, winRate, realized };
+});
 
 async function applyStop(id: number) {
   const raw = (stops[id] ?? "").trim();
@@ -51,16 +67,58 @@ async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; e
 </script>
 
 <template>
-  <div class="panel">
-    <div class="panel-head">
+  <div class="panel" aria-label="내 포지션 및 거래 데이터">
+    <div class="panel-head hold-head">
       <div class="tabs" role="tablist">
-        <button v-for="t in TABS" :key="t.id" role="tab" :data-t="t.id" :aria-selected="tab === t.id" @click="tab = t.id">{{ t.label }}</button>
+        <button role="tab" data-t="hold" :aria-selected="a.holdTab === 'hold'" @click="a.holdTab = 'hold'">
+          보유종목 <span v-if="a.me" class="tab-cnt">{{ a.positions.length }}</span>
+        </button>
+        <button role="tab" data-t="fut" :aria-selected="a.holdTab === 'fut'" @click="a.holdTab = 'fut'">
+          선물 포지션 <span v-if="a.me" class="tab-cnt">{{ a.futures.length }}</span>
+        </button>
+        <button role="tab" data-t="fills" :aria-selected="a.holdTab === 'fills'" @click="a.holdTab = 'fills'">
+          체결 내역 <span v-if="a.me" class="tab-cnt">{{ a.me.fills.length }}</span>
+        </button>
+      </div>
+      <div v-if="a.me" class="bulk-actions">
+        <button id="sellAllSpotBtn" class="mini-btn danger" :disabled="a.busy || !a.positions.length" @click="a.closeAll('spot')">
+          현물 일괄매도 ({{ a.positions.length }})
+        </button>
+        <button id="closeAllFutBtn" class="mini-btn danger" :disabled="a.busy || !a.futures.length" @click="a.closeAll('futures')">
+          선물 일괄종료 ({{ a.futures.length }})
+        </button>
+        <button v-if="a.positions.length && a.futures.length" id="closeAllBtn" class="mini-btn danger-fill" :disabled="a.busy" @click="a.closeAll('all')">
+          전량 일괄청산
+        </button>
       </div>
     </div>
-    <p v-if="!a.me" class="empty">참가하면 {{ TABS.find(t => t.id === tab)!.label }}이(가) 여기에 표시됩니다.</p>
-    <div v-else-if="tab === 'hold'" class="table-scroll">
+
+    <div v-if="a.me" id="myTradeStats" class="my-stats">
+      <div>
+        <span class="muted">현물 평가</span>
+        <b>{{ money(spotStats.value) }}</b>
+        <small :class="spotStats.pnl >= 0 ? 'up' : 'down'">({{ signedMoney(spotStats.pnl) }})</small>
+      </div>
+      <div>
+        <span class="muted">선물 평가</span>
+        <b>{{ money(futStats.value) }}</b>
+        <small :class="futStats.pnl >= 0 ? 'up' : 'down'">({{ signedMoney(futStats.pnl) }})</small>
+      </div>
+      <div>
+        <span class="muted">실현손익(최근)</span>
+        <b :class="fillStats.realized >= 0 ? 'up' : 'down'">{{ signedMoney(fillStats.realized) }}</b>
+      </div>
+      <div>
+        <span class="muted">승률·체결</span>
+        <b>{{ fillStats.closed ? `${fillStats.winRate}% (${fillStats.wins}/${fillStats.closed})` : "—" }}</b>
+        <small class="muted">총 {{ fillStats.total }}건</small>
+      </div>
+    </div>
+
+    <p v-if="!a.me" class="empty">참가하면 보유종목·선물 포지션·체결 내역과 거래 통계가 여기에 표시됩니다.</p>
+    <div v-else-if="a.holdTab === 'hold'" class="table-scroll">
       <table v-if="a.positions.length" id="holdings" class="grid">
-        <thead><tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>수익률</th><th>공유</th></tr></thead>
+        <thead><tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>수익률</th><th>즉시 매도·공유</th></tr></thead>
         <tbody>
           <tr v-for="p in a.positions" :key="p.sym" :data-sym="p.sym" class="clickable" @click="m.select(p.sym)">
             <td><b>{{ p.sym }}</b> <small class="muted">{{ p.name }}</small></td>
@@ -68,17 +126,26 @@ async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; e
             <td>{{ money(p.avg) }}</td>
             <td>{{ money(p.price) }}</td>
             <td>{{ money(p.value) }}</td>
-            <td :class="p.pnl >= 0 ? 'up' : 'down'">{{ p.pnl >= 0 ? "+" : "-" }}{{ money(Math.abs(p.pnl)) }}</td>
+            <td :class="p.pnl >= 0 ? 'up' : 'down'">{{ signedMoney(p.pnl) }}</td>
             <td :class="p.pnl >= 0 ? 'up' : 'down'">{{ pct(p.pnlPct) }}</td>
-            <td @click.stop><button class="mini-btn" data-act="share-spot" @click="shareSpot(p)">자랑</button></td>
+            <td class="act-cell" @click.stop>
+              <button class="mini-btn" data-act="sell-10" :disabled="a.busy" @click="a.order(p.sym, 'sell', 10)">10%</button>
+              <button class="mini-btn" data-act="sell-20" :disabled="a.busy" @click="a.order(p.sym, 'sell', 20)">20%</button>
+              <button class="mini-btn" data-act="sell-50" :disabled="a.busy" @click="a.order(p.sym, 'sell', 50)">50%</button>
+              <button class="mini-btn danger" data-act="sell-100" :disabled="a.busy" @click="a.order(p.sym, 'sell', 100)">전량매도</button>
+              <button class="mini-btn" data-act="share-spot" @click="shareSpot(p)">자랑</button>
+            </td>
           </tr>
         </tbody>
       </table>
-      <p v-else class="empty">보유종목이 없습니다. 오른쪽 주문 패널에서 매수해 보세요.</p>
+      <p v-else class="empty">
+        보유 현물 종목이 없습니다.
+        <button v-if="a.futures.length" class="link-btn" @click="a.holdTab = 'fut'">열려 있는 선물 포지션 {{ a.futures.length }}건 보기 →</button>
+      </p>
     </div>
-    <div v-else-if="tab === 'fut'" class="table-scroll">
+    <div v-else-if="a.holdTab === 'fut'" class="table-scroll">
       <table v-if="a.futures.length" id="futures" class="grid">
-        <thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>청산가</th><th>증거금</th><th>손익</th><th>스탑로스</th><th>종료·공유</th></tr></thead>
+        <thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>청산가</th><th>증거금</th><th>손익</th><th>스탑로스</th><th>즉시 종료·공유</th></tr></thead>
         <tbody>
           <tr v-for="f in a.futures" :key="f.id" :data-sym="f.sym" :data-id="f.id" class="clickable" @click="m.select(f.sym)">
             <td><b>{{ f.sym }}</b> <small class="muted">{{ f.name }}</small></td>
@@ -88,7 +155,7 @@ async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; e
             <td>{{ money(f.price) }}</td>
             <td class="liq-cell">{{ money(f.liq) }}</td>
             <td>{{ money(f.margin) }}</td>
-            <td :class="f.pnl >= 0 ? 'up' : 'down'">{{ f.pnl >= 0 ? "+" : "-" }}{{ money(Math.abs(f.pnl)) }} <small>({{ pct(f.pnlPct) }})</small></td>
+            <td :class="f.pnl >= 0 ? 'up' : 'down'">{{ signedMoney(f.pnl) }} <small>({{ pct(f.pnlPct) }})</small></td>
             <td class="stop-cell" @click.stop>
               <input v-model="stops[f.id]" class="stop-input" inputmode="decimal" :placeholder="f.stop != null ? money(f.stop) : '미설정'" aria-label="스탑로스 가격" @keydown.enter="applyStop(f.id)">
               <button class="mini-btn" data-act="stop-set" @click="applyStop(f.id)">설정</button>
@@ -104,20 +171,23 @@ async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; e
           </tr>
         </tbody>
       </table>
-      <p v-else class="empty">열려 있는 선물 포지션이 없습니다. 오른쪽 주문 패널의 선물 탭에서 진입해 보세요.</p>
+      <p v-else class="empty">
+        열려 있는 선물 포지션이 없습니다.
+        <button v-if="a.positions.length" class="link-btn" @click="a.holdTab = 'hold'">보유 현물 종목 {{ a.positions.length }}건 보기 →</button>
+      </p>
     </div>
     <div v-else class="table-scroll">
       <table v-if="a.me.fills.length" id="fills" class="grid">
         <thead><tr><th>시각</th><th>종목</th><th>구분</th><th>수량</th><th>체결가</th><th>수수료</th><th>실현손익</th></tr></thead>
         <tbody>
-          <tr v-for="f in a.me.fills" :key="f.id">
+          <tr v-for="f in a.me.fills" :key="f.id" class="clickable" @click="m.select(f.sym)">
             <td>{{ clock(f.at) }}</td>
             <td><b>{{ f.sym }}</b></td>
             <td :class="sideClass(f.side)">{{ SIDE[f.side] ?? f.side }}</td>
             <td>{{ qtyText(f.sym, f.qty) }}</td>
             <td>{{ money(f.price) }}</td>
             <td>{{ money(f.fee) }}</td>
-            <td :class="f.pnl == null ? 'muted' : f.pnl >= 0 ? 'up' : 'down'">{{ f.pnl == null ? "—" : `${f.pnl >= 0 ? "+" : "-"}${money(Math.abs(f.pnl))}` }}</td>
+            <td :class="f.pnl == null ? 'muted' : f.pnl >= 0 ? 'up' : 'down'">{{ f.pnl == null ? "—" : signedMoney(f.pnl) }}</td>
           </tr>
         </tbody>
       </table>

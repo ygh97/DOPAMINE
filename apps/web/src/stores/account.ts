@@ -25,6 +25,7 @@ export const useAccount = defineStore("account", () => {
   const token = ref(readToken());
   const me = ref<Me | null>(null);
   const busy = ref(false);
+  const holdTab = ref<"hold" | "fut" | "fills">("hold");
   const toast = ref<{ text: string; kind: "ok" | "error"; id: number } | null>(null);
 
   function notify(text: string, kind: "ok" | "error" = "ok") {
@@ -45,16 +46,22 @@ export const useAccount = defineStore("account", () => {
     return data as T;
   }
 
+  function syncTab(next: Me | null) {
+    if (!next) return;
+    if (holdTab.value === "hold" && !next.positions.length && next.futures.length) holdTab.value = "fut";
+    else if (holdTab.value === "fut" && !next.futures.length && next.positions.length) holdTab.value = "hold";
+  }
+
   async function refresh() {
     if (!token.value) return;
-    try { me.value = await api<Me>("/api/me"); } catch { /* 401이면 api가 정리 */ }
+    try { me.value = await api<Me>("/api/me"); syncTab(me.value); } catch { /* 401이면 api가 정리 */ }
   }
 
   async function join(name: string, password: string) {
     busy.value = true;
     try {
       const r = await api<{ token: string; name: string; created: boolean; me: Me }>("/api/join", { name, password });
-      token.value = r.token; writeToken(r.token); me.value = r.me;
+      token.value = r.token; writeToken(r.token); me.value = r.me; syncTab(r.me);
       void m.loadRanking(); // 랭킹에 바로 보이게
       notify(r.created ? `${r.name}님, 참가를 환영합니다. $100,000으로 시작합니다.` : `${r.name}님, 다시 오셨네요.`);
     } catch (e) { notify((e as Error).message, "error"); }
@@ -71,6 +78,7 @@ export const useAccount = defineStore("account", () => {
     try {
       const r = await api<{ fill: Fill; me: Me }>("/api/order", { sym, side, pct });
       me.value = r.me;
+      if (side === "buy") holdTab.value = "hold";
       void m.loadRanking();
       const f = r.fill;
       notify(`${f.sym} ${f.side === "buy" ? "매수" : "매도"} ${+f.qty.toFixed(6)}${m.quotes[f.sym]?.market === "coin" ? "" : "주"} @ $${f.price.toFixed(f.price < 1 ? 4 : 2)}`);
@@ -83,6 +91,7 @@ export const useAccount = defineStore("account", () => {
     try {
       const r = await api<{ fill: Fill; me: Me }>("/api/futures/open", { sym, side, lev, pct });
       me.value = r.me;
+      holdTab.value = "fut";
       void m.loadRanking();
       const f = r.fill;
       notify(`${f.sym} ${lev}x ${side === "long" ? "롱" : "숏"} 진입 ${+f.qty.toFixed(6)}${m.quotes[f.sym]?.market === "coin" ? "" : "주"} @ $${f.price.toFixed(f.price < 1 ? 4 : 2)}`);
@@ -99,6 +108,19 @@ export const useAccount = defineStore("account", () => {
       const f = r.fill, pnl = f.pnl ?? 0;
       const pnlText = ` (${pnl >= 0 ? "+" : "-"}$${Math.abs(pnl).toFixed(2)})`;
       notify(`${f.sym} 선물 ${pct >= 100 ? "종료" : `${pct}% 종료`} @ $${f.price.toFixed(f.price < 1 ? 4 : 2)}${pnlText}`);
+    } catch (e) { notify((e as Error).message, "error"); }
+    finally { busy.value = false; }
+  }
+
+  async function closeAll(scope: "spot" | "futures" | "all" = "all") {
+    busy.value = true;
+    try {
+      const r = await api<{ count: number; fills: Fill[]; me: Me }>("/api/close-all", { scope });
+      me.value = r.me;
+      void m.loadRanking();
+      const totalPnl = r.fills.reduce((s, f) => s + (f.pnl ?? 0), 0);
+      const label = scope === "spot" ? "현물 일괄매도" : scope === "futures" ? "선물 일괄종료" : "전 포지션 일괄청산";
+      notify(`${label} ${r.count}건 완료 (${totalPnl >= 0 ? "+" : "-"}$${Math.abs(totalPnl).toFixed(2)})`);
     } catch (e) { notify((e as Error).message, "error"); }
     finally { busy.value = false; }
   }
@@ -191,5 +213,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, setStop, reset, fetchDrawings, syncDrawing, sendChat, reportChat, adminChat, adminBan, adminHide };
+  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, closeAll, setStop, reset, fetchDrawings, syncDrawing, sendChat, reportChat, adminChat, adminBan, adminHide };
 });

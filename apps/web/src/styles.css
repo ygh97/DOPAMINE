@@ -131,7 +131,7 @@ dialog#newsDlg::backdrop { background: rgba(10, 15, 25, .45); }
 @keyframes fd { from { background: var(--down-soft); } }
 
 /* center */
-.center { display: grid; grid-template-rows: auto minmax(340px, 1fr) minmax(160px, 30%); gap: var(--gap); min-height: 0; }
+.center { display: grid; grid-template-rows: auto minmax(280px, 1fr) minmax(220px, 38%); gap: var(--gap); min-height: 0; }
 .quote-head { display: flex; align-items: center; gap: 16px; padding: 10px 14px; flex-wrap: wrap; }
 .quote-head h1 { margin: 0; font-size: 18px; }
 .quote-head h1 small { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 6px; }
@@ -344,3 +344,16 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
 .share-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: var(--up-soft); color: var(--up); margin-right: 4px; }
 .chat-input button.share-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); padding: 0 8px; font-size: 12px; font-weight: 600; white-space: nowrap; }
 .chat-input button.share-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+
+
+/* 내 거래 데이터 요약 바 및 일괄매도·즉시매도 (HoldingsPanel) */
+.hold-head { flex-wrap: wrap; gap: 6px; }
+.tab-cnt { display: inline-block; margin-left: 3px; padding: 0 5px; border-radius: 99px; font-size: 11px; background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.bulk-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 4px; }
+.mini-btn.danger-fill { background: var(--up); color: #fff; border-color: var(--up); font-weight: 700; }
+.mini-btn.danger-fill:hover:not(:disabled) { opacity: 0.9; background: var(--up); }
+.my-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); font-size: 12px; }
+.my-stats > div { display: flex; align-items: baseline; gap: 5px; flex-wrap: wrap; min-width: 0; }
+@media (max-width: 760px) {
+  .my-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

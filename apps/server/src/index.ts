@@ -219,6 +219,15 @@ app.post<{ Body: { posId: number; price: number | null } }>("/api/stop", {
   return { me: broker.me(id) };
 });
 
+app.post<{ Body: { scope?: "spot" | "futures" | "all" } }>("/api/close-all", {
+  schema: { body: { type: "object", properties: { scope: { type: "string", enum: ["spot", "futures", "all"] } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const fills = await broker.closeAll(id, req.body.scope ?? "all");
+  return { count: fills.length, fills, me: broker.me(id) };
+});
+
 app.post<{ Body: { confirm: boolean } }>("/api/reset", {
   schema: { body: { type: "object", required: ["confirm"], properties: { confirm: { const: true } } } },
 }, async (req, reply) => {
