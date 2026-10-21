@@ -532,16 +532,42 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
   font-size: 10.5px; font-weight: 700; background: var(--panel-2); color: var(--accent); border: 1px solid var(--line);
 }
 
-/* 자연스러운 카드/말풍선형 채팅창 UI */
+/* 자연스러운 카드/말풍선형 채팅창 UI (배경보다 밝은 톤 + 스크롤 고정) */
+:root {
+  --chat-bg: #ffffff;
+  --chat-card-bg: #f8fbff;
+  --chat-card-border: #d5dfec;
+}
+:root[data-theme="dark"] {
+  --chat-bg: #212b38;
+  --chat-card-bg: #2a3647;
+  --chat-card-border: #3b4b61;
+}
+.chat-log-box {
+  position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column;
+  padding: 6px 8px 4px;
+}
 .chat-log {
-  height: 250px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px;
-  padding: 8px; display: flex; flex-direction: column; gap: 7px; background: var(--bg);
+  flex: 1; min-height: 180px; overflow-y: auto; overflow-anchor: none;
+  border: 1px solid var(--chat-card-border); border-radius: 8px;
+  padding: 8px 9px; display: flex; flex-direction: column; gap: 7px;
+  background: var(--chat-bg);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,.04);
 }
 .chat-card {
+  flex-shrink: 0;
   display: flex; flex-direction: column; gap: 4px; padding: 7px 10px;
-  border-radius: 8px; background: var(--panel); border: 1px solid var(--line);
-  font-size: 12.5px; line-height: 1.45; box-shadow: 0 1px 2px rgba(0,0,0,.03);
+  border-radius: 8px; background: var(--chat-card-bg); border: 1px solid var(--chat-card-border);
+  font-size: 12.5px; line-height: 1.45; box-shadow: 0 1px 3px rgba(0,0,0,.06);
 }
+.chat-jump-btn {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  z-index: 10; border: 1px solid var(--accent); border-radius: 999px;
+  padding: 5px 14px; background: var(--accent); color: #fff;
+  font-size: 12px; font-weight: 800; box-shadow: 0 4px 12px rgba(0,0,0,.28);
+  cursor: pointer; white-space: nowrap;
+}
+.chat-jump-btn:hover { filter: brightness(1.08); }
 .chat-card.is-mine {
   background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { clock, money, pct } from "../format";
 import { useAccount } from "../stores/account";
 import { useMarket, type ChatMsg } from "../stores/market";
@@ -14,19 +14,63 @@ const text = ref("");
 const whisperTo = ref<string | null>(null);
 const chatInputEl = ref<HTMLInputElement | null>(null);
 const logEl = ref<HTMLElement | null>(null);
-const scrollDown = () => nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight; });
+
+// 맨 아래에 있으면 새 채팅 수신 시 자동으로 맨 아래로 스크롤하고, 위로 올려서 보고 있으면 현재 스크롤 위치를 그대로 고정한다.
+const stickBottom = ref(true);
+const unreadCount = ref(0);
+
+function isNearBottom(el: HTMLElement): boolean {
+  return el.scrollHeight - el.scrollTop - el.clientHeight <= 42;
+}
+
+function onChatScroll() {
+  const el = logEl.value;
+  if (!el) return;
+  stickBottom.value = isNearBottom(el);
+  if (stickBottom.value) unreadCount.value = 0;
+}
+
+function scrollToBottom() {
+  stickBottom.value = true;
+  unreadCount.value = 0;
+  void nextTick(() => {
+    const el = logEl.value;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    requestAnimationFrame(() => {
+      if (logEl.value && stickBottom.value) {
+        logEl.value.scrollTop = logEl.value.scrollHeight;
+      }
+    });
+  });
+}
 
 const visibleChat = computed(() => {
   const myName = a.me?.name?.toLowerCase() ?? "";
   return m.chat.filter(c => !c.to || (myName && (c.name.toLowerCase() === myName || c.to.toLowerCase() === myName)));
 });
 
+const lastMsgId = computed(() => visibleChat.value[visibleChat.value.length - 1]?.id ?? 0);
+
 watch(() => m.socialTab, t => {
   if (t === "hall") void loadHall();
-  if (t === "chat") scrollDown();
+  if (t === "chat") scrollToBottom();
 });
 watch(() => m.seasonEpoch, () => { if (m.socialTab === "hall") void loadHall(); });
-watch(() => visibleChat.value.length, () => { if (m.socialTab === "chat") scrollDown(); });
+
+watch(lastMsgId, (newId, oldId) => {
+  if (!newId || newId === oldId) return;
+  if (m.socialTab !== "chat") return;
+  if (stickBottom.value) {
+    scrollToBottom();
+  } else {
+    unreadCount.value += 1;
+  }
+});
+
+onMounted(() => {
+  if (m.socialTab === "chat") scrollToBottom();
+});
 
 function startWhisper(targetName: string) {
   if (!a.me || targetName === "⚡전광판" || targetName === a.me.name) return;
@@ -39,7 +83,10 @@ async function submitChat() {
   const v = text.value.trim();
   if (!v) return;
   const payload = whisperTo.value && !v.startsWith("/") ? `/w ${whisperTo.value} ${v}` : v;
-  if (await a.sendChat(payload)) text.value = "";
+  if (await a.sendChat(payload)) {
+    text.value = "";
+    scrollToBottom();
+  }
 }
 
 async function shareSummary() {
@@ -52,7 +99,9 @@ async function shareSummary() {
     : p
       ? ` · $${p.sym} 현물 ${pct(p.pnlPct)}`
       : ` · 관심 $${m.selected}`;
-  await a.sendChat(`[공유] 총자산 ${money(a.equity)} (${pct(ret)})${posPart}`);
+  if (await a.sendChat(`[공유] 총자산 ${money(a.equity)} (${pct(ret)})${posPart}`)) {
+    scrollToBottom();
+  }
 }
 
 function parseLiqBroadcast(c: ChatMsg): { victim: string; sym: string } | null {
@@ -68,7 +117,9 @@ async function teabag(c: ChatMsg, mode: "mock" | "rip") {
   const msg = mode === "mock"
     ? `[티배깅] 🤣 ${info.victim}님 $${info.sym} 청산 달달하네요~ 반대 포지션으로 감사히 먹습니다 ㅋㅋ`
     : `[티배깅] 🕯️ ${info.victim}님의 $${info.sym} 장렬한 전사를 애도합니다... 성불하세요 (X키를 눌러 조의를 표하십시오)`;
-  await a.sendChat(msg);
+  if (await a.sendChat(msg)) {
+    scrollToBottom();
+  }
 }
 
 type Token = { kind: "text"; val: string } | { kind: "sym"; sym: string } | { kind: "badge"; val: string; cls?: string };
@@ -200,56 +251,61 @@ async function toggleBan(name: string, banned: boolean) {
         </div>
       </div>
 
-      <div id="chatLog" ref="logEl" class="chat-log">
-        <p v-if="!visibleChat.length" class="msg sys">대화가 없습니다. 닉네임을 누르면 귓속말/포지션 조회를 할 수 있습니다.</p>
-        <div
-          v-for="c in visibleChat"
-          :key="c.id"
-          class="chat-card"
-          :class="{
-            'is-mine': c.name === a.me?.name,
-            'is-broadcast': c.name === '⚡전광판',
-            'is-whisper': !!c.to,
-          }"
-          :data-msg-id="c.id"
-        >
-          <div class="chat-card-head">
-            <span v-if="c.to" class="whisper-badge">🔒 귓속말 {{ c.name }} → {{ c.to }}</span>
-            <button
-              v-else
-              type="button"
-              class="chat-user-btn"
-              :class="{ 'mine-name': c.name === a.me?.name }"
-              :title="c.name === '⚡전광판' ? '' : '클릭: 포트폴리오 훔쳐보기 / 우클릭: 귓속말'"
-              @click="c.name !== '⚡전광판' && (m.spyTarget = c.name)"
-              @contextmenu.prevent="startWhisper(c.name)"
-            >
-              {{ c.name }}
-            </button>
-            <button
-              v-if="a.me && c.name !== '⚡전광판' && c.name !== a.me.name"
-              type="button"
-              class="whisper-quick-btn"
-              title="이 유저에게 귓속말 보내기"
-              @click="startWhisper(c.name)"
-            >
-              귓속말
-            </button>
-            <small class="muted chat-time">{{ clock(c.at) }}</small>
-            <button v-if="a.me && c.name !== a.me.name && c.name !== '⚡전광판'" class="report-btn" data-act="report" title="신고" @click="a.reportChat(c.id)">신고</button>
-          </div>
-          <div class="chat-card-body">
-            <template v-for="(tk, idx) in tokenize(c.text)" :key="idx">
-              <span v-if="tk.kind === 'badge'" class="share-badge" :class="tk.cls">{{ tk.val }}</span>
-              <button v-else-if="tk.kind === 'sym'" type="button" class="sym-tag" :data-sym="tk.sym" @click="m.select(tk.sym)">${{ tk.sym }}</button>
-              <template v-else>{{ tk.val }}</template>
-            </template>
-          </div>
-          <div v-if="a.me && parseLiqBroadcast(c)" class="teabag-bar">
-            <button type="button" class="mini-btn teabag-btn" data-act="teabag-mock" @click="teabag(c, 'mock')">🤣 티배깅 조롱</button>
-            <button type="button" class="mini-btn teabag-btn" data-act="teabag-rip" @click="teabag(c, 'rip')">🕯️ 묵념 조의</button>
+      <div class="chat-log-box">
+        <div id="chatLog" ref="logEl" class="chat-log" @scroll.passive="onChatScroll">
+          <p v-if="!visibleChat.length" class="msg sys">대화가 없습니다. 닉네임을 누르면 귓속말/포지션 조회를 할 수 있습니다.</p>
+          <div
+            v-for="c in visibleChat"
+            :key="c.id"
+            class="chat-card"
+            :class="{
+              'is-mine': c.name === a.me?.name,
+              'is-broadcast': c.name === '⚡전광판',
+              'is-whisper': !!c.to,
+            }"
+            :data-msg-id="c.id"
+          >
+            <div class="chat-card-head">
+              <span v-if="c.to" class="whisper-badge">🔒 귓속말 {{ c.name }} → {{ c.to }}</span>
+              <button
+                v-else
+                type="button"
+                class="chat-user-btn"
+                :class="{ 'mine-name': c.name === a.me?.name }"
+                :title="c.name === '⚡전광판' ? '' : '클릭: 포트폴리오 훔쳐보기 / 우클릭: 귓속말'"
+                @click="c.name !== '⚡전광판' && (m.spyTarget = c.name)"
+                @contextmenu.prevent="startWhisper(c.name)"
+              >
+                {{ c.name }}
+              </button>
+              <button
+                v-if="a.me && c.name !== '⚡전광판' && c.name !== a.me.name"
+                type="button"
+                class="whisper-quick-btn"
+                title="이 유저에게 귓속말 보내기"
+                @click="startWhisper(c.name)"
+              >
+                귓속말
+              </button>
+              <small class="muted chat-time">{{ clock(c.at) }}</small>
+              <button v-if="a.me && c.name !== a.me.name && c.name !== '⚡전광판'" class="report-btn" data-act="report" title="신고" @click="a.reportChat(c.id)">신고</button>
+            </div>
+            <div class="chat-card-body">
+              <template v-for="(tk, idx) in tokenize(c.text)" :key="idx">
+                <span v-if="tk.kind === 'badge'" class="share-badge" :class="tk.cls">{{ tk.val }}</span>
+                <button v-else-if="tk.kind === 'sym'" type="button" class="sym-tag" :data-sym="tk.sym" @click="m.select(tk.sym)">${{ tk.sym }}</button>
+                <template v-else>{{ tk.val }}</template>
+              </template>
+            </div>
+            <div v-if="a.me && parseLiqBroadcast(c)" class="teabag-bar">
+              <button type="button" class="mini-btn teabag-btn" data-act="teabag-mock" @click="teabag(c, 'mock')">🤣 티배깅 조롱</button>
+              <button type="button" class="mini-btn teabag-btn" data-act="teabag-rip" @click="teabag(c, 'rip')">🕯️ 묵념 조의</button>
+            </div>
           </div>
         </div>
+        <button v-if="!stickBottom" type="button" class="chat-jump-btn" @click="scrollToBottom">
+          ⬇ {{ unreadCount > 0 ? `새 채팅 ${unreadCount}개 보기` : "맨 아래로 이동" }}
+        </button>
       </div>
 
       <div v-if="whisperTo" class="whisper-target-bar">

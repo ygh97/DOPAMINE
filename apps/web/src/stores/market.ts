@@ -127,7 +127,12 @@ export const useMarket = defineStore("market", () => {
           }
           if (news.value.length > 300) news.value.length = 300;
         }
-        if (Array.isArray(d.chat)) { chat.value = d.chat; for (const c of d.chat) checkBanner(c); }
+        if (Array.isArray(d.chat)) {
+          for (const c of d.chat as ChatMsg[]) {
+            if (!chat.value.some(x => x.id === c.id)) chat.value.push(c);
+            checkBanner(c);
+          }
+        }
         if (d.ranking) applyRanking(d.ranking);
         if (Array.isArray(d.settled) && d.settled.length) settled.value = d.settled;
       } catch {
@@ -168,7 +173,7 @@ export const useMarket = defineStore("market", () => {
       const msg: ChatMsg = JSON.parse((e as MessageEvent).data);
       if (!chat.value.some(c => c.id === msg.id)) chat.value.push(msg);
       checkBanner(msg);
-      if (chat.value.length > 100) chat.value.shift();
+      if (chat.value.length > 300) chat.value.shift();
     });
     source.addEventListener("chat-hide", e => {
       const { id } = JSON.parse((e as MessageEvent).data) as { id: number };
