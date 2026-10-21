@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive } from "vue";
 import { clock, money, pct } from "../format";
-import { useAccount } from "../stores/account";
+import { useAccount, type Fill } from "../stores/account";
 import { useMarket } from "../stores/market";
 
 const a = useAccount();
@@ -22,6 +22,9 @@ const SIDE: Record<string, string> = {
   delist: "상장폐지 정산",
   "split-cash": "병합 단주 정산",
 };
+const isSpotSide = (s: string) => s === "buy" || s === "sell" || s === "split-cash";
+const fillMarketLabel = (s: string) => (isSpotSide(s) ? "현물" : s === "delist" ? "정산" : "선물");
+const fillMarketClass = (s: string) => (isSpotSide(s) ? "mkt-spot" : s === "delist" ? "mkt-etc" : "mkt-fut");
 const sideClass = (s: string) =>
   s === "buy" || s === "long-open" || s === "tp" ? "up" : s === "sell" || s === "short-open" || s === "liquidation" ? "down" : "muted";
 const qtyText = (sym: string, q: number) => (m.quotes[sym]?.market === "coin" || !Number.isInteger(q) ? +q.toFixed(6) : q.toLocaleString());
@@ -74,6 +77,14 @@ async function shareSpot(p: { sym: string; avg: number; price: number; pnl: numb
 async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; entry: number; price: number; pnlPct: number }) {
   m.socialTab = "chat";
   await a.sendChat(`[공유] $${f.sym} ${f.lev}x ${f.side === "long" ? "롱" : "숏"} 진입 ${money(f.entry)} → 현재 ${money(f.price)} (${pct(f.pnlPct)})`);
+}
+async function shareFill(f: Fill) {
+  m.socialTab = "chat";
+  const mkt = fillMarketLabel(f.side);
+  const act = SIDE[f.side] ?? f.side;
+  const unit = m.quotes[f.sym]?.market === "coin" ? "" : "주";
+  const pnlPart = f.pnl != null ? ` · 실현손익 ${signedMoney(f.pnl)}` : "";
+  await a.sendChat(`[공유] $${f.sym} [${mkt}] ${act} ${qtyText(f.sym, f.qty)}${unit} @ ${money(f.price)}${pnlPart}`);
 }
 </script>
 
@@ -194,16 +205,20 @@ async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; e
     </div>
     <div v-else class="table-scroll">
       <table v-if="a.me.fills.length" id="fills" class="grid">
-        <thead><tr><th>시각</th><th>종목</th><th>구분</th><th>수량</th><th>체결가</th><th>수수료</th><th>실현손익</th></tr></thead>
+        <thead><tr><th>시각</th><th>종목</th><th>유형</th><th>구분</th><th>수량</th><th>체결가</th><th>수수료</th><th>실현손익</th><th>공유</th></tr></thead>
         <tbody>
           <tr v-for="f in a.me.fills" :key="f.id" class="clickable" @click="m.select(f.sym)">
             <td>{{ clock(f.at) }}</td>
             <td><b>{{ f.sym }}</b></td>
-            <td :class="sideClass(f.side)">{{ SIDE[f.side] ?? f.side }}</td>
+            <td><span class="fill-mkt-badge" :class="fillMarketClass(f.side)">{{ fillMarketLabel(f.side) }}</span></td>
+            <td :class="sideClass(f.side)"><b>{{ SIDE[f.side] ?? f.side }}</b></td>
             <td>{{ qtyText(f.sym, f.qty) }}</td>
             <td>{{ money(f.price) }}</td>
             <td>{{ money(f.fee) }}</td>
             <td :class="f.pnl == null ? 'muted' : f.pnl >= 0 ? 'up' : 'down'">{{ f.pnl == null ? "—" : signedMoney(f.pnl) }}</td>
+            <td class="act-cell" @click.stop>
+              <button class="mini-btn" data-act="share-fill" @click="shareFill(f)">자랑</button>
+            </td>
           </tr>
         </tbody>
       </table>
