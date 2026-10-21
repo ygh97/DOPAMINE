@@ -178,3 +178,31 @@ test("등락률 기준가(prev)는 게임 1주일(7일) 주기로만 초기화�
   assert.equal(m.tick, 2240);
   assert.equal(m.quote("NVDA")!.prev, m.quote("NVDA")!.price, "게임 1주일(560틱) 주기마다 기준가 갱신");
 });
+
+test("우상향 추세·코인 섹터 동조화·개별 기업 뉴스 단독 반응", () => {
+  const m = make(21);
+  const startAvg = m.quotes().filter(q => q.market !== "venture").reduce((s, q) => s + q.price, 0);
+  run(m, 6000);
+  const endQuotes = m.quotes().filter(q => q.market !== "venture");
+  const upRatio = endQuotes.reduce((s, q) => s + q.price / ASSETS.find(a => a.sym === q.sym)!.price, 0) / endQuotes.length;
+  assert.ok(upRatio > 1.05 && startAvg > 0, `전체 평균 수익 배수 우상향 (${upRatio.toFixed(2)}x)`);
+
+  // 코인 섹터 동조화 확인 (BTC - ETH 상관관계)
+  const ret = (s: string) => { const c = m.bars(s).map(b => b.close); return c.slice(1).map((x, i) => Math.log(x / c[i])); };
+  const x = ret("BTC"), y = ret("ETH"), n = Math.min(x.length, y.length);
+  const mx = x.slice(-n).reduce((a, b) => a + b) / n, my = y.slice(-n).reduce((a, b) => a + b) / n;
+  let sxy = 0, sx = 0, sy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = x[x.length - n + i] - mx, dy = y[y.length - n + i] - my;
+    sxy += dx * dy; sx += dx * dx; sy += dy * dy;
+  }
+  const coinCorr = sxy / Math.sqrt(sx * sy);
+  assert.ok(coinCorr > 0.45, `코인 섹터 동조화 상관계수 ${coinCorr.toFixed(2)}`);
+
+  // 개별 기업·코인 뉴스는 오직 해당 1개 종목만 대상으로 한다
+  for (const item of m.news) {
+    if (item.kind === "기업" || item.kind === "코인") {
+      assert.equal(item.symbols.length, 1, "개별 기업·코인 뉴스는 해당 종목 1개만 반응");
+    }
+  }
+});

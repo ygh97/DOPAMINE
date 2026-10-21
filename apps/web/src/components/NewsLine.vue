@@ -37,6 +37,16 @@ function symMove(n: NewsItem, sym: string): number | null {
         <time class="news-time">{{ dateText(latest.date) }} · {{ clock(latest.at) }}</time>
       </template>
       <span v-else class="headline muted">뉴스를 기다리는 중</span>
+      <button
+        id="floatNewsToggleBtn"
+        type="button"
+        class="icon-btn news-act-btn float-toggle-btn"
+        :aria-pressed="m.floatingNewsOpen"
+        title="웹페이지 안에서 이동·크기 조절 가능한 실시간 뉴스 창을 띄우거나 숨깁니다"
+        @click.stop="m.toggleFloatingNews()"
+      >
+        🪟 실시간 뉴스창 {{ m.floatingNewsOpen ? "ON" : "OFF" }}
+      </button>
       <button id="newsExpandBtn" type="button" class="icon-btn news-act-btn" :aria-expanded="expanded" @click.stop="expanded = !expanded">
         {{ expanded ? "접기 ▴" : "최근 5개 펼치기 ▾" }}
       </button>

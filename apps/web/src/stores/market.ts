@@ -34,8 +34,21 @@ export const useMarket = defineStore("market", () => {
   const settled = ref<{ type: string; sym: string }[]>([]);
   const chat = ref<ChatMsg[]>([]);
   const banner = ref<{ id: number; text: string; kind: "clear" | "liq" } | null>(null);
+  const whisperAlert = ref<{ id: number; from: string; text: string } | null>(null);
+  const unreadWhispers = ref(0);
+  const replyWhisperTo = ref<string | null>(null);
   let lastBannerId = 0;
+  let lastWhisperId = 0;
   function checkBanner(msg: ChatMsg) {
+    if (msg.to && msg.id > lastWhisperId) {
+      const myName = (() => { try { return (localStorage.getItem("dc-name") ?? "").toLowerCase(); } catch { return ""; } })();
+      if (myName && msg.to.toLowerCase() === myName && msg.name.toLowerCase() !== myName) {
+        lastWhisperId = msg.id;
+        whisperAlert.value = { id: msg.id, from: msg.name, text: msg.text };
+        if (socialTab.value !== "chat") unreadWhispers.value++;
+        setTimeout(() => { if (whisperAlert.value?.id === msg.id) whisperAlert.value = null; }, 8000);
+      }
+    }
     if (msg.name !== "⚡전광판" || msg.id <= lastBannerId) return;
     lastBannerId = msg.id;
     const kind: "clear" | "liq" = msg.text.startsWith("[100배졸업]") ? "clear" : "liq";
@@ -47,6 +60,11 @@ export const useMarket = defineStore("market", () => {
   const tab = ref<MarketKind>("stock");
   const selected = ref("NVDA");
   const newsDialog = ref<{ mode: "detail"; id: string } | { mode: "list"; sym?: string } | null>(null);
+  const floatingNewsOpen = ref((() => { try { return localStorage.getItem("dc-float-news") === "1"; } catch { return false; } })());
+  function toggleFloatingNews(force?: boolean) {
+    floatingNewsOpen.value = force ?? !floatingNewsOpen.value;
+    try { localStorage.setItem("dc-float-news", floatingNewsOpen.value ? "1" : "0"); } catch { /* ignore */ }
+  }
   const guideOpen = ref(false);
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
@@ -92,7 +110,11 @@ export const useMarket = defineStore("market", () => {
     date.value = s.date;
     tick.value = s.tick;
     news.value = s.news;
-    if (Array.isArray(s.chat)) { chat.value = s.chat; lastBannerId = s.chat.at(-1)?.id ?? 0; }
+    if (Array.isArray(s.chat)) {
+      chat.value = s.chat;
+      lastBannerId = s.chat.at(-1)?.id ?? 0;
+      lastWhisperId = s.chat.at(-1)?.id ?? 0;
+    }
     applyQuotes(s.quotes);
     await loadRanking();
   }
@@ -214,6 +236,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, banner, season, seasonEpoch, tab, selected, newsDialog, guideOpen, spyTarget, orderPreset, socialTab, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

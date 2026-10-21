@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
+import FloatingNews from "./components/FloatingNews.vue";
 import HoldingsPanel from "./components/HoldingsPanel.vue";
 import NewsDialog from "./components/NewsDialog.vue";
 import NewsLine from "./components/NewsLine.vue";
@@ -105,6 +106,12 @@ async function sendBannerTeabag(text: string, type: "teabag" | "rip") {
   await a.sendChat(tag);
 }
 
+function replyWhisper(from: string) {
+  m.replyWhisperTo = from;
+  m.whisperAlert = null;
+  if (mView.value !== "all") mView.value = "social";
+}
+
 watch(() => m.selected, () => { if (mView.value === "watch") mView.value = "trade"; });
 onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷부터 받는다
 </script>
@@ -119,7 +126,17 @@ onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷�
       <button type="button" class="teabag-btn rip" @click="sendBannerTeabag(m.banner.text, 'rip')">🕯️ 묵념</button>
     </span>
   </div>
+  <div v-if="m.whisperAlert" id="whisperAlertBanner" class="whisper-alert" role="alert">
+    <span class="whisper-alert-badge">🔒 귓속말 도착</span>
+    <b>@{{ m.whisperAlert.from }}</b>
+    <span class="whisper-alert-text">{{ m.whisperAlert.text }}</span>
+    <div class="whisper-alert-actions">
+      <button type="button" class="whisper-reply-btn" @click="replyWhisper(m.whisperAlert.from)">답장하기</button>
+      <button type="button" class="whisper-close-btn" @click="m.whisperAlert = null">✕</button>
+    </div>
+  </div>
   <NewsLine />
+  <FloatingNews />
   <NewsDialog />
   <ToastMessage />
   <main class="layout" :data-mview="mView">

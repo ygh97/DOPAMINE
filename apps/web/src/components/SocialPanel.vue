@@ -54,7 +54,18 @@ const lastMsgId = computed(() => visibleChat.value[visibleChat.value.length - 1]
 
 watch(() => m.socialTab, t => {
   if (t === "hall") void loadHall();
-  if (t === "chat") scrollToBottom();
+  if (t === "chat") {
+    m.unreadWhispers = 0;
+    scrollToBottom();
+  }
+});
+watch(() => m.replyWhisperTo, target => {
+  if (!target) return;
+  whisperTo.value = target;
+  m.socialTab = "chat";
+  m.unreadWhispers = 0;
+  m.replyWhisperTo = null;
+  void nextTick(() => chatInputEl.value?.focus());
 });
 watch(() => m.seasonEpoch, () => { if (m.socialTab === "hall") void loadHall(); });
 
@@ -192,7 +203,10 @@ async function toggleBan(name: string, banned: boolean) {
       <div class="tabs" role="tablist">
         <button role="tab" data-c="rank" :aria-selected="m.socialTab === 'rank'" @click="m.socialTab = 'rank'">랭킹</button>
         <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">명예의 전당</button>
-        <button role="tab" data-c="chat" :aria-selected="m.socialTab === 'chat'" @click="m.socialTab = 'chat'">채팅</button>
+        <button role="tab" data-c="chat" :aria-selected="m.socialTab === 'chat'" @click="m.socialTab = 'chat'">
+          채팅
+          <span v-if="m.unreadWhispers > 0" class="whisper-tab-badge">🔒{{ m.unreadWhispers }}</span>
+        </button>
       </div>
       <span class="muted" style="margin-left: auto">참가 {{ m.players }}명</span>
       <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>

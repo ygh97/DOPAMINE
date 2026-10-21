@@ -17,12 +17,12 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   maxBars: 1500,
   newsGap: [6, 14],       // 뉴스 간격(틱)
   marketSigma: 0.0007,
-  sectorSigma: 0.0012,    // 같은 업종끼리 상관 약 0.4
+  sectorSigma: 0.0018,    // 같은 업종(섹터·코인)끼리 주가 방향이 강하게 묶이도록 상향
   kappa: 0.0006,          // 적정가 회귀 강도 (반감기 약 1,150틱)
   rsiPeriod: 14,
   rsiWeight: 0.25,        // RSI 기울기 최대치 = 개별 σ의 25%
   regimeSwitch: 1 / 400,  // 국면 전환 확률(틱당)
-  flipChance: 0.15,       // 뉴스 반응이 반대로 나올 확률
+  flipChance: 0.08,       // 뉴스 반응이 반대로 나올 확률 (호재 반응 일관성 강화)
   srLookback: 60,         // 전고점·전저점을 볼 봉 수
   srBand: 0.004,          // 지지·저항이 작동하는 거리 (0.4%)
   srWeight: 0.35,         // 지지·저항 기울기 최대치 = 개별 σ의 35%
@@ -46,9 +46,9 @@ export const DEFAULT_OPTIONS: MarketOptions = {
 };
 
 const KIND: Record<MarketKind, { sigma: number; betaM: number; betaS: number; jump: number }> = {
-  stock: { sigma: 0.0012, betaM: 1, betaS: 1, jump: 0 },
-  coin: { sigma: 0.0025, betaM: 0.6, betaS: 1.8, jump: 0.002 },
-  venture: { sigma: 0.0035, betaM: 0.5, betaS: 0.8, jump: 0.003 },
+  stock: { sigma: 0.00085, betaM: 1.0, betaS: 1.45, jump: 0 },
+  coin: { sigma: 0.00095, betaM: 0.75, betaS: 2.15, jump: 0 },
+  venture: { sigma: 0.0032, betaM: 0.5, betaS: 0.9, jump: 0.002 },
 };
 
 interface Impulse { total: number; w: number[]; i: number; delay: number }
@@ -225,65 +225,94 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
 
   // ---------- 숨은 세력(Whale / Market Maker) 차트 패턴 ----------
   // 뉴스나 알림을 전혀 띄우지 않고 차트 수급으로만 개미털기(Shakeout)·설거지(Pump & Dump)·숏스퀴즈(Short Squeeze)를 발생시킨다.
+  // 우상향 기조에 맞춰 매집 후 상승(개미털기·숏스퀴즈) 비중을 78%로 높인다.
   function whaleOperation() {
     const candidates = live().filter(x => x.watchUntil == null && !venturesBusy.has(x.sym));
     if (!candidates.length) return;
     const a = pick(candidates);
-    const scale = a.market === "venture" ? 2.2 : a.market === "coin" ? 1.6 : 1.0;
+    const scale = a.market === "venture" ? 2.0 : a.market === "coin" ? 1.4 : 1.0;
     const modeRoll = rand();
     a.volBoost = Math.max(a.volBoost, 14);
 
-    if (modeRoll < 0.36) {
-      // 개미털기 (Shakeout): 초반 급락 후 V자 매집 반등
-      const dip = -uni(0.025, 0.055) * scale;
-      const rip = uni(0.05, 0.11) * scale;
-      impulse(a.pending, dip, Math.round(uni(4, 8)), 0);
-      impulse(a.pending, rip, Math.round(uni(20, 40)), Math.round(uni(6, 10)));
-    } else if (modeRoll < 0.70) {
-      // 설거지 (Pump & Dump): 단기 슈팅 후 고점 대량 투하
-      const pump = uni(0.03, 0.07) * scale;
-      const dump = -uni(0.055, 0.12) * scale;
-      impulse(a.pending, pump, Math.round(uni(7, 13)), 0);
-      impulse(a.pending, dump, Math.round(uni(22, 45)), Math.round(uni(10, 16)));
-    } else {
-      // 숏스퀴즈 (Short Squeeze): 1차 매집 + 2차 연쇄 분출
+    if (modeRoll < 0.42) {
+      // 개미털기 (Shakeout): 초반 짧은 눌림 후 강한 V자 매집 돌파
+      const dip = -uni(0.015, 0.035) * scale;
+      const rip = uni(0.045, 0.10) * scale;
+      impulse(a.pending, dip, Math.round(uni(4, 7)), 0);
+      impulse(a.pending, rip, Math.round(uni(18, 36)), Math.round(uni(5, 9)));
+      if (a.eps && a.baseEps) { a.baseEps *= Math.exp(rip * 0.4); a.eps *= Math.exp(rip * 0.4); }
+      else a.anchor *= Math.exp(rip * 0.4);
+    } else if (modeRoll < 0.78) {
+      // 숏스퀴즈 (Short Squeeze): 1차 매집 + 2차 연쇄 상방 분출
       const wave1 = uni(0.03, 0.06) * scale;
-      const wave2 = uni(0.04, 0.09) * scale;
+      const wave2 = uni(0.045, 0.095) * scale;
       impulse(a.pending, wave1, Math.round(uni(5, 10)), 0);
       impulse(a.pending, wave2, Math.round(uni(15, 30)), Math.round(uni(6, 12)));
-      impulse(a.pending, -wave2 * 0.35, Math.round(uni(30, 50)), Math.round(uni(35, 55)));
+      impulse(a.pending, -wave2 * 0.25, Math.round(uni(30, 50)), Math.round(uni(35, 55)));
+      if (a.eps && a.baseEps) { a.baseEps *= Math.exp((wave1 + wave2) * 0.45); a.eps *= Math.exp((wave1 + wave2) * 0.45); }
+      else a.anchor *= Math.exp((wave1 + wave2) * 0.45);
+    } else {
+      // 설거지 (Pump & Dump): 단기 슈팅 후 조정
+      const pump = uni(0.03, 0.065) * scale;
+      const dump = -uni(0.04, 0.085) * scale;
+      impulse(a.pending, pump, Math.round(uni(7, 13)), 0);
+      impulse(a.pending, dump, Math.round(uni(22, 45)), Math.round(uni(10, 16)));
     }
   }
 
-  // ---------- 뉴스 ----------
+  // 적정가(EPS·앵커) 이동 헬퍼: 호재나 성장으로 기업의 내재가치 자체가 계단식으로 우상향하도록 지원
+  function shiftFair(a: AssetState, logMove: number) {
+    const mult = Math.exp(logMove);
+    if (a.eps != null && a.baseEps != null) {
+      a.baseEps *= mult;
+      a.eps = Math.min(a.baseEps * cfg.epsBand[1], Math.max(a.baseEps * cfg.epsBand[0], a.eps * mult));
+    } else {
+      a.anchor *= mult;
+    }
+  }
+
+  // ---------- 뉴스 (호재 빈도 ~66% 우위 & 호재 시 큰 폭 상승 & 개별 기업 단독 반응) ----------
   function marketNews() {
-    const good = rand() < 0.5, tpl = pick(good ? NEWS.market.good : NEWS.market.bad);
-    react(marketPending, realize((good ? 1 : -1) * uni(0.004, 0.012)));
+    const good = rand() < 0.66, tpl = pick(good ? NEWS.market.good : NEWS.market.bad);
+    const move = good ? realize(uni(0.008, 0.022), 0.03) : realize(-uni(0.004, 0.010), 0.08);
+    react(marketPending, move);
+    for (const a of live()) shiftFair(a, move * a.betaM * (good ? 0.65 : 0.35));
     publish({ kind: "시장", headline: tpl.h, body: tpl.b, symbols: [] });
   }
   function sectorNews() {
     const members = (key: string) => live().filter(a => a.sector === key).map(a => a.sym);
     const key = pick(Object.keys(sectors).filter(k => k !== "venture" && members(k).length)), name = sectors[key];
-    const good = rand() < 0.5, tpl = pick(good ? NEWS.sector.good : NEWS.sector.bad);
-    react(sectorPending[key], realize((good ? 1 : -1) * uni(0.006, 0.02)));
+    const good = rand() < 0.66, tpl = pick(good ? NEWS.sector.good : NEWS.sector.bad);
+    const move = good ? realize(uni(0.015, 0.038), 0.03) : realize(-uni(0.006, 0.016), 0.08);
+    react(sectorPending[key], move);
+    for (const a of live()) {
+      if (a.sector === key) shiftFair(a, move * a.betaS * (good ? 0.65 : 0.35));
+    }
     publish({ kind: "업종", sector: key, headline: `${name} 업종 · ${tpl.h}`, body: tpl.b.replaceAll("{sector}", name), symbols: members(key) });
   }
   function companyNews() {
     const a = pick(live().filter(x => x.market !== "venture"));
-    const good = rand() < 0.5, src = a.market === "coin" ? NEWS.coin : NEWS.company;
+    const good = rand() < 0.67, src = a.market === "coin" ? NEWS.coin : NEWS.company;
     const tpl: Template = pick(good ? src.good : src.bad);
-    react(a.pending, realize((good ? 1 : -1) * (a.market === "coin" ? uni(0.02, 0.06) : uni(0.01, 0.04))));
-    if (tpl.eps && a.eps) a.eps *= 1 + (good ? 1 : -1) * uni(...cfg.epsStep); // 실적·가이던스 → 적정가 이동
+    // 개별 회사·코인 뉴스는 오직 해당 종목(a) 하나에만 강하게 반응한다 (호재 시 큰 폭 점프)
+    const rawMag = a.market === "coin"
+      ? (good ? uni(0.045, 0.115) : -uni(0.018, 0.05))
+      : (good ? uni(0.03, 0.08) : -uni(0.012, 0.035));
+    const move = realize(rawMag, good ? 0.02 : 0.08);
+    react(a.pending, move);
+    shiftFair(a, move * (good ? 0.75 : 0.45));
+    if (tpl.eps && a.eps) a.eps *= 1 + (good ? 1.4 : -0.8) * uni(...cfg.epsStep);
+    a.volBoost = Math.max(a.volBoost, good ? 12 : 8);
     const fill = fillOf(a);
     publish({ kind: a.market === "coin" ? "코인" : "기업", headline: `${a.name} · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym] });
   }
-  // 신흥주 3단계 검증: 최초 주장 → 재현 시험 → 성공/실패
+  // 신흥주 3단계 검증: 최초 주장 → 재현 시험 → 성공/실패 (성공 확률도 우상향 기조에 맞춰 60%로 상향)
   function ventureEvent() {
     const free = live().filter(a => a.market === "venture" && !venturesBusy.has(a.sym) && a.watchUntil == null);
     if (!free.length) return companyNews();
-    const a = pick(free), success = rand() < 0.5, eventId = nid();
+    const a = pick(free), success = rand() < 0.60, eventId = nid();
     venturesBusy.add(a.sym);
-    react(a.pending, realize(uni(0.05, 0.15)));
+    react(a.pending, realize(uni(0.06, 0.18), 0.03));
     a.stage = "기술검증";
     ventureStage(a, 0, success, eventId, NEWS.venture[0]);
     const t1 = tick + Math.round(uni(25, 50)), t2 = t1 + Math.round(uni(25, 50));
