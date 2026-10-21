@@ -32,6 +32,16 @@ export const useMarket = defineStore("market", () => {
   /** 마지막으로 병합·폐지 정산된 종목들. 계좌 스토어가 보고 내 보유와 겹치면 계좌를 다시 받는다 */
   const settled = ref<{ type: string; sym: string }[]>([]);
   const chat = ref<ChatMsg[]>([]);
+  const banner = ref<{ id: number; text: string; kind: "clear" | "liq" } | null>(null);
+  let lastBannerId = 0;
+  function checkBanner(msg: ChatMsg) {
+    if (msg.name !== "⚡전광판" || msg.id <= lastBannerId) return;
+    lastBannerId = msg.id;
+    const kind: "clear" | "liq" = msg.text.startsWith("[100배졸업]") ? "clear" : "liq";
+    const text = msg.text.replace(/^\[(100배졸업|강제청산)\]\s*/, "");
+    banner.value = { id: msg.id, text, kind };
+    setTimeout(() => { if (banner.value?.id === msg.id) banner.value = null; }, 6000);
+  }
 
   const tab = ref<MarketKind>("stock");
   const selected = ref("NVDA");
@@ -77,7 +87,7 @@ export const useMarket = defineStore("market", () => {
     date.value = s.date;
     tick.value = s.tick;
     news.value = s.news;
-    if (Array.isArray(s.chat)) chat.value = s.chat;
+    if (Array.isArray(s.chat)) { chat.value = s.chat; lastBannerId = s.chat.at(-1)?.id ?? 0; }
     applyQuotes(s.quotes);
     await loadRanking();
   }
@@ -111,7 +121,7 @@ export const useMarket = defineStore("market", () => {
           }
           if (news.value.length > 300) news.value.length = 300;
         }
-        if (Array.isArray(d.chat)) chat.value = d.chat;
+        if (Array.isArray(d.chat)) { chat.value = d.chat; for (const c of d.chat) checkBanner(c); }
         if (d.ranking) applyRanking(d.ranking);
         if (Array.isArray(d.settled) && d.settled.length) settled.value = d.settled;
       } catch {
@@ -151,6 +161,7 @@ export const useMarket = defineStore("market", () => {
     source.addEventListener("chat", e => {
       const msg: ChatMsg = JSON.parse((e as MessageEvent).data);
       if (!chat.value.some(c => c.id === msg.id)) chat.value.push(msg);
+      checkBanner(msg);
       if (chat.value.length > 100) chat.value.shift();
     });
     source.addEventListener("chat-hide", e => {
@@ -187,6 +198,6 @@ export const useMarket = defineStore("market", () => {
     selected.value = sym;
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, season, seasonEpoch, tab, selected, newsDialog, socialTab, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, banner, season, seasonEpoch, tab, selected, newsDialog, socialTab, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select };
 });

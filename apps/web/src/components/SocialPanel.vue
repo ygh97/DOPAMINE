@@ -47,6 +47,12 @@ function tokenize(raw: string): Token[] {
   if (s.startsWith("[공유] ")) {
     out.push({ kind: "badge", val: "수익인증" });
     s = s.slice(5);
+  } else if (s.startsWith("[강제청산] ")) {
+    out.push({ kind: "badge", val: "강제청산" });
+    s = s.slice(7);
+  } else if (s.startsWith("[100배졸업] ")) {
+    out.push({ kind: "badge", val: "100배졸업" });
+    s = s.slice(9);
   }
   const re = /\$([A-Za-z]{2,10})/g;
   let last = 0, match: RegExpExecArray | null;
@@ -156,7 +162,7 @@ async function toggleBan(name: string, banned: boolean) {
       </div>
       <div id="chatLog" ref="logEl" class="chat-log">
         <p v-if="!m.chat.length" class="msg sys">대화가 없습니다. $NVDA처럼 종목을 태그하거나 수익률을 공유해 보세요.</p>
-        <div v-for="c in m.chat" :key="c.id" class="msg" :data-msg-id="c.id">
+        <div v-for="c in m.chat" :key="c.id" class="msg" :class="{ broadcast: c.name === '⚡전광판' }" :data-msg-id="c.id">
           <span class="msg-body">
             <small class="muted msg-time">{{ clock(c.at) }}</small>
             <b :class="{ 'mine-name': c.name === a.me?.name }">{{ c.name }}</b>
@@ -168,7 +174,7 @@ async function toggleBan(name: string, banned: boolean) {
               </template>
             </span>
           </span>
-          <button v-if="a.me && c.name !== a.me.name" class="report-btn" data-act="report" title="신고" @click="a.reportChat(c.id)">신고</button>
+          <button v-if="a.me && c.name !== a.me.name && c.name !== '⚡전광판'" class="report-btn" data-act="report" title="신고" @click="a.reportChat(c.id)">신고</button>
         </div>
       </div>
       <form id="chatForm" class="chat-input" @submit.prevent="submitChat">

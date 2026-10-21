@@ -92,6 +92,8 @@ const loop = setInterval(() => {
   if (assetsChanged) { lastAssetsTick = market.tick; for (const s of reload) splitLog.push({ tick: market.tick, sym: s }); send("assets", { quotes: market.quotes().map(packQuote), reload }); }
   // 보유 종목이 병합·폐지로 정산됐다: 그 종목을 가진 사람은 계좌를 다시 받는다
   if (settled.length) { for (const s of settled) settledLog.push({ tick: market.tick, ...s }); if (settledLog.length > 200) settledLog.splice(0, settledLog.length - 200); send("settled", settled); }
+  const rankRows = market.tick % 5 === 0 ? broker.ranking(20) : null;
+  for (const text of broker.drainBroadcasts()) send("chat", chat.system(text));
   if (!clients.size) return;
   // 종목별 [timestamp, open, high, low, close, volume, 전일 종가]
   const bars: Record<string, number[]> = {};
@@ -100,7 +102,7 @@ const loop = setInterval(() => {
     if (b) bars[q.sym] = [...packBar(b), r7(q.prev)];
   }
   send("tick", { tick: market.tick, date: market.gameDate(), bars });
-  if (market.tick % 5 === 0) send("ranking", { rows: broker.ranking(20), players: broker.players });
+  if (rankRows) send("ranking", { rows: rankRows, players: broker.players });
 }, Math.max(10, Math.min(250, TICK_MS / 2)));
 
 // ---------- HTTP ----------

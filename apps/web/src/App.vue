@@ -37,6 +37,10 @@ onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷�
 
 <template>
   <TopBar />
+  <div v-if="m.banner" id="megaphoneBanner" class="megaphone" :class="m.banner.kind" @click="m.banner = null">
+    <b>⚡ 실시간 전광판</b>
+    <span>{{ m.banner.text }}</span>
+  </div>
   <NewsLine />
   <NewsDialog />
   <ToastMessage />

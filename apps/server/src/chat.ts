@@ -18,6 +18,15 @@ export class Chat {
 
   constructor(db: Db) { this.db = db; }
 
+  /** 시스템 전광판 방송 메시지 기록 (100배 졸업·강제청산 알림) */
+  system(text: string, now = Date.now()): ChatMsg {
+    this.db.prepare("INSERT OR IGNORE INTO users (id, name, pass, created_at) VALUES (0, '⚡전광판', '-', 0)").run();
+    const id = Number(
+      this.db.prepare("INSERT INTO chat_messages (user_id, name, text, at) VALUES (0, '⚡전광판', ?, ?)").run(text, now).lastInsertRowid,
+    );
+    return { id, name: "⚡전광판", text, at: now };
+  }
+
   post(userId: number, rawText: string, now = Date.now()): ChatMsg {
     const user = this.db.prepare("SELECT name, banned FROM users WHERE id = ?").get(userId) as { name: string; banned: number } | undefined;
     if (!user) throw new ChatError("참가가 필요합니다.");

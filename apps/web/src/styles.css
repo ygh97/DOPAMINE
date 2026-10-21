@@ -392,3 +392,17 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
 @media (max-width: 900px) {
   .top-center-nick { margin: 0; }
 }
+
+
+/* 100배 졸업·강제청산 실시간 전광판 알림 */
+.megaphone {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer;
+  background: var(--up); color: #fff;
+}
+.megaphone.clear { background: linear-gradient(90deg, #b45309, #d97706, #b45309); }
+.msg.broadcast {
+  padding: 5px 8px; border-radius: 6px;
+  background: var(--warn-soft); border: 1px solid var(--warn);
+}
+.msg.broadcast b { color: var(--warn); }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // KLineChart 차트. 서버에서 1분봉을 받아 그리고, SSE tick마다 마지막 봉을 갱신한다.
-// 보유 평단·선물 진입가·청산가·익절·스탑로스 기준선을 차트에 함께 표시하고, 최근 마지막 봉에 자동 고정한다.
+// 보유 평단·선물 진입가·청산가·익절·스탑로스 기준선을 차트에 함께 표시한다.
 import { dispose, init, type Chart, type KLineData } from "klinecharts";
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { alpha, mount, register, type DrawingController } from "../chart/drawing-tools.js";
@@ -31,7 +31,6 @@ const INDICATORS = [
   { name: "RSI", label: "RSI", main: false },
 ];
 const period = ref(1);
-const pinLatest = ref(true); // 최근 마지막 봉 우측 고정 여부 (기본 켜짐)
 const on = reactive<Record<string, boolean>>({ MA: true, VOL: true });
 
 let chart: Chart | null = null;
@@ -87,16 +86,6 @@ function chartStyles() {
   } as Parameters<Chart["setStyles"]>[0];
 }
 
-function focusLatest() {
-  if (!chart) return;
-  chart.scrollToRealTime();
-}
-
-function togglePin() {
-  pinLatest.value = !pinLatest.value;
-  if (pinLatest.value) focusLatest();
-}
-
 /** 현재 종목의 현물 평단·선물 진입가·청산가·익절·스탑로스 수평선을 갱신한다 */
 function syncPosLines() {
   if (!chart) return;
@@ -123,13 +112,10 @@ function redraw() {
   if (!chart) return;
   const price = base[base.length - 1]?.close ?? 1;
   chart.setPriceVolumePrecision(price < 1 ? 4 : 2, 0);
+  chart.resize();
   chart.applyNewData(aggregate(base, period.value));
+  chart.scrollToRealTime();
   syncPosLines();
-  focusLatest();
-  requestAnimationFrame(() => {
-    chart?.resize();
-    if (pinLatest.value) focusLatest();
-  });
 }
 
 async function show(sym: string) {
@@ -139,7 +125,6 @@ async function show(sym: string) {
   const packed = await m.fetchBars(sym);
   if (sym !== shown) return; // 응답 사이에 다른 종목을 골랐으면 버린다
   base = packed.map(toBar);
-  pinLatest.value = true;
   redraw();
   shownFactor = m.quotes[sym]?.splitFactor ?? 1;
   drawings.load(sym, shownFactor);
@@ -151,7 +136,7 @@ async function loadRemoteDrawings() {
   if (remote) drawings.mergeRemote(remote);
 }
 
-// tick: 같은 시각의 봉이면 교체, 새 시각이면 이어 붙임
+// tick: 같은 시각의 봉이면 교체, 새 시각이면 이어 붙임 (사용자가 보고 있는 스크롤 위치 유지)
 watch(() => m.lastBars, bars => {
   const p = bars[shown];
   if (!chart || !p || !base.length) return;
@@ -161,7 +146,6 @@ watch(() => m.lastBars, bars => {
   else return;
   const span = period.value * 60_000, t0 = Math.floor(b.timestamp / span) * span;
   chart.updateData(aggregate(base.filter(x => x.timestamp >= t0), period.value)[0]);
-  if (pinLatest.value) focusLatest();
 });
 watch(() => m.selected, sym => void show(sym));
 watch(() => m.barsEpoch[m.selected], () => void show(m.selected)); // 주식병합 등으로 과거 봉이 바뀜
@@ -193,10 +177,7 @@ onMounted(async () => {
   chart.createIndicator({ name: "MA", calcParams: [5, 20, 60] }, true, { id: "candle_pane" });
   subPanes.VOL = chart.createIndicator("VOL", false, { height: 80 }) ?? "";
   drawings = mount(chart, barEl.value!, popEl.value!, p => a.syncDrawing(p));
-  new ResizeObserver(() => {
-    chart?.resize();
-    if (pinLatest.value) focusLatest();
-  }).observe(chartEl.value!);
+  new ResizeObserver(() => chart?.resize()).observe(chartEl.value!);
   addEventListener("pagehide", saveOnLeave);
   await show(m.selected);
   if (a.token) await loadRemoteDrawings();
@@ -216,7 +197,6 @@ onBeforeUnmount(() => {
       </div>
       <div class="ind-chips" aria-label="지표">
         <button v-for="i in INDICATORS" :key="i.name" :data-i="i.name" :aria-pressed="!!on[i.name]" @click="toggle(i.name, i.main)">{{ i.label }}</button>
-        <button id="pinLatestBtn" type="button" :aria-pressed="pinLatest" title="차트를 항상 가장 최근 마지막 봉에 고정합니다" @click="togglePin">최근 봉 고정</button>
         <button class="demo-btn" title="대표 그리기 도구를 차트에 한 번에 그려봅니다" @click="drawings?.demo()">도구 예시</button>
       </div>
     </div>

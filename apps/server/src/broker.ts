@@ -50,6 +50,7 @@ export class Broker {
   private market: Market;
   private accounts = new Map<number, Account>();
   private pending: Pending[] = [];
+  private broadcasts: string[] = [];
   private recent = new Map<number, { tick: number; count: number }>(); // 주문 속도 제한
 
   constructor(db: Db, season: Season, market: Market) {
@@ -332,6 +333,9 @@ export class Broker {
       this.db.prepare("UPDATE futures SET qty = ?, margin = ? WHERE id = ?").run(f.qty, f.margin, f.id);
     }
     const side = o.reason === "liquidation" ? "liquidation" : o.reason === "stop" ? "stop" : o.reason === "tp" ? "tp" : `${f.side}-close`;
+    if (o.reason === "liquidation") {
+      this.broadcasts.push(`[강제청산] 💥 ${acc.name}님 $${o.sym} ${f.lev}x ${f.side === "long" ? "롱" : "숏"} (증거금 $${Math.round(f.margin).toLocaleString()}) 강제청산!`);
+    }
     return record(side, qty, price, fee, pnl);
   }
 
@@ -411,11 +415,20 @@ export class Broker {
       if (equity >= GOAL && acc.clearedTick == null) {
         acc.clearedTick = this.market.tick;
         this.db.prepare("UPDATE accounts SET cleared_tick = ? WHERE user_id = ? AND season_id = ?").run(acc.clearedTick, acc.userId, this.season.id);
+        this.broadcasts.push(`[100배졸업] 🏆 ${acc.name}님이 총자산 $${Math.round(equity).toLocaleString()} 달성으로 100배 졸업에 성공했습니다!`);
       }
       return { name: acc.name, equity, returnPct: (equity / START_CASH - 1) * 100, clearedTick: acc.clearedTick };
     });
     rows.sort((a, b) => b.equity - a.equity || (a.clearedTick ?? Infinity) - (b.clearedTick ?? Infinity));
     return rows.slice(0, limit).map((r, i) => ({ rank: i + 1, ...r }));
+  }
+
+  /** 이번 tick에 발생한 전광판 알림(100배 졸업·강제청산)을 꺼낸다 */
+  drainBroadcasts(): string[] {
+    if (!this.broadcasts.length) return [];
+    const out = this.broadcasts;
+    this.broadcasts = [];
+    return out;
   }
 
   // ---------- 차트 그리기 서버 보관 ----------
