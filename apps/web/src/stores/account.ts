@@ -87,6 +87,8 @@ export const useAccount = defineStore("account", () => {
 
   // 내가 가진 종목이 병합·폐지로 정산되면 계좌를 다시 받는다
   watch(() => m.settled, list => { if (list.some(s => holding(s.sym) > 0)) void refresh(); });
+  // 새 시즌: 계좌가 $100,000으로 새로 생긴다
+  watch(() => m.seasonEpoch, () => { void refresh(); notify("새 시즌이 시작됐습니다. 모두 $100,000부터 다시!"); });
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 

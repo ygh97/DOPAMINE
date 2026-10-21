@@ -113,6 +113,7 @@ watch(() => m.lastBars, bars => {
 });
 watch(() => m.selected, sym => void show(sym));
 watch(() => m.barsEpoch[m.selected], () => void show(m.selected)); // 주식병합 등으로 과거 봉이 바뀜
+watch(() => m.seasonEpoch, () => { drawings?.clearAll(); shown = ""; void show(m.selected); }); // 새 시즌
 watch(period, redraw);
 watch(() => ui.theme, () => chart?.setStyles(chartStyles()), { flush: "post" });
 

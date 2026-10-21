@@ -20,9 +20,10 @@
     "sim:quick": "node tools/sim-week.ts 1 2 3 --days 1",
     "e2e": "node tools/e2e-m1.cjs",
     "e2e:quick": "node tools/e2e-m1.cjs --quick",
-    "check": "npm test && npm run typecheck && npm run sim:quick && npm run e2e:quick && npm run e2e:split && npm run e2e:m2",
+    "check": "npm test && npm run typecheck && npm run sim:quick && npm run e2e:quick && npm run e2e:split && npm run e2e:m2 && npm run e2e:season",
     "e2e:split": "node tools/e2e-split.cjs",
-    "e2e:m2": "node tools/e2e-m2.cjs"
+    "e2e:m2": "node tools/e2e-m2.cjs",
+    "e2e:season": "node tools/e2e-season.cjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

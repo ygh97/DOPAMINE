@@ -18,13 +18,14 @@
 npm install
 npm run dev:server        # http://127.0.0.1:4810  (8787은 다른 프로그램이 쓰고 있음)
 npm run dev:web           # http://127.0.0.1:5173  (/api는 4810으로 프록시)
-npm test                  # 엔진 10개 + 서버 11개 테스트 (node --test, 약 3초)
+npm test                  # 엔진 11개 + 서버 13개 테스트 (node --test, 약 5초)
 npm run typecheck         # engine·server는 tsc, web은 vue-tsc
 npm run check             # 빠른 전체 확인: 테스트 + 타입체크 + 1일 시뮬레이션 + 빠른 E2E (약 16초)
 npm run sim               # 1주 시즌 시뮬레이션, seed 3개 병렬 (약 16초). --days N으로 기간 조절
 npm run e2e               # 서버+Vite를 띄우고 Playwright로 확인, 재연결 포함 (약 18초). e2e:quick은 약 5초
 npm run e2e:split         # 주식병합 뒤 그린 선·액면가가 같은 배수로 옮겨지는지 (약 5초)
 npm run e2e:m2            # 두 사람 참가·매수·매도·랭킹·새로고침·다시 시작 (약 8초)
+npm run e2e:season        # 스냅샷 재시작, 15초 시즌 종료 → 명예의 전당 → 새 시즌 (약 16초)
 ```
 
 ## 규칙
@@ -32,6 +33,8 @@ npm run e2e:m2            # 두 사람 참가·매수·매도·랭킹·새로고
 - Node 24 타입 스트리핑으로 서버·엔진을 빌드 없이 실행한다. **erasable 문법만** 쓴다 (enum, namespace, 생성자 파라미터 프로퍼티 금지). 상대 import는 `.ts` 확장자를 붙인다.
 - TypeScript는 6.x에 고정. 7.x는 vue-tsc가 쓰는 JS API가 없어 web 타입체크가 깨진다.
 - 엔진의 숨은 상태(대기 충격, 국면, 앵커, EPS)는 `Quote`·`Bar`·`NewsItem` 밖으로 내보내지 않는다. 엔진 테스트 "숨은 상태가 없다"가 이를 지킨다.
+- 서버 환경 변수: `PORT` 4810, `TICK_MS` 1000, `SEASON_MS` 1주, `SEED`, `DB_FILE`, `ENGINE_OPTIONS`(테스트용 JSON).
+- 엔진 상태를 바꾸는 필드를 추가하면 `snapshot()`/`restore()`에도 넣고 `SNAPSHOT_VERSION`을 올린다. 예약 작업은 함수가 아니라 `Task` 데이터로 둔다 (스냅샷에 담기게).
 - DB는 기본 `data/dopamine.db` (git 제외). 테스트는 `DB_FILE`로 임시 파일을 쓴다. 시즌 중 엔진을 바꾸면 재생이 어긋나니 `data/`를 지우고 새 시즌으로 시작한다.
 - 같은 seed면 같은 경로가 나와야 한다. 엔진에서 `Math.random()`·`Date.now()`를 직접 쓰지 않는다 (now는 입력으로 받는다).
 - 뉴스 문구: 실존 인물 이름 금지, 실제 회사에 위법 혐의 금지, 원본("단타 아레나") 문구·증권사 이름 재사용 금지.
@@ -41,4 +44,4 @@ npm run e2e:m2            # 두 사람 참가·매수·매도·랭킹·새로고
 
 ## 현재 단계
 
-M2 완료 (참가, 현물 주문·주문 충격, 보유종목, 체결 내역, 랭킹, SQLite, 병합·폐지 정산, 재시작 재생). 다음은 M3: 시즌 리셋, 명예의 전당, 엔진 스냅샷.
+M3 완료 (시즌 종료·리셋, 명예의 전당, 엔진 스냅샷 재시작). 다음은 M4: 선물(롱·숏, 레버리지, 강제 청산, 분할 종료, 스탑로스).

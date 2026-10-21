@@ -7,6 +7,8 @@ export interface DrawingController {
   load(key: string, factor?: number): void;
   /** 대표 도구 예시를 현재 데이터 위에 그린다 */
   demo(): void;
+  /** 모든 종목의 그림과 저장분을 지운다 (새 시즌) */
+  clearAll(): void;
 }
 export function register(): void;
 export function mount(chart: Chart, bar: HTMLElement, pop: HTMLElement): DrawingController;

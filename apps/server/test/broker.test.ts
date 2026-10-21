@@ -3,14 +3,14 @@ import { test } from "node:test";
 import { Auth, AuthError } from "../src/auth.ts";
 import { Broker, GOAL, OrderError, START_CASH } from "../src/broker.ts";
 import { openDb } from "../src/db.ts";
-import { bootMarket, currentSeason } from "../src/season.ts";
+import { bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot } from "../src/season.ts";
 
 const T0 = 1_792_000_000_000;
 const FAST = { ticksPerBar: 10, warmupBars: 200 };
 
 function setup(seed = 1) {
   const db = openDb(":memory:");
-  const season = currentSeason(db, seed, 1000, T0);
+  const season = currentSeason(db, seed, 1000, 7 * 86_400_000, T0);
   const { market } = bootMarket(db, season, FAST, T0);
   const broker = new Broker(db, season, market);
   const auth = new Auth(db);
@@ -166,4 +166,39 @@ test("서버를 다시 켜면 기록된 주문 흐름으로 같은 시세가 재
   const { market: replayed, replayed: n } = bootMarket(s.db, s.season, FAST, T0 + elapsed * 1000);
   assert.equal(n, elapsed);
   assert.deepEqual(replayed.quotes(), live);
+});
+
+test("스냅샷 + 이후 주문 흐름으로 복원해도 같은 시세", async () => {
+  const s = setup(9);
+  const u = s.user("snapper");
+  await order(s, u, "NVDA", "buy", 30);
+  for (let i = 0; i < 100; i++) s.tick();
+  saveSnapshot(s.db, s.season, s.market);
+  await order(s, u, "LMQ", "buy", 20);
+  for (let i = 0; i < 100; i++) s.tick();
+  const elapsed = s.market.tick - 2000;
+  const boot = bootMarket(s.db, s.season, FAST, T0 + elapsed * 1000);
+  assert.ok(boot.fromSnapshot);
+  assert.ok(boot.replayed < elapsed, `스냅샷 뒤 ${boot.replayed} tick만 재생`);
+  assert.deepEqual(boot.market.quotes(), s.market.quotes());
+});
+
+test("시즌 종료: 명예의 전당 기록, 새 시즌은 새 seed와 $100,000 계좌", async () => {
+  const s = setup(10);
+  const a = s.user("winner"), b = s.user("second"), c = s.user("third"), d = s.user("fourth");
+  await order(s, a, "NVDA", "buy", 50);
+  void [b, c, d];
+  const rows = s.broker.ranking(Infinity);
+  const next = finishSeason(s.db, s.season, rows, T0 + s.season.lengthMs + 1000);
+  assert.equal(next.id, s.season.id + 1);
+  assert.notEqual(next.seed, s.season.seed);
+  assert.equal(next.startedAt, T0 + s.season.lengthMs, "이전 시즌이 끝난 시각에 이어서 시작");
+  const hall = hallOfFame(s.db) as { season: number; rank: number; name: string }[];
+  assert.equal(hall.length, 3, "1~3위만 (100배 달성자 없음)");
+  assert.deepEqual(hall.map(h => h.rank), [1, 2, 3]);
+  assert.equal(currentSeason(s.db, 1, 1000, 1, T0).id, next.id, "진행 중 시즌 = 새 시즌");
+  const { market } = bootMarket(s.db, next, FAST, next.startedAt);
+  const broker = new Broker(s.db, next, market);
+  assert.equal(broker.me(a).equity, START_CASH);
+  assert.equal(broker.me(a).positions.length, 0);
 });

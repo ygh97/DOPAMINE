@@ -15,7 +15,9 @@ export function openDb(file: string): Db {
       id INTEGER PRIMARY KEY,
       seed INTEGER NOT NULL,
       started_at INTEGER NOT NULL,
-      tick_ms INTEGER NOT NULL
+      tick_ms INTEGER NOT NULL,
+      length_ms INTEGER NOT NULL DEFAULT 604800000,
+      ended_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY,
@@ -65,7 +67,27 @@ export function openDb(file: string): Db {
       notional REAL NOT NULL,
       PRIMARY KEY (season_id, tick, sym)
     );
+    -- 시즌별 최신 엔진 스냅샷 하나. 재시작 때 여기서부터 이어서 재생한다
+    CREATE TABLE IF NOT EXISTS snapshots (
+      season_id INTEGER PRIMARY KEY,
+      tick INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      saved_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS hall_of_fame (
+      season_id INTEGER NOT NULL,
+      rank INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      equity REAL NOT NULL,
+      return_pct REAL NOT NULL,
+      cleared_tick INTEGER,
+      PRIMARY KEY (season_id, name)
+    );
   `);
+  // M2에서 만든 DB에는 시즌 길이·종료 칸이 없다
+  for (const sql of ["ALTER TABLE seasons ADD COLUMN length_ms INTEGER NOT NULL DEFAULT 604800000", "ALTER TABLE seasons ADD COLUMN ended_at INTEGER"]) {
+    try { db.exec(sql); } catch { /* 이미 있음 */ }
+  }
   return db;
 }
 

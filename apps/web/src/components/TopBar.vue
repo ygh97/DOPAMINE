@@ -13,6 +13,14 @@ const password = ref("");
 
 const START = 100_000;
 const ret = computed(() => (a.equity / START - 1) * 100);
+// 시즌 남은 시간 (tick마다 다시 계산)
+const left = computed(() => {
+  void m.tick;
+  const ms = (m.season?.endsAt ?? 0) - Date.now();
+  if (ms <= 0) return "시즌 마감 중";
+  const h = Math.floor(ms / 3_600_000), d = Math.floor(h / 24), min = Math.floor((ms % 3_600_000) / 60_000);
+  return d ? `${d}일 ${h % 24}시간 남음` : h ? `${h}시간 ${min}분 남음` : `${min}분 ${Math.floor((ms % 60_000) / 1000)}초 남음`;
+});
 const goalPct = computed(() => Math.min(100, (a.equity / (a.me?.goal ?? 1e7)) * 100));
 
 async function submit() {
@@ -27,7 +35,7 @@ function restart() {
 <template>
   <header class="topbar">
     <div class="logo"><b>도파민 <i>센터</i></b><small>DOPAMINE CENTER</small></div>
-    <div class="clock">S1 · <b>{{ dateText(m.date) }}</b></div>
+    <div class="clock" :title="left">S{{ m.season?.id ?? 1 }} · <b>{{ dateText(m.date) }}</b> <small id="seasonLeft" class="muted">{{ left }}</small></div>
     <span class="conn" :class="{ on: m.connected }">{{ m.connected ? "실시간" : "재연결 중" }}</span>
 
     <div v-if="a.me" class="account">

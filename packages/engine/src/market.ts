@@ -88,6 +88,8 @@ export interface CreateMarketInput {
   seed?: number;
   now?: number;
   options?: Partial<MarketOptions>;
+  /** Market.snapshot()으로 만든 JSON. 주면 과거 차트를 다시 만들지 않고 그 상태에서 이어간다 */
+  snapshot?: string;
 }
 
 export interface Market {
@@ -107,36 +109,47 @@ export interface Market {
    * step() 전에 종목마다 한 번 부른다. 같은 tick 주문은 모두 이 가격에 체결된다.
    */
   applyFlow(sym: string, notional: number): { price: number; impact: number } | null;
+  /** 엔진 전체 상태를 JSON으로 (난수 상태 포함). createMarket({ snapshot })으로 이어서 돌릴 수 있다 */
+  snapshot(): string;
 }
 
-function mulberry32(seed: number): () => number {
+// 내부 상태를 꺼내고 넣을 수 있는 난수 (스냅샷용)
+function mulberry32(seed: number) {
   let a = seed;
-  return () => {
+  const next = () => {
     a |= 0; a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+  return { next, get: () => a, set: (v: number) => { a = v; } };
 }
 
-export function createMarket({ assets, sectors, spares = [], seed = 20261021, now = Date.now(), options = {} }: CreateMarketInput): Market {
+/** 나중에 실행할 일. 함수 대신 데이터로 들고 있어야 스냅샷에 담을 수 있다 */
+type Task =
+  | { at: number; kind: "venture1" | "venture2"; sym: string; success: boolean; eventId: string }
+  | { at: number; kind: "list" }
+  | { at: number; kind: "rescue"; sym: string };
+const SNAPSHOT_VERSION = 1;
+
+export function createMarket({ assets, sectors, spares = [], seed = 20261021, now = Date.now(), options = {}, snapshot }: CreateMarketInput): Market {
   const cfg: MarketOptions = { ...DEFAULT_OPTIONS, ...options };
-  const rand = mulberry32(seed);
+  const rng = mulberry32(seed), rand = rng.next;
   const uni = (a: number, b: number) => a + (b - a) * rand();
   const pick = <T>(arr: readonly T[]): T => arr[Math.floor(rand() * arr.length)];
   const gauss = () => Math.sqrt(-2 * Math.log(rand() || 1e-12)) * Math.cos(2 * Math.PI * rand());
   const sign = () => (rand() < 0.5 ? -1 : 1);
 
-  const startTime = Math.floor(now / cfg.barMs) * cfg.barMs - (cfg.warmupBars - 1) * cfg.barMs;
+  let startTime = Math.floor(now / cfg.barMs) * cfg.barMs - (cfg.warmupBars - 1) * cfg.barMs;
   let tick = 0, nextNewsAt = 3, warm = true, assetsVersion = 0, nextGradAt = Infinity;
-  const news: NewsItem[] = [];
+  let news: NewsItem[] = [];
   let actions: CorporateAction[] = []; // 이번 tick의 주식병합·폐지·승격·상장 (서버가 보유 정산에 쓴다)
-  const scheduled: { at: number; run: () => void }[] = [];
-  const marketPending: Impulse[] = [];
-  const sectorPending: Record<string, Impulse[]> = {};
-  const venturesBusy = new Set<string>();
-  const sparePool: SpareDef[] = spares.map(s => ({ ...s }));
-  const state: Record<string, AssetState> = {};
+  let scheduled: Task[] = [];
+  let marketPending: Impulse[] = [];
+  let sectorPending: Record<string, Impulse[]> = {};
+  let venturesBusy = new Set<string>();
+  let sparePool: SpareDef[] = spares.map(s => ({ ...s }));
+  let state: Record<string, AssetState> = {};
   const live = () => Object.values(state);
 
   function addAsset(def: AssetDef) {
@@ -234,28 +247,41 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   function ventureEvent() {
     const free = live().filter(a => a.market === "venture" && !venturesBusy.has(a.sym) && a.watchUntil == null);
     if (!free.length) return companyNews();
-    const a = pick(free), success = rand() < 0.5, eventId = nid(), fill = fillOf(a);
+    const a = pick(free), success = rand() < 0.5, eventId = nid();
     venturesBusy.add(a.sym);
-    const stage = (i: number, tpl: Template) => publish({
+    react(a.pending, realize(uni(0.05, 0.15)));
+    a.stage = "기술검증";
+    ventureStage(a, 0, success, eventId, NEWS.venture[0]);
+    const t1 = tick + Math.round(uni(25, 50)), t2 = t1 + Math.round(uni(25, 50));
+    scheduled.push({ at: t1, kind: "venture1", sym: a.sym, success, eventId });
+    scheduled.push({ at: t2, kind: "venture2", sym: a.sym, success, eventId });
+  }
+  function ventureStage(a: AssetState, i: number, success: boolean, eventId: string, tpl: Template) {
+    const fill = fillOf(a);
+    publish({
       kind: "신흥주", headline: `${a.name}(${a.sym}) · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym],
       event: { id: eventId, index: i, total: 3, label: ["최초 보도", "추가 확인", success ? "확인" : "정정"][i] },
     });
-    react(a.pending, realize(uni(0.05, 0.15)));
-    a.stage = "기술검증";
-    stage(0, NEWS.venture[0]);
-    const t1 = tick + Math.round(uni(25, 50)), t2 = t1 + Math.round(uni(25, 50));
-    scheduled.push({ at: t1, run: () => { if (!state[a.sym]) return; react(a.pending, realize(sign() * uni(0, 0.05))); stage(1, NEWS.venture[1]); } });
-    scheduled.push({ at: t2, run: () => {
-      venturesBusy.delete(a.sym);
-      if (!state[a.sym]) return;
-      // 결과는 로그 기준 대칭: 성공 +35%~+120%, 실패 -33%~-63%. 적정가(앵커)도 같은 만큼 이동
-      const move = success ? uni(0.3, 0.8) : -uni(0.4, 1.0);
-      a.anchor *= Math.exp(move);
-      react(a.pending, move);
-      if (success) a.successes++;
-      a.stage = success ? "매출검증" : "상장유지심사";
-      stage(2, NEWS.venture[success ? 2 : 3]);
-    } });
+  }
+  function runTask(t: Task) {
+    if (t.kind === "list") return listNew();
+    if (t.kind === "rescue") return rescue(t.sym);
+    if (t.kind === "venture1") {
+      const a = state[t.sym];
+      if (!a) return;
+      react(a.pending, realize(sign() * uni(0, 0.05)));
+      return ventureStage(a, 1, t.success, t.eventId, NEWS.venture[1]);
+    }
+    venturesBusy.delete(t.sym);
+    const a = state[t.sym];
+    if (!a) return;
+    // 결과는 로그 기준 대칭: 성공 +35%~+120%, 실패 -33%~-63%. 적정가(앵커)도 같은 만큼 이동
+    const move = t.success ? uni(0.3, 0.8) : -uni(0.4, 1.0);
+    a.anchor *= Math.exp(move);
+    react(a.pending, move);
+    if (t.success) a.successes++;
+    a.stage = t.success ? "매출검증" : "상장유지심사";
+    ventureStage(a, 2, t.success, t.eventId, NEWS.venture[t.success ? 2 : 3]);
   }
   function noiseNews() {
     const tpl = pick(NEWS.noise);
@@ -281,7 +307,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     nextGradAt = tick + Math.round(cfg.gradCooldown * uni(0.7, 1.3)); // 간격도 조금씩 다르게
     assetsVersion++;
     publish({ kind: "기업", headline: `${a.name}(${a.sym}) · ${fill(NEWS.listing.graduate.h)}`, body: fill(NEWS.listing.graduate.b), symbols: [a.sym] });
-    scheduled.push({ at: tick + Math.round(uni(40, 80)), run: listNew }); // 신흥주 자리 채우기
+    scheduled.push({ at: tick + Math.round(uni(40, 80)), kind: "list" }); // 신흥주 자리 채우기
   }
   function delist(a: AssetState) {
     const fill = fillOf(a);
@@ -290,7 +316,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     delete state[a.sym];
     assetsVersion++;
     sparePool.push({ sym: a.sym, name: a.name, tech: a.tech || "핵심 기술", parValue: a.def.parValue }); // 나중에 재상장 후보로
-    scheduled.push({ at: tick + Math.round(uni(40, 80)), run: listNew });
+    scheduled.push({ at: tick + Math.round(uni(40, 80)), kind: "list" });
   }
 
   // 주식병합: 가격이 너무 낮으면 10:1(필요하면 100:1)로 합친다. 시총은 그대로, 과거 차트도 같은 비율로 맞춘다
@@ -319,7 +345,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     a.watchUntil = tick + cfg.watchTicks;
     a.stage = "관리종목";
     publish({ kind: "신흥주", headline: `${a.name}(${a.sym}) · ${fill(NEWS.listing.watch.h)}`, body: fill(NEWS.listing.watch.b), symbols: [a.sym] });
-    scheduled.push({ at: tick + Math.round(uni(0.2, 0.8) * cfg.watchTicks), run: () => rescue(a.sym) });
+    scheduled.push({ at: tick + Math.round(uni(0.2, 0.8) * cfg.watchTicks), kind: "rescue", sym: a.sym });
   }
   function rescue(sym: string) {
     const a = state[sym];
@@ -362,7 +388,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   }
   function listNew() {
     const i = sparePool.findIndex(d => !state[d.sym]);
-    if (i < 0) { scheduled.push({ at: tick + 300, run: listNew }); return; } // 예비 종목이 없으면 나중에 다시
+    if (i < 0) { scheduled.push({ at: tick + 300, kind: "list" }); return; } // 예비 종목이 없으면 나중에 다시
     const [d] = sparePool.splice(i, 1), price = Math.round(uni(2, 10) * 100) / 100;
     addAsset({ ...d, market: "venture", sector: "venture", price, cap: price * Math.round(uni(5e7, 2e8)), parValue: d.parValue ?? 0.1 });
     const a = state[d.sym], fill = fillOf(a);
@@ -411,7 +437,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     tick++;
     actions = [];
     const before = news.length ? news[0].id : null, versionBefore = assetsVersion;
-    for (let j = scheduled.length - 1; j >= 0; j--) if (scheduled[j].at <= tick) scheduled.splice(j, 1)[0].run();
+    for (let j = scheduled.length - 1; j >= 0; j--) if (scheduled[j].at <= tick) runTask(scheduled.splice(j, 1)[0]);
     if (tick >= nextNewsAt) { makeNews(); nextNewsAt = tick + Math.round(uni(...cfg.newsGap)); }
 
     const m = gauss() * cfg.marketSigma + drain(marketPending);
@@ -477,8 +503,28 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     nextGradAt = tick + Math.round((cfg.gradCooldown / 2) * uni(0.7, 1.3));
   }
 
-  for (let i = 0; i < cfg.warmupBars * cfg.ticksPerBar; i++) step();
-  rebase();
+  // 스냅샷: 엔진의 모든 상태를 JSON 하나로. 서버 재시작 때 처음부터 재생하지 않고 이어서 돌린다
+  function takeSnapshot(): string {
+    return JSON.stringify({
+      v: SNAPSHOT_VERSION, rng: rng.get(), tick, nextNewsAt, warm, assetsVersion,
+      nextGradAt: Number.isFinite(nextGradAt) ? nextGradAt : null, startTime, news, scheduled,
+      marketPending, sectorPending, venturesBusy: [...venturesBusy], sparePool, state,
+    });
+  }
+  function restore(json: string) {
+    const d = JSON.parse(json);
+    if (d.v !== SNAPSHOT_VERSION) throw new Error(`스냅샷 버전이 다릅니다: ${d.v}`);
+    rng.set(d.rng); tick = d.tick; nextNewsAt = d.nextNewsAt; warm = d.warm; assetsVersion = d.assetsVersion;
+    nextGradAt = d.nextGradAt ?? Infinity; startTime = d.startTime; news = d.news; scheduled = d.scheduled;
+    marketPending = d.marketPending; sectorPending = d.sectorPending; venturesBusy = new Set(d.venturesBusy);
+    sparePool = d.sparePool; state = d.state;
+  }
+
+  if (snapshot) restore(snapshot);
+  else {
+    for (let i = 0; i < cfg.warmupBars * cfg.ticksPerBar; i++) step();
+    rebase();
+  }
 
   function liquidity(a: AssetState): number {
     const cap = capOf(a) ?? 0;
@@ -513,13 +559,14 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     options: cfg,
     get tick() { return tick; },
     get assetsVersion() { return assetsVersion; },
-    news,
+    get news() { return news; },
     step,
     gameDate: () => gameDate(),
     quotes: () => live().map(toQuote),
     quote: sym => (state[sym] ? toQuote(state[sym]) : null),
     bars: sym => state[sym]?.bars ?? [],
     liquidity: sym => (state[sym] ? liquidity(state[sym]) : null),
+    snapshot: takeSnapshot,
     applyFlow,
   };
 }

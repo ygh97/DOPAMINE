@@ -24,6 +24,9 @@ export const useMarket = defineStore("market", () => {
   /** 시즌 랭킹 (5 tick마다) */
   const ranking = ref<RankRow[]>([]);
   const players = ref(0);
+  /** 진행 중 시즌. 시즌이 바뀌면 seasonEpoch가 올라가고 차트·계좌가 새로 받는다 */
+  const season = ref<{ id: number; startedAt: number; endsAt: number } | null>(null);
+  const seasonEpoch = ref(0);
   /** 마지막으로 병합·폐지 정산된 종목들. 계좌 스토어가 보고 내 보유와 겹치면 계좌를 다시 받는다 */
   const settled = ref<{ type: string; sym: string }[]>([]);
 
@@ -45,6 +48,8 @@ export const useMarket = defineStore("market", () => {
   async function loadSnapshot() {
     const s = await (await fetch("/api/snapshot")).json();
     sectors.value = s.sectors;
+    if (season.value && season.value.id !== s.season.id) seasonEpoch.value++; // 재연결 사이에 시즌이 바뀜
+    season.value = s.season;
     date.value = s.date;
     tick.value = s.tick;
     news.value = s.news;
@@ -92,6 +97,7 @@ export const useMarket = defineStore("market", () => {
       news.value.unshift(JSON.parse((e as MessageEvent).data));
       if (news.value.length > 300) news.value.pop();
     });
+    source.addEventListener("season", () => { void loadSnapshot(); });
     source.addEventListener("ranking", e => applyRanking(JSON.parse((e as MessageEvent).data)));
     source.addEventListener("settled", e => { settled.value = JSON.parse((e as MessageEvent).data); });
     source.addEventListener("assets", e => {
@@ -120,6 +126,6 @@ export const useMarket = defineStore("market", () => {
     selected.value = sym;
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, tab, selected, newsDialog, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, season, seasonEpoch, tab, selected, newsDialog, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select };
 });

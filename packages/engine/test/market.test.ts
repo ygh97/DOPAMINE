@@ -152,3 +152,16 @@ test("검증 성공 + 시총 기준이면 주식으로 승격한다", () => {
   assert.equal(q.sector, "newgrowth");
   assert.ok(q.per && Math.abs(q.per - 15) < 1e-9, "승격 시 PER 15");
 });
+
+test("스냅샷에서 이어 돌리면 끊김 없이 같은 경로", () => {
+  const a = make(12);
+  run(a, 3000);
+  a.applyFlow("NVDA", 5e6);
+  const snap = a.snapshot();
+  const b = createMarket({ assets: ASSETS, sectors: SECTORS, spares: SPARES, seed: 12, now: NOW, options: FAST, snapshot: snap });
+  assert.equal(b.tick, a.tick);
+  run(a, 4000); run(b, 4000);
+  assert.deepEqual(b.quotes(), a.quotes());
+  assert.deepEqual(b.news.slice(0, 30), a.news.slice(0, 30));
+  assert.deepEqual(b.bars("LMQ").slice(-50), a.bars("LMQ").slice(-50));
+});

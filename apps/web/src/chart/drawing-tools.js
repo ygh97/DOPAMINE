@@ -271,6 +271,12 @@ export function mount(chart, bar, pop) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); } catch { /* 저장 불가 환경은 무시 */ }
   }
   // 그 사이 주식병합이 있었으면 가격 좌표를 같은 배수로 옮겨서 다시 그린다 (예: 10:1 병합이면 ×10)
+  // 새 시즌: 시작가가 바뀌어 예전 그림은 의미가 없다
+  function clearAll() {
+    cancel(); [...ids].forEach(id => chart.removeOverlay(id)); ids.clear(); pop.hidden = true;
+    for (const k of Object.keys(saved)) delete saved[k];
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* 저장 불가 환경은 무시 */ }
+  }
   function load(key, factor = 1) {
     const entry = Array.isArray(saved[key]) ? {factor: 1, items: saved[key]} : saved[key]; // 예전 저장 형식 호환
     if (!entry) return;
@@ -295,7 +301,7 @@ export function mount(chart, bar, pop) {
   }
 
   pop.hidden = true;
-  return {save, load, demo};
+  return {save, load, demo, clearAll};
 }
 
 export { alpha };
