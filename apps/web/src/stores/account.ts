@@ -127,6 +127,36 @@ export const useAccount = defineStore("account", () => {
     void api("/api/drawings", p).catch(() => {});
   }
 
+  async function sendChat(text: string): Promise<boolean> {
+    try {
+      const r = await api<{ msg: { id: number; name: string; text: string; at: number } }>("/api/chat", { text });
+      if (!m.chat.some(c => c.id === r.msg.id)) m.chat.push(r.msg);
+      return true;
+    } catch (e) { notify((e as Error).message, "error"); return false; }
+  }
+
+  async function reportChat(id: number) {
+    try {
+      const r = await api<{ id: number; reports: number; hidden: boolean }>("/api/chat/report", { id });
+      notify(r.hidden ? "신고 누적으로 메시지가 숨김 처리됐습니다." : `신고가 접수됐습니다 (${r.reports}/3)`);
+    } catch (e) { notify((e as Error).message, "error"); }
+  }
+
+  async function adminApi<T>(key: string, path: string, body?: unknown): Promise<T> {
+    const r = await fetch(path, {
+      method: body === undefined ? "GET" : "POST",
+      headers: { ...(body === undefined ? {} : { "Content-Type": "application/json" }), "x-admin-key": key },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error ?? `요청 실패 (${r.status})`);
+    return data as T;
+  }
+
+  const adminChat = (key: string) => adminApi<{ messages: { id: number; name: string; text: string; at: number; reports: number; hidden: boolean }[]; banned: string[] }>(key, "/api/admin/chat");
+  const adminBan = (key: string, name: string, banned: boolean) => adminApi(key, "/api/admin/ban", { name, banned });
+  const adminHide = (key: string, id: number, hidden: boolean) => adminApi(key, "/api/admin/hide", { id, hidden });
+
   // 실시간 평가: 서버가 준 보유 수량·선물 포지션 × 지금 시세
   const positions = computed(() => (me.value?.positions ?? []).map(p => {
     const price = m.quotes[p.sym]?.price ?? 0;
@@ -161,5 +191,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, setStop, reset, fetchDrawings, syncDrawing };
+  return { token, me, busy, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, setStop, reset, fetchDrawings, syncDrawing, sendChat, reportChat, adminChat, adminBan, adminHide };
 });

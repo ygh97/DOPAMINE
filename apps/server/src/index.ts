@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { SECTORS, type Bar, type NewsItem, type Quote } from "@dopamine/engine";
 import { Auth, AuthError } from "./auth.ts";
 import { Broker, OrderError } from "./broker.ts";
+import { Chat, ChatError } from "./chat.ts";
 import { openDb } from "./db.ts";
 import { bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, targetTick } from "./season.ts";
 
@@ -18,7 +19,9 @@ const DB_FILE = process.env.DB_FILE ?? fileURLToPath(new URL("../../../data/dopa
 const ENGINE_OPTIONS = JSON.parse(process.env.ENGINE_OPTIONS ?? "{}");
 
 const db = openDb(DB_FILE);
+const ADMIN_KEY = process.env.ADMIN_KEY ?? "dopamine-admin";
 const auth = new Auth(db);
+const chat = new Chat(db);
 // 시즌이 바뀌면 아래 넷을 통째로 갈아 끼운다
 const bootStart = performance.now();
 let season = currentSeason(db, SEED, TICK_MS, SEASON_MS);
@@ -46,7 +49,7 @@ const packBar = (b: Bar) => [b.timestamp, r7(b.open), r7(b.high), r7(b.low), r7(
 const packQuote = (q: Quote) => ({ ...q, price: r7(q.price), prev: r7(q.prev), per: q.per && r7(q.per), cap: q.cap && Math.round(q.cap) });
 
 function snapshot() {
-  return { tick: market.tick, date: market.gameDate(), season: seasonInfo(), sectors: SECTORS, quotes: market.quotes().map(packQuote), news: market.news.slice(0, 50) };
+  return { tick: market.tick, date: market.gameDate(), season: seasonInfo(), sectors: SECTORS, quotes: market.quotes().map(packQuote), news: market.news.slice(0, 50), chat: chat.recent(50) };
 }
 
 // ---------- SSE ----------
@@ -97,7 +100,7 @@ const loop = setInterval(() => {
 const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
 
 app.setErrorHandler((err, _req, reply) => {
-  if (err instanceof AuthError || err instanceof OrderError) return reply.code(400).send({ error: err.message });
+  if (err instanceof AuthError || err instanceof OrderError || err instanceof ChatError) return reply.code(400).send({ error: err.message });
   if ((err as { validation?: unknown }).validation) return reply.code(400).send({ error: "요청 형식이 올바르지 않습니다." });
   app.log.error(err);
   return reply.code(500).send({ error: "서버 오류가 났습니다." });
@@ -208,6 +211,57 @@ app.post<{ Body: { sym?: string; factor?: number; items?: unknown[]; clear?: boo
   if (!id) return;
   if (req.body.clear) broker.clearDrawings(id);
   else broker.saveDrawing(id, req.body.sym ?? "", req.body.factor ?? 1, req.body.items ?? []);
+  return { ok: true };
+});
+
+function adminOk(req: FastifyRequest, reply: FastifyReply) {
+  if (req.headers["x-admin-key"] === ADMIN_KEY) return true;
+  void reply.code(403).send({ error: "운영자 키가 올바르지 않습니다." });
+  return false;
+}
+
+app.get("/api/chat", async () => ({ messages: chat.recent(50) }));
+
+app.post<{ Body: { text: string } }>("/api/chat", {
+  schema: { body: { type: "object", required: ["text"], properties: { text: { type: "string", maxLength: 300 } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const msg = chat.post(id, req.body.text);
+  send("chat", msg);
+  return { msg };
+});
+
+app.post<{ Body: { id: number } }>("/api/chat/report", {
+  schema: { body: { type: "object", required: ["id"], properties: { id: { type: "integer" } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const r = chat.report(id, req.body.id);
+  if (r.hidden) send("chat-hide", { id: r.id });
+  return r;
+});
+
+app.get("/api/admin/chat", async (req, reply) => {
+  if (!adminOk(req, reply)) return;
+  return chat.adminList();
+});
+
+app.post<{ Body: { name: string; banned: boolean } }>("/api/admin/ban", {
+  schema: { body: { type: "object", required: ["name", "banned"], properties: { name: { type: "string" }, banned: { type: "boolean" } } } },
+}, async (req, reply) => {
+  if (!adminOk(req, reply)) return;
+  chat.setBan(req.body.name, req.body.banned);
+  if (req.body.banned) send("chat-purge", { name: req.body.name });
+  return { ok: true };
+});
+
+app.post<{ Body: { id: number; hidden: boolean } }>("/api/admin/hide", {
+  schema: { body: { type: "object", required: ["id", "hidden"], properties: { id: { type: "integer" }, hidden: { type: "boolean" } } } },
+}, async (req, reply) => {
+  if (!adminOk(req, reply)) return;
+  chat.setHidden(req.body.id, req.body.hidden);
+  if (req.body.hidden) send("chat-hide", { id: req.body.id });
   return { ok: true };
 });
 

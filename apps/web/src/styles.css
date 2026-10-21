@@ -307,3 +307,21 @@ tr.mine { background: var(--accent-soft); }
   .layout[data-mview="social"] .center,
   .layout[data-mview="social"] .sec-order { display: none; }
 }
+
+
+/* 실시간 채팅 및 운영자 도구 (M6) */
+.chat-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.chat-log { min-height: 160px; }
+.msg { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; line-height: 1.4; word-break: break-word; }
+.msg-body { flex: 1; min-width: 0; }
+.msg-time { margin-right: 5px; font-size: 11px; }
+.mine-name { color: var(--accent); }
+.report-btn { border: 0; background: none; color: var(--muted); font-size: 11px; padding: 0 4px; opacity: 0.55; flex-shrink: 0; }
+.report-btn:hover { opacity: 1; color: var(--up); }
+.chat-input button:disabled, .chat-input input:disabled { opacity: 0.5; cursor: not-allowed; }
+.admin-box { padding: 8px; border-bottom: 1px solid var(--line); background: var(--panel-2); display: grid; gap: 6px; font-size: 12px; }
+.admin-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.admin-row input { flex: 1 1 90px; min-width: 0; border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; background: var(--panel); color: var(--text); font: inherit; }
+.admin-banned { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.admin-list { max-height: 120px; overflow: auto; display: grid; gap: 4px; }
+.admin-item { display: flex; justify-content: space-between; align-items: center; gap: 6px; }

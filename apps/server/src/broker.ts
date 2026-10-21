@@ -97,7 +97,7 @@ export class Broker {
 
   me(userId: number) {
     const acc = this.account(userId);
-    const fills = this.db.prepare("SELECT id, tick, at, sym, side, qty, price, fee FROM fills WHERE user_id = ? AND season_id = ? ORDER BY id DESC LIMIT 50")
+    const fills = this.db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE user_id = ? AND season_id = ? ORDER BY id DESC LIMIT 50")
       .all(userId, this.season.id) as unknown as Fill[];
     const equity = this.equity(acc);
     return {
@@ -232,8 +232,8 @@ export class Broker {
     const acc = this.account(o.userId), q = this.market.quote(o.sym)!;
     const record = (side: string, qty: number, price: number, fee: number, pnl?: number): Fill => {
       this.db.prepare("UPDATE accounts SET cash = ? WHERE user_id = ? AND season_id = ?").run(acc.cash, acc.userId, this.season.id);
-      const id = Number(this.db.prepare("INSERT INTO fills (user_id, season_id, tick, at, sym, side, qty, price, fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(acc.userId, this.season.id, tick, at, o.sym, side, qty, price, fee).lastInsertRowid);
+      const id = Number(this.db.prepare("INSERT INTO fills (user_id, season_id, tick, at, sym, side, qty, price, fee, pnl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(acc.userId, this.season.id, tick, at, o.sym, side, qty, price, fee, pnl ?? null).lastInsertRowid);
       return { id, tick, at, sym: o.sym, side, qty, price, fee, pnl };
     };
 
@@ -260,7 +260,7 @@ export class Broker {
       acc.cash += qty * price - fee;
       pos.qty -= qty;
       this.savePosition(acc, o.sym, pos);
-      return record("sell", qty, price, fee);
+      return record("sell", qty, price, fee, qty * (price - pos.avg) - fee);
     }
 
     if (o.kind === "open") {

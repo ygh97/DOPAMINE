@@ -97,6 +97,20 @@ export function openDb(file: string): Db {
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (user_id, season_id, sym)
     );
+    CREATE TABLE IF NOT EXISTS chat_messages (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      name TEXT NOT NULL,
+      text TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      reports INTEGER NOT NULL DEFAULT 0,
+      hidden INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS chat_reports (
+      msg_id INTEGER NOT NULL REFERENCES chat_messages(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      PRIMARY KEY (msg_id, user_id)
+    );
     CREATE TABLE IF NOT EXISTS hall_of_fame (
       season_id INTEGER NOT NULL,
       rank INTEGER NOT NULL,
@@ -108,7 +122,12 @@ export function openDb(file: string): Db {
     );
   `);
   // M2에서 만든 DB에는 시즌 길이·종료 칸이 없다
-  for (const sql of ["ALTER TABLE seasons ADD COLUMN length_ms INTEGER NOT NULL DEFAULT 604800000", "ALTER TABLE seasons ADD COLUMN ended_at INTEGER"]) {
+  for (const sql of [
+    "ALTER TABLE seasons ADD COLUMN length_ms INTEGER NOT NULL DEFAULT 604800000",
+    "ALTER TABLE seasons ADD COLUMN ended_at INTEGER",
+    "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE fills ADD COLUMN pnl REAL",
+  ]) {
     try { db.exec(sql); } catch { /* 이미 있음 */ }
   }
   return db;

@@ -98,7 +98,7 @@ async function clearStop(id: number) {
     </div>
     <div v-else class="table-scroll">
       <table v-if="a.me.fills.length" id="fills" class="grid">
-        <thead><tr><th>시각</th><th>종목</th><th>구분</th><th>수량</th><th>체결가</th><th>수수료</th></tr></thead>
+        <thead><tr><th>시각</th><th>종목</th><th>구분</th><th>수량</th><th>체결가</th><th>수수료</th><th>실현손익</th></tr></thead>
         <tbody>
           <tr v-for="f in a.me.fills" :key="f.id">
             <td>{{ clock(f.at) }}</td>
@@ -107,6 +107,7 @@ async function clearStop(id: number) {
             <td>{{ qtyText(f.sym, f.qty) }}</td>
             <td>{{ money(f.price) }}</td>
             <td>{{ money(f.fee) }}</td>
+            <td :class="f.pnl == null ? 'muted' : f.pnl >= 0 ? 'up' : 'down'">{{ f.pnl == null ? "—" : `${f.pnl >= 0 ? "+" : "-"}${money(Math.abs(f.pnl))}` }}</td>
           </tr>
         </tbody>
       </table>

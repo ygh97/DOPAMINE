@@ -4,6 +4,7 @@ import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 
 export interface RankRow { rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }
+export interface ChatMsg { id: number; name: string; text: string; at: number }
 /** 서버가 보내는 압축 봉: [timestamp, open, high, low, close, volume] */
 export type PackedBar = [number, number, number, number, number, number];
 interface TickEvent { tick: number; date: GameDate; bars: Record<string, [...PackedBar, number]> }
@@ -29,6 +30,7 @@ export const useMarket = defineStore("market", () => {
   const seasonEpoch = ref(0);
   /** 마지막으로 병합·폐지 정산된 종목들. 계좌 스토어가 보고 내 보유와 겹치면 계좌를 다시 받는다 */
   const settled = ref<{ type: string; sym: string }[]>([]);
+  const chat = ref<ChatMsg[]>([]);
 
   const tab = ref<MarketKind>("stock");
   const selected = ref("NVDA");
@@ -53,6 +55,7 @@ export const useMarket = defineStore("market", () => {
     date.value = s.date;
     tick.value = s.tick;
     news.value = s.news;
+    if (Array.isArray(s.chat)) chat.value = s.chat;
     applyQuotes(s.quotes);
     await loadRanking();
   }
@@ -100,6 +103,19 @@ export const useMarket = defineStore("market", () => {
     source.addEventListener("season", () => { void loadSnapshot(); });
     source.addEventListener("ranking", e => applyRanking(JSON.parse((e as MessageEvent).data)));
     source.addEventListener("settled", e => { settled.value = JSON.parse((e as MessageEvent).data); });
+    source.addEventListener("chat", e => {
+      const msg: ChatMsg = JSON.parse((e as MessageEvent).data);
+      if (!chat.value.some(c => c.id === msg.id)) chat.value.push(msg);
+      if (chat.value.length > 100) chat.value.shift();
+    });
+    source.addEventListener("chat-hide", e => {
+      const { id } = JSON.parse((e as MessageEvent).data) as { id: number };
+      chat.value = chat.value.filter(c => c.id !== id);
+    });
+    source.addEventListener("chat-purge", e => {
+      const { name } = JSON.parse((e as MessageEvent).data) as { name: string };
+      chat.value = chat.value.filter(c => c.name !== name);
+    });
     source.addEventListener("assets", e => {
       const d: { quotes: Quote[]; reload: string[] } = JSON.parse((e as MessageEvent).data);
       applyQuotes(d.quotes);
@@ -126,6 +142,6 @@ export const useMarket = defineStore("market", () => {
     selected.value = sym;
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, season, seasonEpoch, tab, selected, newsDialog, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, season, seasonEpoch, tab, selected, newsDialog, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select };
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Auth, AuthError } from "../src/auth.ts";
 import { Broker, GOAL, OrderError, START_CASH, liqPrice } from "../src/broker.ts";
+import { Chat, ChatError } from "../src/chat.ts";
 import { openDb } from "../src/db.ts";
 import { bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot } from "../src/season.ts";
 
@@ -322,4 +323,37 @@ test("그리기 서버 저장·조회·삭제 및 시즌 분리", () => {
   s.broker.saveDrawing(u, "BTC", 1, [item]);
   s.broker.clearDrawings(u);
   assert.deepEqual(s.broker.getDrawings(u), {});
+});
+
+
+test("실시간 채팅: 전송·3초 쿨타임·200자·금칙어·3회 신고 자동 숨김·운영자 차단", () => {
+  const s = setup();
+  const chat = new Chat(s.db);
+  const u1 = s.user("alice");
+  const u2 = s.user("bob");
+  const u3 = s.user("carol");
+  const u4 = s.user("dave");
+
+  const m1 = chat.post(u1, "안녕하세요 성투하세요", 10_000);
+  assert.equal(m1.name, "alice");
+  assert.equal(chat.recent().length, 1);
+
+  assert.throws(() => chat.post(u1, "도배", 11_000), ChatError, "3초 쿨타임");
+  const m2 = chat.post(u1, "3초 지남", 13_500);
+  assert.equal(chat.recent().length, 2);
+
+  assert.throws(() => chat.post(u2, "a".repeat(201), 15_000), ChatError, "200자 제한");
+  assert.throws(() => chat.post(u2, "시발 폭락하네", 15_000), ChatError, "금칙어 차단");
+
+  assert.throws(() => chat.report(u1, m2.id), ChatError, "본인 메시지 신고 불가");
+  assert.equal(chat.report(u2, m2.id).hidden, false);
+  assert.throws(() => chat.report(u2, m2.id), ChatError, "중복 신고 불가");
+  assert.equal(chat.report(u3, m2.id).hidden, false);
+  assert.equal(chat.report(u4, m2.id).hidden, true, "3명 신고 시 자동 숨김");
+  assert.equal(chat.recent().length, 1);
+
+  chat.setBan("alice", true);
+  assert.equal(chat.recent().length, 0, "차단 시 기존 메시지 숨김");
+  assert.throws(() => chat.post(u1, "차단됨", 30_000), ChatError);
+  assert.deepEqual(chat.adminList().banned, ["alice"]);
 });
