@@ -1,0 +1,129 @@
+export type MarketKind = "stock" | "coin" | "venture";
+
+/** 종목 정의 (카탈로그). price는 시즌 시작가. */
+export interface AssetDef {
+  sym: string;
+  name: string;
+  market: MarketKind;
+  sector: string;
+  price: number;
+  cap?: number;
+  fairPER?: number;
+  product?: string;
+  tech?: string;
+  /** 액면가. 코인은 없음. 주식병합 때 ratio배가 된다 */
+  parValue?: number;
+  /** 코인의 가상 유동성 (게임 하루 거래대금). 주식·신흥주는 시총에서 계산 */
+  liquidity?: number;
+}
+
+/** 신흥주 예비 목록 항목. 상장할 때 가격·시총은 엔진이 정한다. */
+export interface SpareDef {
+  sym: string;
+  name: string;
+  tech: string;
+  parValue?: number;
+}
+
+export interface Bar {
+  timestamp: number;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
+export interface GameDate {
+  year: number;
+  month: number;
+  day: number;
+}
+
+export interface NewsEvent {
+  id: string;
+  index: number;
+  total: number;
+  label: string;
+}
+
+/** 클라이언트에 그대로 내보내도 되는 뉴스. 숨은 충격값은 들어 있지 않다. */
+export interface NewsItem {
+  id: string;
+  tick: number;
+  at: number;
+  date: GameDate;
+  kind: string;
+  headline: string;
+  body: string;
+  symbols: string[];
+  priceAt: Record<string, number>;
+  sector?: string;
+  event?: NewsEvent;
+  delisted?: boolean;
+}
+
+/** 클라이언트에 보여줄 시세. 엔진 내부 상태(앵커, 국면, 대기 충격)는 없다. */
+export interface Quote {
+  sym: string;
+  name: string;
+  market: MarketKind;
+  sector: string;
+  price: number;
+  prev: number;
+  per: number | null;
+  cap: number | null;
+  stage: string | null;
+  parValue: number | null;
+  /** 시즌 시작 뒤 누적 주식병합 배수. 차트 그림을 새 가격으로 옮길 때 쓴다 */
+  splitFactor: number;
+}
+
+/** 보유 정산이 필요한 상장 변화. split: 수량 ÷ ratio·평단 × ratio, delist: price로 청산 */
+export type CorporateAction =
+  | { type: "split"; sym: string; ratio: number }
+  | { type: "delist"; sym: string; price: number }
+  | { type: "graduate"; sym: string }
+  | { type: "list"; sym: string };
+
+export interface StepResult {
+  news: NewsItem[];
+  barClosed: boolean;
+  assetsChanged: boolean;
+  actions: CorporateAction[];
+}
+
+export interface MarketOptions {
+  ticksPerBar: number;
+  ticksPerDay: number;
+  barMs: number;
+  warmupBars: number;
+  maxBars: number;
+  newsGap: [number, number];
+  marketSigma: number;
+  sectorSigma: number;
+  kappa: number;
+  rsiPeriod: number;
+  rsiWeight: number;
+  regimeSwitch: number;
+  flipChance: number;
+  srLookback: number;
+  srBand: number;
+  srWeight: number;
+  gradCap: number;
+  gradPER: number;
+  gradSuccesses: number;
+  impactK: number;
+  impactCap: Record<MarketKind, number>;
+  impactTempShare: number;
+  impactRevertTicks: number;
+  gradCooldown: number;
+  splitPrice: number;
+  delistCap: number;
+  watchTicks: number;
+  rescueOdds: [number, number];
+  maxNewGrowth: number;
+  epsStep: [number, number];
+  epsHalfLife: number;
+  epsBand: [number, number];
+}

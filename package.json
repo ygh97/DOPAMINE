@@ -1,0 +1,31 @@
+{
+  "name": "dopamine-center",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspace @dopamine/server & npm run dev --workspace @dopamine/web",
+    "dev:server": "npm run dev --workspace @dopamine/server",
+    "dev:web": "npm run dev --workspace @dopamine/web",
+    "test": "npm test --workspace @dopamine/engine && npm test --workspace @dopamine/server",
+    "typecheck": "tsc -p packages/engine && tsc -p apps/server && npm run typecheck --workspace @dopamine/web",
+    "build": "npm run build --workspace @dopamine/web",
+    "sim": "node tools/sim-week.ts 1 2 3",
+    "sim:quick": "node tools/sim-week.ts 1 2 3 --days 1",
+    "e2e": "node tools/e2e-m1.cjs",
+    "e2e:quick": "node tools/e2e-m1.cjs --quick",
+    "check": "npm test && npm run typecheck && npm run sim:quick && npm run e2e:quick && npm run e2e:split && npm run e2e:m2",
+    "e2e:split": "node tools/e2e-split.cjs",
+    "e2e:m2": "node tools/e2e-m2.cjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "~6.0.3"
+  }
+}
