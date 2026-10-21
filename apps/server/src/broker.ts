@@ -376,4 +376,32 @@ export class Broker {
     rows.sort((a, b) => b.equity - a.equity || (a.clearedTick ?? Infinity) - (b.clearedTick ?? Infinity));
     return rows.slice(0, limit).map((r, i) => ({ rank: i + 1, ...r }));
   }
+
+  // ---------- 차트 그리기 서버 보관 ----------
+  getDrawings(userId: number): Record<string, { factor: number; items: unknown[] }> {
+    const rows = this.db.prepare("SELECT sym, factor, items FROM drawings WHERE user_id = ? AND season_id = ?")
+      .all(userId, this.season.id) as { sym: string; factor: number; items: string }[];
+    const out: Record<string, { factor: number; items: unknown[] }> = {};
+    for (const r of rows) {
+      try { out[r.sym] = { factor: r.factor, items: JSON.parse(r.items) }; } catch { /* 손상된 항목 무시 */ }
+    }
+    return out;
+  }
+
+  saveDrawing(userId: number, sym: string, factor: number, items: unknown[]) {
+    if (!sym || sym.length > 12 || !Number.isFinite(factor) || factor <= 0 || !Array.isArray(items))
+      throw new OrderError("그리기 데이터 형식이 올바르지 않습니다.");
+    if (!items.length) {
+      this.db.prepare("DELETE FROM drawings WHERE user_id = ? AND season_id = ? AND sym = ?").run(userId, this.season.id, sym);
+      return;
+    }
+    const json = JSON.stringify(items.slice(0, 100));
+    this.db.prepare(
+      "INSERT INTO drawings (user_id, season_id, sym, factor, items, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, season_id, sym) DO UPDATE SET factor = excluded.factor, items = excluded.items, updated_at = excluded.updated_at",
+    ).run(userId, this.season.id, sym, factor, json, Date.now());
+  }
+
+  clearDrawings(userId: number) {
+    this.db.prepare("DELETE FROM drawings WHERE user_id = ? AND season_id = ?").run(userId, this.season.id);
+  }
 }

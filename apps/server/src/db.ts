@@ -88,6 +88,15 @@ export function openDb(file: string): Db {
       data TEXT NOT NULL,
       saved_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS drawings (
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      season_id INTEGER NOT NULL REFERENCES seasons(id),
+      sym TEXT NOT NULL,
+      factor REAL NOT NULL DEFAULT 1,
+      items TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (user_id, season_id, sym)
+    );
     CREATE TABLE IF NOT EXISTS hall_of_fame (
       season_id INTEGER NOT NULL,
       rank INTEGER NOT NULL,

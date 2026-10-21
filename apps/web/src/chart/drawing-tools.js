@@ -114,6 +114,18 @@ export function register() {
     }});
   wave("elliottWave", ["0", "1", "2", "3", "4", "5"]);
   wave("xabcd", ["X", "A", "B", "C", "D"], [[0, 1, 2], [2, 3, 4]]);
+  registerOverlay({
+    name: "posLine", totalStep: 2, lock: true,
+    needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: true,
+    createPointFigures: ({overlay, coordinates: [c], bounding}) => {
+      if (!c) return [];
+      const d = overlay.extendData || {}, color = d.color || css("--accent");
+      return [
+        {type: "line", ignoreEvent: true, attrs: {coordinates: [{x: 0, y: c.y}, {x: bounding.width, y: c.y}]}, styles: {style: d.dashed ? "dashed" : "solid", dashedValue: [4, 4], color, size: 1}},
+        {type: "text", ignoreEvent: true, attrs: {x: 8, y: c.y - 3, text: d.label || "", align: "left", baseline: "bottom"}, styles: {color: "#fff", backgroundColor: color, borderColor: color}},
+      ];
+    },
+  });
 }
 
 // 아이콘: 18x18 stroke path
@@ -147,7 +159,8 @@ const SWATCHES = ["#1f5fbf", "#e0353b", "#1d6fd8", "#2f9e44", "#f59f00", "#7950f
 const STORAGE_KEY = "dc-drawings-v1";
 const readSaved = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); } catch { return {}; } };
 
-export function mount(chart, bar, pop) {
+export function mount(chart, bar, pop, onSync) {
+  let curKey = "", curFactor = 1, clearing = false;
   const ids = new Set(), saved = readSaved(), current = {};
   let drawingId = null, selectedId = null, activeTool = null, keep = false, locked = false, hidden = false, magnet = 0;
 
@@ -182,10 +195,10 @@ export function mount(chart, bar, pop) {
   }
   function callbacks() {
     return {
-      onDrawEnd: e => { ids.add(e.overlay.id); drawingId = null; const t = activeTool; setActive(null); if (keep && t) start(t); return false; },
+      onDrawEnd: e => { ids.add(e.overlay.id); drawingId = null; const t = activeTool; setActive(null); persist(); if (keep && t) start(t); return false; },
       onSelected: e => { selectedId = e.overlay.id; pop.hidden = false; return false; },
       onDeselected: () => { selectedId = null; pop.hidden = true; return false; },
-      onRemoved: e => { ids.delete(e.overlay.id); if (selectedId === e.overlay.id) { selectedId = null; pop.hidden = true; } return false; },
+      onRemoved: e => { ids.delete(e.overlay.id); if (selectedId === e.overlay.id) { selectedId = null; pop.hidden = true; } if (!clearing) persist(); return false; },
     };
   }
   function create(o) {
@@ -218,6 +231,7 @@ export function mount(chart, bar, pop) {
     }
     if (size) { st.line.size = size; for (const k of ["polygon", "rect", "circle"]) st[k].borderSize = size; }
     chart.overrideOverlay({id: selectedId, styles: st});
+    persist();
   }
 
   bar.addEventListener("click", e => {
@@ -227,7 +241,7 @@ export function mount(chart, bar, pop) {
       closeMenus(); g.classList.toggle("open", open);
       if (open) { // position: fixed 메뉴를 버튼 오른쪽에, 화면 안으로
         const r = g.getBoundingClientRect(), f = g.querySelector(".flyout");
-        f.style.left = r.right + 6 + "px";
+        f.style.left = Math.max(8, Math.min(r.right + 6, innerWidth - f.offsetWidth - 8)) + "px";
         f.style.top = Math.max(8, Math.min(r.top, innerHeight - f.offsetHeight - 8)) + "px";
       }
       return;
@@ -247,7 +261,7 @@ export function mount(chart, bar, pop) {
       case "keep": keep = !keep; return b.setAttribute("aria-pressed", keep);
       case "lock": locked = !locked; b.setAttribute("aria-pressed", locked); return each(id => chart.overrideOverlay({id, lock: locked}));
       case "hide": return toggleHidden();
-      case "clear": cancel(); [...ids].forEach(id => chart.removeOverlay(id)); ids.clear(); pop.hidden = true; return;
+      case "clear": cancel(); clearing = true; [...ids].forEach(id => chart.removeOverlay(id)); clearing = false; ids.clear(); pop.hidden = true; persist(); return;
     }
   });
   pop.addEventListener("click", e => {
@@ -263,7 +277,22 @@ export function mount(chart, bar, pop) {
   });
 
   // 종목 전환 시 그림을 종목별로 보관. factor = 그릴 당시의 누적 주식병합 배수
+  function serialize() {
+    return [...ids].map(id => chart.getOverlayById(id)).filter(Boolean)
+      .map(o => ({name: o.name, points: o.points.map(p => ({timestamp: p.timestamp, value: p.value})), extendData: o.extendData, styles: o.styles}));
+  }
+  function persist(key = curKey, factor = curFactor) {
+    if (!key) return;
+    const items = serialize();
+    saved[key] = {factor, items};
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); } catch { /* 저장 불가 환경은 무시 */ }
+    onSync?.({sym: key, factor, items});
+  }
   function save(key, factor = 1) {
+    persist(key, factor);
+    cancel(); clearing = true; [...ids].forEach(id => chart.removeOverlay(id)); clearing = false; ids.clear(); pop.hidden = true;
+  }
+  function oldSaveUnused() {
     const items = [...ids].map(id => chart.getOverlayById(id)).filter(Boolean)
       .map(o => ({name: o.name, points: o.points.map(p => ({timestamp: p.timestamp, value: p.value})), extendData: o.extendData, styles: o.styles}));
     saved[key] = {factor, items};
@@ -278,6 +307,8 @@ export function mount(chart, bar, pop) {
     try { localStorage.removeItem(STORAGE_KEY); } catch { /* 저장 불가 환경은 무시 */ }
   }
   function load(key, factor = 1) {
+    curKey = key; curFactor = factor;
+    cancel(); clearing = true; [...ids].forEach(id => chart.removeOverlay(id)); clearing = false; ids.clear(); pop.hidden = true;
     const entry = Array.isArray(saved[key]) ? {factor: 1, items: saved[key]} : saved[key]; // 예전 저장 형식 호환
     if (!entry) return;
     const k = factor / entry.factor;
@@ -298,10 +329,21 @@ export function mount(chart, bar, pop) {
       {name: "textLabel", points: [P(30, 1.04)], extendData: "돌파 확인"},
       {name: "horizontalRayLine", points: [P(70, 1, "high")]},
     ].forEach(create);
+    persist();
   }
 
   pop.hidden = true;
-  return {save, load, demo, clearAll};
+  function mergeRemote(remote) {
+    if (!remote) return;
+    for (const [k, v] of Object.entries(saved)) {
+      const entry = Array.isArray(v) ? {factor: 1, items: v} : v;
+      if (entry?.items?.length && !remote[k]?.items?.length) onSync?.({sym: k, factor: entry.factor || 1, items: entry.items});
+    }
+    for (const [k, v] of Object.entries(remote)) if (v?.items?.length) saved[k] = v;
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(saved)); } catch { /* 저장 불가 환경은 무시 */ }
+    if (curKey && remote[curKey]?.items?.length) load(curKey, curFactor);
+  }
+  return {save, load, demo, clearAll, mergeRemote};
 }
 
 export { alpha };

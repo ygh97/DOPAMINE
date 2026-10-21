@@ -86,6 +86,8 @@ async function clearStop(id: number) {
               <button v-if="f.stop != null" class="mini-btn" data-act="stop-clear" @click="clearStop(f.id)">해제</button>
             </td>
             <td class="act-cell" @click.stop>
+              <button class="mini-btn" data-act="close-10" :disabled="a.busy" @click="a.closeFuture(f.id, 10)">10%</button>
+              <button class="mini-btn" data-act="close-20" :disabled="a.busy" @click="a.closeFuture(f.id, 20)">20%</button>
               <button class="mini-btn" data-act="close-50" :disabled="a.busy" @click="a.closeFuture(f.id, 50)">50%</button>
               <button class="mini-btn danger" data-act="close-100" :disabled="a.busy" @click="a.closeFuture(f.id, 100)">종료</button>
             </td>

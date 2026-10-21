@@ -235,6 +235,7 @@ r = 시장 요인 × 시장 베타 + 업종 요인 × 업종 베타      같은 
 | `POST /api/futures/open` (Bearer) | `{sym, side: long\|short, lev, pct}` → 다음 tick에 체결 → `{fill, me}` |
 | `POST /api/futures/close` (Bearer) | `{posId, pct}` → 다음 tick에 체결 → `{fill, me}` |
 | `POST /api/stop` (Bearer) | `{posId, price}` (null이면 해제) → `{me}` |
+| `GET/POST /api/drawings` (Bearer) | 종목별 차트 그리기 조회·저장 (`{sym, factor, items}`) |
 | M6~ | `/api/chat` |
 
 - 대역폭: tick 이벤트 약 1.5KB/s (실측). 원본(315KB/2초)의 약 1/100.
@@ -252,7 +253,7 @@ r = 시장 요인 × 시장 베타 + 업종 요인 × 업종 베타      같은 
 | M2 ✅ | 참가 + 현물 주문(주문 충격 포함) + 보유종목 + 랭킹 + SQLite + 병합·폐지 정산 + 재시작 재생 | 두 계정이 거래하고 랭킹 반영 |
 | M3 ✅ | 시즌 리셋, 명예의 전당, 엔진 스냅샷(재생 시간 단축) | 시즌 교체 시나리오 테스트 |
 | M4 ✅ | 선물 + 강제 청산 + 스탑로스 | 강제 청산 테스트 통과 |
-| M5 | 그리기 저장(서버), 모바일 다듬기 | |
+| M5 ✅ | 그리기 저장(서버) + 차트 포지션 선 + 모바일 다듬기 | 새 기기 동기화·모바일 E2E 통과 |
 | M6 | 채팅 + 속도 제한 + 금칙어 + 신고·밴 + 관리자 화면 | 도배 차단 확인 |
 | M7 | Docker + Oracle 배포 + 개인정보 처리방침·고지 | 공개 URL 접속 |
 

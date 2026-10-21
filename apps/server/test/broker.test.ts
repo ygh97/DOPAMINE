@@ -309,3 +309,17 @@ test("주식병합·상장폐지 시 선물 포지션도 함께 조정·정산",
   const expectedPnl = split.qty * (exitPrice - split.entry);
   assert.ok(Math.abs(after.cash - (cashBefore + split.margin + expectedPnl)) < 1e-6);
 });
+
+
+test("그리기 서버 저장·조회·삭제 및 시즌 분리", () => {
+  const s = setup();
+  const u = s.user("artist");
+  const item = { name: "horizontalStraightLine", points: [{ timestamp: 1000, value: 220 }] };
+  s.broker.saveDrawing(u, "NVDA", 1, [item]);
+  assert.deepEqual(s.broker.getDrawings(u), { NVDA: { factor: 1, items: [item] } });
+  s.broker.saveDrawing(u, "NVDA", 1, []);
+  assert.deepEqual(s.broker.getDrawings(u), {});
+  s.broker.saveDrawing(u, "BTC", 1, [item]);
+  s.broker.clearDrawings(u);
+  assert.deepEqual(s.broker.getDrawings(u), {});
+});

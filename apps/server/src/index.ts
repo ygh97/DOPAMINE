@@ -196,6 +196,21 @@ app.post<{ Body: { confirm: boolean } }>("/api/reset", {
   return { me: broker.me(id) };
 });
 
+app.get("/api/drawings", async (req, reply) => {
+  const id = userOf(req, reply);
+  return id && { drawings: broker.getDrawings(id) };
+});
+
+app.post<{ Body: { sym?: string; factor?: number; items?: unknown[]; clear?: boolean } }>("/api/drawings", {
+  schema: { body: { type: "object", properties: { sym: { type: "string", maxLength: 12 }, factor: { type: "number" }, items: { type: "array" }, clear: { type: "boolean" } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  if (req.body.clear) broker.clearDrawings(id);
+  else broker.saveDrawing(id, req.body.sym ?? "", req.body.factor ?? 1, req.body.items ?? []);
+  return { ok: true };
+});
+
 app.get("/api/stream", (req, reply) => {
   reply.hijack();
   const res = reply.raw;

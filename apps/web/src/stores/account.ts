@@ -116,6 +116,17 @@ export const useAccount = defineStore("account", () => {
     catch (e) { notify((e as Error).message, "error"); }
   }
 
+  async function fetchDrawings() {
+    if (!token.value) return null;
+    try { return (await api<{ drawings: Record<string, { factor: number; items: unknown[] }> }>("/api/drawings")).drawings; }
+    catch { return null; }
+  }
+
+  function syncDrawing(p: { sym: string; factor: number; items: unknown[] }) {
+    if (!token.value) return;
+    void api("/api/drawings", p).catch(() => {});
+  }
+
   // 실시간 평가: 서버가 준 보유 수량·선물 포지션 × 지금 시세
   const positions = computed(() => (me.value?.positions ?? []).map(p => {
     const price = m.quotes[p.sym]?.price ?? 0;
@@ -150,5 +161,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, setStop, reset };
+  return { token, me, busy, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, setStop, reset, fetchDrawings, syncDrawing };
 });

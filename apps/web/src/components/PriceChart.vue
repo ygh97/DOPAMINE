@@ -1,12 +1,16 @@
 <script setup lang="ts">
 // KLineChart 차트. 서버에서 1분봉을 받아 그리고, SSE tick마다 마지막 봉을 갱신한다.
+// 보유 평단·선물 진입가·청산가·스탑로스 기준선을 차트에 함께 표시한다.
 import { dispose, init, type Chart, type KLineData } from "klinecharts";
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { alpha, mount, register, type DrawingController } from "../chart/drawing-tools.js";
+import { money } from "../format";
+import { useAccount } from "../stores/account";
 import { useMarket, type PackedBar } from "../stores/market";
 import { useUi } from "../stores/ui";
 
 const m = useMarket();
+const a = useAccount();
 const ui = useUi();
 const chartEl = ref<HTMLDivElement | null>(null);
 const barEl = ref<HTMLDivElement | null>(null);
@@ -34,6 +38,7 @@ let drawings: DrawingController | null = null;
 let base: KLineData[] = [];
 let shown = "";
 let shownFactor = 1; // 지금 그려진 그림의 기준 병합 배수
+let posIds: string[] = [];
 const subPanes: Record<string, string> = {};
 
 const toBar = ([timestamp, open, high, low, close, volume]: PackedBar): KLineData => ({ timestamp, open, high, low, close, volume });
@@ -81,11 +86,33 @@ function chartStyles() {
   } as Parameters<Chart["setStyles"]>[0];
 }
 
+/** 현재 종목의 현물 평단·선물 진입가·청산가·스탑로스 수평선을 갱신한다 */
+function syncPosLines() {
+  if (!chart) return;
+  for (const id of posIds) chart.removeOverlay(id);
+  posIds = [];
+  if (!base.length || !a.me || !shown) return;
+  const ts = base[base.length - 1].timestamp;
+  const add = (value: number, label: string, color: string, dashed = false) => {
+    const id = chart!.createOverlay({ name: "posLine", groupId: "positions", lock: true, points: [{ timestamp: ts, value }], extendData: { label, color, dashed } });
+    if (typeof id === "string") posIds.push(id);
+  };
+  const spot = a.me.positions.find(p => p.sym === shown);
+  if (spot) add(spot.avg, `현물 평단 ${money(spot.avg)}`, cssVar("--accent"));
+  for (const f of a.me.futures.filter(x => x.sym === shown)) {
+    const dir = f.side === "long" ? "롱" : "숏";
+    add(f.entry, `${dir} ${f.lev}x 진입 ${money(f.entry)}`, cssVar(f.side === "long" ? "--up" : "--down"));
+    add(f.liq, `청산가 ${money(f.liq)}`, cssVar("--warn"), true);
+    if (f.stop != null) add(f.stop, `스탑로스 ${money(f.stop)}`, cssVar("--muted"), true);
+  }
+}
+
 function redraw() {
   if (!chart) return;
   const price = base[base.length - 1]?.close ?? 1;
   chart.setPriceVolumePrecision(price < 1 ? 4 : 2, 0);
   chart.applyNewData(aggregate(base, period.value));
+  syncPosLines();
 }
 
 async function show(sym: string) {
@@ -98,6 +125,12 @@ async function show(sym: string) {
   redraw();
   shownFactor = m.quotes[sym]?.splitFactor ?? 1;
   drawings.load(sym, shownFactor);
+}
+
+async function loadRemoteDrawings() {
+  if (!drawings || !a.token) return;
+  const remote = await a.fetchDrawings();
+  if (remote) drawings.mergeRemote(remote);
 }
 
 // tick: 같은 시각의 봉이면 교체, 새 시각이면 이어 붙임
@@ -115,7 +148,9 @@ watch(() => m.selected, sym => void show(sym));
 watch(() => m.barsEpoch[m.selected], () => void show(m.selected)); // 주식병합 등으로 과거 봉이 바뀜
 watch(() => m.seasonEpoch, () => { drawings?.clearAll(); shown = ""; void show(m.selected); }); // 새 시즌
 watch(period, redraw);
-watch(() => ui.theme, () => chart?.setStyles(chartStyles()), { flush: "post" });
+watch(() => a.me, syncPosLines);
+watch(() => a.token, tok => { if (tok) void loadRemoteDrawings(); });
+watch(() => ui.theme, () => { chart?.setStyles(chartStyles()); syncPosLines(); }, { flush: "post" });
 
 function toggle(name: string, main: boolean) {
   if (!chart) return;
@@ -130,16 +165,17 @@ function toggle(name: string, main: boolean) {
 
 const saveOnLeave = () => { if (shown) drawings?.save(shown, shownFactor); };
 
-onMounted(() => {
+onMounted(async () => {
   register();
   chart = init(chartEl.value!, { styles: chartStyles(), timezone: "Asia/Seoul" });
   if (!chart) return;
   chart.createIndicator({ name: "MA", calcParams: [5, 20, 60] }, true, { id: "candle_pane" });
   subPanes.VOL = chart.createIndicator("VOL", false, { height: 80 }) ?? "";
-  drawings = mount(chart, barEl.value!, popEl.value!);
+  drawings = mount(chart, barEl.value!, popEl.value!, p => a.syncDrawing(p));
   new ResizeObserver(() => chart?.resize()).observe(chartEl.value!);
   addEventListener("pagehide", saveOnLeave);
-  void show(m.selected);
+  await show(m.selected);
+  if (a.token) await loadRemoteDrawings();
 });
 onBeforeUnmount(() => {
   saveOnLeave();
