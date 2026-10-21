@@ -6,6 +6,7 @@ import { useMarket } from "../stores/market";
 const m = useMarket();
 const q = computed(() => m.current);
 const diff = computed(() => (q.value ? change(q.value.price, q.value.prev) : 0));
+const symNewsCount = computed(() => (q.value ? m.news.filter(n => n.symbols.includes(q.value!.sym)).length : 0));
 </script>
 
 <template>
@@ -14,6 +15,9 @@ const diff = computed(() => (q.value ? change(q.value.price, q.value.prev) : 0))
       <h1 id="qSym">{{ q.sym }}<small>{{ q.name }} · 가상 · {{ m.sectors[q.sector] }}{{ q.stage ? ` · ${q.stage}` : "" }}</small></h1>
       <div class="big-price" :class="diff >= 0 ? 'up' : 'down'">{{ money(q.price) }}</div>
       <b :class="diff >= 0 ? 'up' : 'down'">{{ diff >= 0 ? "▲" : "▼" }} {{ money(Math.abs(q.price - q.prev)) }} ({{ pct(diff) }})</b>
+      <button id="symNewsBtn" type="button" class="icon-btn sym-news-btn" @click="m.newsDialog = { mode: 'list', sym: q.sym }">
+        📰 {{ q.sym }} 뉴스 <span class="tab-cnt">{{ symNewsCount }}</span>
+      </button>
       <div class="stats">
         <div class="kv"><span>주간 기준가</span><b>{{ money(q.prev) }}</b></div>
         <div class="kv"><span>액면가</span><b>{{ q.parValue ? `$${q.parValue.toFixed(2)}` : "-" }}</b></div>

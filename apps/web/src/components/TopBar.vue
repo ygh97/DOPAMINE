@@ -37,6 +37,7 @@ function restart() {
     <div class="logo"><b>도파민 <i>센터</i></b><small>DOPAMINE CENTER</small></div>
     <div class="clock" :title="left">S{{ m.season?.id ?? 1 }} · <b>{{ dateText(m.date) }}</b> <small id="seasonLeft" class="muted">{{ left }}</small></div>
     <span class="conn" :class="{ on: m.connected }">{{ m.connected ? "실시간" : "재연결 중" }}</span>
+    <button id="guideBtn" type="button" class="icon-btn guide-top-btn" @click="m.guideOpen = true">? 뉴비 가이드</button>
 
     <div v-if="a.me" id="topUserNick" class="top-center-nick">
       <span class="nick-label">트레이더</span>

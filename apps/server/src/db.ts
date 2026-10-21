@@ -129,6 +129,7 @@ export function openDb(file: string): Db {
     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE fills ADD COLUMN pnl REAL",
     "ALTER TABLE futures ADD COLUMN tp REAL",
+    "ALTER TABLE chat_messages ADD COLUMN to_name TEXT",
   ]) {
     try { db.exec(sql); } catch { /* 이미 있음 */ }
   }

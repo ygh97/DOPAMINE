@@ -71,9 +71,9 @@ function ensureTickCache() {
   cachedTick = market.tick;
 }
 
-function snapshot() {
+function snapshot(viewerName?: string | null) {
   ensureTickCache();
-  return { tick: market.tick, date: market.gameDate(), season: seasonInfo(), sectors: SECTORS, quotes: cachedQuotes, news: market.news.slice(0, 50), chat: chat.recent(50) };
+  return { tick: market.tick, date: market.gameDate(), season: seasonInfo(), sectors: SECTORS, quotes: cachedQuotes, news: market.news.slice(0, 50), chat: chat.recent(50, viewerName) };
 }
 
 // ---------- SSE ----------
@@ -154,7 +154,12 @@ function joinAllowed(ip: string) {
   return recent.length <= 10;
 }
 
-app.get("/api/snapshot", async () => snapshot());
+function viewerOf(req: FastifyRequest): string | null {
+  const id = auth.userOf(req.headers.authorization);
+  return id ? broker.account(id).name : null;
+}
+
+app.get("/api/snapshot", async req => snapshot(viewerOf(req)));
 
 app.get<{ Querystring: { tick?: string } }>("/api/poll", async req => {
   const since = Number(req.query.tick) || market.tick;
@@ -167,11 +172,15 @@ app.get<{ Querystring: { tick?: string } }>("/api/poll", async req => {
     season: seasonInfo(),
     bars: cachedBars,
     news: market.news.filter(n => n.tick > since).slice(0, 30).reverse(),
-    chat: chat.recent(50),
+    chat: chat.recent(50, viewerOf(req)),
     ranking: { rows: broker.ranking(20), players: broker.players },
     settled: settled.length ? settled : undefined,
     assets: lastAssetsTick > since ? { quotes: cachedQuotes, reload } : undefined,
   };
+});
+
+app.get<{ Querystring: { name?: string } }>("/api/portfolio", async req => {
+  return broker.portfolioByName(req.query.name ?? "");
 });
 
 app.get<{ Querystring: { sym?: string; limit?: string } }>("/api/bars", async (req, reply) => {
@@ -290,7 +299,7 @@ function adminOk(req: FastifyRequest, reply: FastifyReply) {
   return false;
 }
 
-app.get("/api/chat", async () => ({ messages: chat.recent(50) }));
+app.get("/api/chat", async req => ({ messages: chat.recent(50, viewerOf(req)) }));
 
 app.post<{ Body: { text: string } }>("/api/chat", {
   schema: { body: { type: "object", required: ["text"], properties: { text: { type: "string", maxLength: 300 } } } },

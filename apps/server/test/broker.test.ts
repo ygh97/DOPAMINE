@@ -330,7 +330,7 @@ test("그리기 서버 저장·조회·삭제 및 시즌 분리", () => {
 });
 
 
-test("실시간 채팅: 전송·3초 쿨타임·200자·금칙어·3회 신고 자동 숨김·운영자 차단", () => {
+test("실시간 채팅: 전송·1초 쿨타임·귓속말(/w)·200자·금칙어·3회 신고 자동 숨김·운영자 차단", () => {
   const s = setup();
   const chat = new Chat(s.db);
   const u1 = s.user("alice");
@@ -342,9 +342,17 @@ test("실시간 채팅: 전송·3초 쿨타임·200자·금칙어·3회 신고 �
   assert.equal(m1.name, "alice");
   assert.equal(chat.recent().length, 1);
 
-  assert.throws(() => chat.post(u1, "도배", 11_000), ChatError, "3초 쿨타임");
-  const m2 = chat.post(u1, "3초 지남", 13_500);
+  assert.throws(() => chat.post(u1, "도배", 10_500), ChatError, "1초 쿨타임");
+  const m2 = chat.post(u1, "1초 지남", 11_500);
   assert.equal(chat.recent().length, 2);
+
+  // 귓속말(/w)은 발신자와 수신자에게만 보인다
+  const mw = chat.post(u1, "/w bob 비밀 작전 들어가자", 13_000);
+  assert.equal(mw.to, "bob");
+  assert.equal(chat.recent(50, null).length, 2, "비로그인/타인에게는 귓속말 숨김");
+  assert.equal(chat.recent(50, "carol").length, 2, "제3자에게는 귓속말 숨김");
+  assert.equal(chat.recent(50, "alice").length, 3, "발신자에게는 귓속말 노출");
+  assert.equal(chat.recent(50, "bob").length, 3, "수신자에게는 귓속말 노출");
 
   assert.throws(() => chat.post(u2, "a".repeat(201), 15_000), ChatError, "200자 제한");
   assert.throws(() => chat.post(u2, "시발 폭락하네", 15_000), ChatError, "금칙어 차단");
@@ -360,6 +368,21 @@ test("실시간 채팅: 전송·3초 쿨타임·200자·금칙어·3회 신고 �
   assert.equal(chat.recent().length, 0, "차단 시 기존 메시지 숨김");
   assert.throws(() => chat.post(u1, "차단됨", 30_000), ChatError);
   assert.deepEqual(chat.adminList().banned, ["alice"]);
+});
+
+test("타인 포트폴리오 스캔(portfolioByName): 현물 및 선물 청산가·미실현손익 공개", async () => {
+  const s = setup();
+  const u = s.user("target_whale");
+  await order(s, u, "NVDA", "buy", 10);
+  await openFut(s, u, "BTC", "long", 5, 20);
+  const pf = s.broker.portfolioByName("target_whale");
+  assert.equal(pf.name, "target_whale");
+  assert.equal(pf.positions.length, 1);
+  assert.equal(pf.positions[0].sym, "NVDA");
+  assert.equal(pf.futures.length, 1);
+  assert.equal(pf.futures[0].sym, "BTC");
+  assert.equal(pf.futures[0].lev, 5);
+  assert.ok(pf.futures[0].liq > 0);
 });
 
 

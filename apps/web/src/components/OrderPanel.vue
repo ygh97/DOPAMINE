@@ -18,6 +18,12 @@ const lev = ref(2);
 const levels = computed(() => LEVERAGE[m.current?.market ?? "stock"]);
 const lockRemainSec = computed(() => (a.me?.resetAt != null ? Math.max(0, 600 - (m.tick - a.me.resetAt)) : 0));
 watch(levels, l => { if (!l.includes(lev.value)) lev.value = l[0]; });
+watch(() => m.orderPreset, p => {
+  if (!p) return;
+  mode.value = p.mode;
+  side.value = p.side;
+  if (p.lev && levels.value.includes(p.lev)) lev.value = p.lev;
+});
 const cash = computed(() => a.me?.cash ?? 100_000);
 const held = computed(() => (m.current ? a.holding(m.current.sym) : 0));
 const fractional = computed(() => m.current?.market === "coin");

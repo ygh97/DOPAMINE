@@ -5,7 +5,8 @@ import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 
 export interface RankRow { rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }
-export interface ChatMsg { id: number; name: string; text: string; at: number }
+export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null }
+export interface OrderPreset { mode: "spot" | "fut"; side: "buy" | "sell"; lev?: number; seq: number }
 /** 서버가 보내는 압축 봉: [timestamp, open, high, low, close, volume] */
 export type PackedBar = [number, number, number, number, number, number];
 interface TickEvent { tick: number; date: GameDate; bars: Record<string, [...PackedBar, number]> }
@@ -45,7 +46,10 @@ export const useMarket = defineStore("market", () => {
 
   const tab = ref<MarketKind>("stock");
   const selected = ref("NVDA");
-  const newsDialog = ref<{ mode: "detail"; id: string } | { mode: "list" } | null>(null);
+  const newsDialog = ref<{ mode: "detail"; id: string } | { mode: "list"; sym?: string } | null>(null);
+  const guideOpen = ref(false);
+  const spyTarget = ref<string | null>(null);
+  const orderPreset = ref<OrderPreset | null>(null);
   const socialTab = ref<"chat" | "rank" | "hall">("rank");
 
   const list = computed(() => Object.values(quotes.value).filter(q => q.market === tab.value));
@@ -80,7 +84,8 @@ export const useMarket = defineStore("market", () => {
   }
 
   async function loadSnapshot() {
-    const s = await (await fetch("/api/snapshot")).json();
+    const tok = (() => { try { return localStorage.getItem("dc-token") ?? ""; } catch { return ""; } })();
+    const s = await (await fetch("/api/snapshot", tok ? { headers: { Authorization: `Bearer ${tok}` } } : undefined)).json();
     sectors.value = s.sectors;
     if (season.value && season.value.id !== s.season.id) seasonEpoch.value++; // 재연결 사이에 시즌이 바뀜
     season.value = s.season;
@@ -102,7 +107,8 @@ export const useMarket = defineStore("market", () => {
     void loadSnapshot().then(() => { connected.value = true; }).catch(() => { connected.value = false; });
     pollTimer = window.setInterval(async () => {
       try {
-        const r = await fetch(`/api/poll?tick=${tick.value}`);
+        const tok = (() => { try { return localStorage.getItem("dc-token") ?? ""; } catch { return ""; } })();
+        const r = await fetch(`/api/poll?tick=${tick.value}`, tok ? { headers: { Authorization: `Bearer ${tok}` } } : undefined);
         if (!r.ok) { connected.value = false; return; }
         const d = await r.json();
         connected.value = true;
@@ -198,6 +204,11 @@ export const useMarket = defineStore("market", () => {
     selected.value = sym;
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, banner, season, seasonEpoch, tab, selected, newsDialog, socialTab, list, current,
-    loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select };
+  function snipe(sym: string, mode: "spot" | "fut", side: "buy" | "sell", lev?: number) {
+    select(sym);
+    orderPreset.value = { mode, side, lev, seq: Date.now() };
+  }
+
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, banner, season, seasonEpoch, tab, selected, newsDialog, guideOpen, spyTarget, orderPreset, socialTab, list, current,
+    loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

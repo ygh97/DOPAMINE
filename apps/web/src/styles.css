@@ -501,3 +501,145 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
 .fill-mkt-badge.mkt-spot { background: var(--accent-soft); color: var(--accent); }
 .fill-mkt-badge.mkt-fut { background: var(--warn-soft); color: var(--warn); }
 .fill-mkt-badge.mkt-etc { background: var(--panel-2); color: var(--muted); }
+
+/* 뉴비 가이드 버튼 & 종목별 뉴스 버튼 */
+.guide-top-btn {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700;
+}
+.sym-news-btn {
+  margin-left: auto; border: 1px solid var(--accent); background: var(--accent-soft);
+  color: var(--accent); border-radius: 6px; padding: 5px 10px; font-size: 12.5px; font-weight: 700;
+}
+.sym-news-btn:hover { filter: brightness(0.95); }
+.news-filter-bar { display: flex; gap: 6px; margin-bottom: 10px; }
+.news-filter-bar button {
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+  border-radius: 6px; padding: 5px 12px; font-size: 12.5px; font-weight: 700;
+}
+.news-filter-bar button[aria-pressed="true"] {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--accent);
+}
+
+/* 랭킹 포지션 스캔 칩 */
+.rank-hint {
+  margin: 0 0 6px; font-size: 11.5px; color: var(--muted);
+  padding: 5px 8px; border-radius: 6px; background: var(--panel-2); border: 1px dashed var(--line);
+}
+.rank-row { cursor: pointer; transition: background 0.12s; }
+.rank-row:hover { background: var(--accent-soft); }
+.spy-chip {
+  display: inline-block; margin-left: 5px; padding: 1px 5px; border-radius: 4px;
+  font-size: 10.5px; font-weight: 700; background: var(--panel-2); color: var(--accent); border: 1px solid var(--line);
+}
+
+/* 자연스러운 카드/말풍선형 채팅창 UI */
+.chat-log {
+  height: 250px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px; display: flex; flex-direction: column; gap: 7px; background: var(--bg);
+}
+.chat-card {
+  display: flex; flex-direction: column; gap: 4px; padding: 7px 10px;
+  border-radius: 8px; background: var(--panel); border: 1px solid var(--line);
+  font-size: 12.5px; line-height: 1.45; box-shadow: 0 1px 2px rgba(0,0,0,.03);
+}
+.chat-card.is-mine {
+  background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+.chat-card.is-whisper {
+  background: color-mix(in srgb, #9333ea 11%, var(--panel));
+  border-color: #9333ea;
+}
+.chat-card.is-broadcast {
+  background: var(--warn-soft); border-color: var(--warn);
+}
+.chat-card-head {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11.5px;
+}
+.chat-user-btn {
+  border: 0; background: transparent; padding: 0; font: inherit; font-weight: 800;
+  color: var(--text); cursor: pointer;
+}
+.chat-user-btn:hover { color: var(--accent); text-decoration: underline; }
+.whisper-badge {
+  padding: 1px 6px; border-radius: 4px; background: #9333ea; color: #fff;
+  font-size: 10.5px; font-weight: 700;
+}
+.whisper-quick-btn {
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+  border-radius: 4px; padding: 1px 5px; font-size: 10.5px; cursor: pointer;
+}
+.whisper-quick-btn:hover { color: var(--accent); border-color: var(--accent); }
+.chat-time { margin-left: auto; font-size: 11px; }
+.chat-card-body {
+  color: var(--text); word-break: break-word; font-size: 13px;
+}
+.share-badge.teabag { background: #dc2626; color: #fff; }
+.share-badge.rip { background: #4b5563; color: #fff; }
+
+.teabag-bar, .banner-actions {
+  display: inline-flex; gap: 6px; margin-top: 3px; flex-wrap: wrap;
+}
+.teabag-btn {
+  border: 1px solid #dc2626; background: #dc2626; color: #fff;
+  border-radius: 5px; padding: 3px 8px; font-size: 11.5px; font-weight: 800; cursor: pointer;
+}
+.teabag-btn.rip {
+  border-color: #4b5563; background: #4b5563; color: #fff;
+}
+.teabag-btn:hover { filter: brightness(1.08); }
+
+.whisper-target-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 9px; margin-bottom: 5px; border-radius: 6px;
+  background: color-mix(in srgb, #9333ea 14%, var(--panel));
+  border: 1px solid #9333ea; font-size: 12px; color: var(--text);
+}
+.whisper-target-bar button {
+  border: 0; background: transparent; color: var(--muted); font-size: 11.5px; font-weight: 700;
+}
+
+/* 포트폴리오 스캔 & 저격 모달 + 뉴비 가이드 모달 */
+dialog#spyDlg, dialog#guideDlg {
+  width: min(760px, 95vw); max-height: 86vh; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
+  background: var(--panel); color: var(--text); box-shadow: 0 18px 48px rgba(0,0,0,.35);
+}
+dialog#spyDlg::backdrop, dialog#guideDlg::backdrop { background: rgba(0,0,0,.55); }
+.dlg-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line);
+}
+.dlg-head h2 { margin: 0; font-size: 17px; }
+.dlg-head-actions { display: flex; gap: 6px; align-items: center; }
+.dlg-head .dlg-close { float: none; }
+.spy-name { color: var(--accent); margin-left: 6px; }
+.spy-summary {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px;
+}
+.spy-stat {
+  padding: 9px 11px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 3px;
+}
+.spy-stat span { font-size: 11.5px; color: var(--muted); }
+.spy-stat b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.spy-body h3 {
+  margin: 14px 0 6px; font-size: 13.5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.spy-sub { font-size: 11.5px; font-weight: 500; color: var(--warn); }
+.liq-price { color: #dc2626; font-weight: 800; }
+.snipe-btn {
+  border: 0; border-radius: 5px; padding: 4px 9px; font-size: 11.5px; font-weight: 800; color: #fff; cursor: pointer;
+}
+.snipe-btn.long { background: var(--up); }
+.snipe-btn.short { background: var(--down); }
+.snipe-btn:hover { filter: brightness(1.08); }
+
+.guide-grid { display: grid; gap: 10px; }
+.guide-card {
+  padding: 12px 14px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line);
+}
+.guide-card h3 { margin: 0 0 5px; font-size: 14px; color: var(--accent); }
+.guide-card p { margin: 0; font-size: 13px; line-height: 1.55; }
+.guide-card code {
+  padding: 1px 5px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); font-weight: 700;
+}

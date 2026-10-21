@@ -7,6 +7,7 @@ import { useMarket } from "../stores/market";
 const m = useMarket();
 const dlg = ref<HTMLDialogElement | null>(null);
 const page = ref<NewsItem[]>([]);
+const filterSym = ref<string>("");
 
 const detail = computed(() => {
   const d = m.newsDialog;
@@ -23,10 +24,20 @@ const steps = computed(() => {
     .sort((a, b) => a.event!.index - b.event!.index);
 });
 
+const filteredList = computed(() => {
+  const seen = new Set<string>();
+  const all = [...m.news, ...page.value].filter(n => !seen.has(n.id) && seen.add(n.id));
+  if (!filterSym.value) return all.slice(0, 100);
+  return all.filter(n => n.symbols.includes(filterSym.value)).slice(0, 100);
+});
+
 watch(() => m.newsDialog, async d => {
   if (!d) { if (dlg.value?.open) dlg.value.close(); return; }
   if (!dlg.value?.open) dlg.value?.showModal();
-  if (d.mode === "list") page.value = await m.fetchNewsPage();
+  if (d.mode === "list") {
+    filterSym.value = d.sym ?? "";
+    page.value = await m.fetchNewsPage();
+  }
 });
 
 function goChart(sym: string) {
@@ -83,9 +94,16 @@ function onBackdrop(e: MouseEvent) {
       <p class="disclaimer">게임용 허구 뉴스입니다. 같은 뉴스라도 가격 반응은 매번 다를 수 있습니다.</p>
     </template>
     <template v-else-if="m.newsDialog?.mode === 'list'">
-      <h2>지난 뉴스</h2>
-      <ul class="news-list">
-        <li v-for="n in (page.length ? page : m.news).slice(0, 100)" :key="n.id">
+      <h2>{{ filterSym ? `$${filterSym} 관련 뉴스` : "전체 뉴스" }}</h2>
+      <div class="news-filter-bar">
+        <button type="button" class="mini-btn" :aria-pressed="!filterSym" @click="filterSym = ''">전체 보기</button>
+        <button type="button" class="mini-btn" :aria-pressed="filterSym === m.selected" @click="filterSym = m.selected">
+          현재 종목 (${{ m.selected }}) 뉴스만
+        </button>
+        <span v-if="filterSym && filterSym !== m.selected" class="badge">${{ filterSym }} 필터 중</span>
+      </div>
+      <ul v-if="filteredList.length" class="news-list">
+        <li v-for="n in filteredList" :key="n.id">
           <button @click="m.newsDialog = { mode: 'detail', id: n.id }">
             <span :class="badgeClass(n)">{{ badgeText(n) }}</span>
             <span class="t">{{ n.headline }}</span>
@@ -93,6 +111,7 @@ function onBackdrop(e: MouseEvent) {
           </button>
         </li>
       </ul>
+      <p v-else class="empty">아직 해당 종목의 뉴스가 없습니다.</p>
     </template>
   </dialog>
 </template>

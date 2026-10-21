@@ -141,6 +141,36 @@ export class Broker {
     };
   }
 
+  /** 다른 트레이더의 포트폴리오(현물·선물 포지션·청산가·미실현 손익) 공개 조회 (청산 사냥용) */
+  portfolioByName(rawName: string) {
+    const target = String(rawName ?? "").trim().toLowerCase();
+    const acc = [...this.accounts.values()].find(a => a.name.toLowerCase() === target);
+    if (!acc) throw new OrderError("트레이더를 찾을 수 없습니다.");
+    this.ensureRankCache();
+    const equity = this.equity(acc);
+    const positions = [...acc.positions].map(([sym, p]) => {
+      const price = this.price(sym);
+      const value = p.qty * price, cost = p.qty * p.avg;
+      return { sym, qty: p.qty, avg: p.avg, price, value, pnl: value - cost, pnlPct: cost ? (value / cost - 1) * 100 : 0 };
+    });
+    const futures = [...acc.futures.values()].map(f => {
+      const price = this.price(f.sym), liq = liqPrice(f);
+      const pnl = pnlOf(f, price);
+      const value = Math.max(0, f.margin + pnl);
+      return { id: f.id, sym: f.sym, side: f.side, lev: f.lev, qty: f.qty, entry: f.entry, price, margin: f.margin, liq, value, pnl, pnlPct: f.margin ? (pnl / f.margin) * 100 : 0 };
+    });
+    return {
+      name: acc.name,
+      rank: this.rankCache?.rankByUser.get(acc.name) ?? null,
+      cash: acc.cash,
+      equity,
+      returnPct: (equity / START_CASH - 1) * 100,
+      clearedTick: acc.clearedTick,
+      positions,
+      futures,
+    };
+  }
+
   reset(userId: number) {
     const acc = this.account(userId);
     tx(this.db, () => {

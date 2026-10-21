@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { clock, money, pct } from "../format";
 import { useAccount } from "../stores/account";
-import { useMarket } from "../stores/market";
+import { useMarket, type ChatMsg } from "../stores/market";
 
 const m = useMarket();
 const a = useAccount();
@@ -11,20 +11,35 @@ const hall = ref<HallRow[]>([]);
 const loadHall = async () => { hall.value = (await (await fetch("/api/hall")).json()).rows; };
 
 const text = ref("");
+const whisperTo = ref<string | null>(null);
+const chatInputEl = ref<HTMLInputElement | null>(null);
 const logEl = ref<HTMLElement | null>(null);
 const scrollDown = () => nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight; });
+
+const visibleChat = computed(() => {
+  const myName = a.me?.name?.toLowerCase() ?? "";
+  return m.chat.filter(c => !c.to || (myName && (c.name.toLowerCase() === myName || c.to.toLowerCase() === myName)));
+});
 
 watch(() => m.socialTab, t => {
   if (t === "hall") void loadHall();
   if (t === "chat") scrollDown();
 });
 watch(() => m.seasonEpoch, () => { if (m.socialTab === "hall") void loadHall(); });
-watch(() => m.chat.length, () => { if (m.socialTab === "chat") scrollDown(); });
+watch(() => visibleChat.value.length, () => { if (m.socialTab === "chat") scrollDown(); });
+
+function startWhisper(targetName: string) {
+  if (!a.me || targetName === "⚡전광판" || targetName === a.me.name) return;
+  whisperTo.value = targetName;
+  m.socialTab = "chat";
+  void nextTick(() => chatInputEl.value?.focus());
+}
 
 async function submitChat() {
   const v = text.value.trim();
   if (!v) return;
-  if (await a.sendChat(v)) text.value = "";
+  const payload = whisperTo.value && !v.startsWith("/") ? `/w ${whisperTo.value} ${v}` : v;
+  if (await a.sendChat(payload)) text.value = "";
 }
 
 async function shareSummary() {
@@ -40,13 +55,32 @@ async function shareSummary() {
   await a.sendChat(`[공유] 총자산 ${money(a.equity)} (${pct(ret)})${posPart}`);
 }
 
-type Token = { kind: "text"; val: string } | { kind: "sym"; sym: string } | { kind: "badge"; val: string };
+function parseLiqBroadcast(c: ChatMsg): { victim: string; sym: string } | null {
+  if (c.name !== "⚡전광판" || !c.text.startsWith("[강제청산]")) return null;
+  const match = /💥\s+(\S+)님\s+\$(\S+)/.exec(c.text);
+  return match ? { victim: match[1], sym: match[2] } : null;
+}
+
+async function teabag(c: ChatMsg, mode: "mock" | "rip") {
+  if (!a.me) return;
+  const info = parseLiqBroadcast(c);
+  if (!info) return;
+  const msg = mode === "mock"
+    ? `[티배깅] 🤣 ${info.victim}님 $${info.sym} 청산 달달하네요~ 반대 포지션으로 감사히 먹습니다 ㅋㅋ`
+    : `[티배깅] 🕯️ ${info.victim}님의 $${info.sym} 장렬한 전사를 애도합니다... 성불하세요 (X키를 눌러 조의를 표하십시오)`;
+  await a.sendChat(msg);
+}
+
+type Token = { kind: "text"; val: string } | { kind: "sym"; sym: string } | { kind: "badge"; val: string; cls?: string };
 function tokenize(raw: string): Token[] {
   const out: Token[] = [];
   let s = raw;
   if (s.startsWith("[공유] ")) {
     out.push({ kind: "badge", val: "수익인증" });
     s = s.slice(5);
+  } else if (s.startsWith("[티배깅] ")) {
+    out.push({ kind: "badge", val: "티배깅", cls: "teabag" });
+    s = s.slice(6);
   } else if (s.startsWith("[강제청산] ")) {
     out.push({ kind: "badge", val: "강제청산" });
     s = s.slice(7);
@@ -54,7 +88,7 @@ function tokenize(raw: string): Token[] {
     out.push({ kind: "badge", val: "100배졸업" });
     s = s.slice(9);
   }
-  const re = /\$([A-Za-z]{2,10})/g;
+  const re = /\$([A-Za-z]{1,10})/g;
   let last = 0, match: RegExpExecArray | null;
   while ((match = re.exec(s)) !== null) {
     const sym = match[1].toUpperCase();
@@ -113,11 +147,16 @@ async function toggleBan(name: string, banned: boolean) {
       <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>
     </div>
     <div v-if="m.socialTab === 'rank'" class="table-scroll">
+      <div class="rank-hint muted">💡 유저를 클릭하면 보유 종목·레버리지·<b>청산가</b>를 훔쳐보고 저격할 수 있습니다.</div>
       <table v-if="m.ranking.length" id="ranking" class="grid">
         <tbody>
-          <tr v-for="r in m.ranking" :key="r.name" class="rank-row" :class="{ mine: r.name === a.me?.name }">
+          <tr v-for="r in m.ranking" :key="r.name" class="rank-row clickable" :class="{ mine: r.name === a.me?.name }" @click="m.spyTarget = r.name">
             <td>{{ r.rank }}</td>
-            <td><b>{{ r.name }}</b><span v-if="r.clearedTick" class="stage">100배</span></td>
+            <td>
+              <b>{{ r.name }}</b>
+              <span v-if="r.clearedTick" class="stage">100배</span>
+              <span class="spy-chip">🔍포지션</span>
+            </td>
             <td>{{ money(r.equity) }}</td>
             <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
           </tr>
@@ -160,26 +199,73 @@ async function toggleBan(name: string, banned: boolean) {
           </div>
         </div>
       </div>
+
       <div id="chatLog" ref="logEl" class="chat-log">
-        <p v-if="!m.chat.length" class="msg sys">대화가 없습니다. $NVDA처럼 종목을 태그하거나 수익률을 공유해 보세요.</p>
-        <div v-for="c in m.chat" :key="c.id" class="msg" :class="{ broadcast: c.name === '⚡전광판' }" :data-msg-id="c.id">
-          <span class="msg-body">
-            <small class="muted msg-time">{{ clock(c.at) }}</small>
-            <b :class="{ 'mine-name': c.name === a.me?.name }">{{ c.name }}</b>
-            <span class="msg-text">
-              <template v-for="(tk, idx) in tokenize(c.text)" :key="idx">
-                <span v-if="tk.kind === 'badge'" class="share-badge">{{ tk.val }}</span>
-                <button v-else-if="tk.kind === 'sym'" type="button" class="sym-tag" :data-sym="tk.sym" @click="m.select(tk.sym)">${{ tk.sym }}</button>
-                <template v-else>{{ tk.val }}</template>
-              </template>
-            </span>
-          </span>
-          <button v-if="a.me && c.name !== a.me.name && c.name !== '⚡전광판'" class="report-btn" data-act="report" title="신고" @click="a.reportChat(c.id)">신고</button>
+        <p v-if="!visibleChat.length" class="msg sys">대화가 없습니다. 닉네임을 누르면 귓속말/포지션 조회를 할 수 있습니다.</p>
+        <div
+          v-for="c in visibleChat"
+          :key="c.id"
+          class="chat-card"
+          :class="{
+            'is-mine': c.name === a.me?.name,
+            'is-broadcast': c.name === '⚡전광판',
+            'is-whisper': !!c.to,
+          }"
+          :data-msg-id="c.id"
+        >
+          <div class="chat-card-head">
+            <span v-if="c.to" class="whisper-badge">🔒 귓속말 {{ c.name }} → {{ c.to }}</span>
+            <button
+              v-else
+              type="button"
+              class="chat-user-btn"
+              :class="{ 'mine-name': c.name === a.me?.name }"
+              :title="c.name === '⚡전광판' ? '' : '클릭: 포트폴리오 훔쳐보기 / 우클릭: 귓속말'"
+              @click="c.name !== '⚡전광판' && (m.spyTarget = c.name)"
+              @contextmenu.prevent="startWhisper(c.name)"
+            >
+              {{ c.name }}
+            </button>
+            <button
+              v-if="a.me && c.name !== '⚡전광판' && c.name !== a.me.name"
+              type="button"
+              class="whisper-quick-btn"
+              title="이 유저에게 귓속말 보내기"
+              @click="startWhisper(c.name)"
+            >
+              귓속말
+            </button>
+            <small class="muted chat-time">{{ clock(c.at) }}</small>
+            <button v-if="a.me && c.name !== a.me.name && c.name !== '⚡전광판'" class="report-btn" data-act="report" title="신고" @click="a.reportChat(c.id)">신고</button>
+          </div>
+          <div class="chat-card-body">
+            <template v-for="(tk, idx) in tokenize(c.text)" :key="idx">
+              <span v-if="tk.kind === 'badge'" class="share-badge" :class="tk.cls">{{ tk.val }}</span>
+              <button v-else-if="tk.kind === 'sym'" type="button" class="sym-tag" :data-sym="tk.sym" @click="m.select(tk.sym)">${{ tk.sym }}</button>
+              <template v-else>{{ tk.val }}</template>
+            </template>
+          </div>
+          <div v-if="a.me && parseLiqBroadcast(c)" class="teabag-bar">
+            <button type="button" class="mini-btn teabag-btn" data-act="teabag-mock" @click="teabag(c, 'mock')">🤣 티배깅 조롱</button>
+            <button type="button" class="mini-btn teabag-btn" data-act="teabag-rip" @click="teabag(c, 'rip')">🕯️ 묵념 조의</button>
+          </div>
         </div>
+      </div>
+
+      <div v-if="whisperTo" class="whisper-target-bar">
+        <span>🔒 <b>{{ whisperTo }}</b>님에게 비밀 귓속말 작성 중</span>
+        <button type="button" class="mini-btn" @click="whisperTo = null">전체 채팅으로 전환 ✕</button>
       </div>
       <form id="chatForm" class="chat-input" @submit.prevent="submitChat">
         <button id="sharePosBtn" type="button" class="share-btn" :disabled="!a.me" title="내 현재 수익률·포지션 채팅 공유" @click="shareSummary">수익인증</button>
-        <input v-model="text" :disabled="!a.me" maxlength="200" :placeholder="a.me ? '메시지 입력 ($NVDA 태그 가능, 3초 쿨타임)' : '참가 후 채팅할 수 있습니다'" aria-label="채팅 메시지">
+        <input
+          ref="chatInputEl"
+          v-model="text"
+          :disabled="!a.me"
+          maxlength="200"
+          :placeholder="!a.me ? '참가 후 채팅할 수 있습니다' : whisperTo ? `${whisperTo}님에게 귓속말 입력...` : '메시지 입력 ($NVDA 태그, /w 닉네임 귓속말, 1초 쿨타임)'"
+          aria-label="채팅 메시지"
+        >
         <button type="submit" :disabled="!a.me || !text.trim()">전송</button>
       </form>
     </div>

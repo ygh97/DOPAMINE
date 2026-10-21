@@ -238,8 +238,11 @@ r = 시장 요인 × 시장 베타 + 업종 요인 × 업종 베타      같은 
 | `POST /api/futures/open` (Bearer) | `{sym, side: long\|short, lev, pct}` → 다음 tick에 체결 → `{fill, me}` |
 | `POST /api/futures/close` (Bearer) | `{posId, pct}` → 다음 tick에 체결 → `{fill, me}` |
 | `POST /api/stop` (Bearer) | `{posId, price}` (null이면 해제) → `{me}` |
+| `POST /api/tp` (Bearer) | `{posId, price}` (null이면 해제) → `{me}` |
+| `POST /api/close-all` (Bearer) | `{scope: all\|spot\|fut}` 일괄 시장가 정리 → `{fills, me}` |
+| `GET /api/portfolio?name=` | 특정 트레이더의 실시간 현금·총자산·현물 보유·선물 포지션(진입가·레버리지·강제청산가·미실현손익) 스캔 |
 | `GET/POST /api/drawings` (Bearer) | 종목별 차트 그리기 조회·저장 (`{sym, factor, items}`) |
-| `GET/POST /api/chat` | 최근 메시지 조회 / 채팅 전송 (`{text}`, 3초 쿨타임·200자·금칙어) |
+| `GET/POST /api/chat` | 최근 메시지 조회 / 채팅 전송 (`{text}`, 1초 쿨타임·200자·금칙어, `/w 닉네임 내용` 귓속말 지원) |
 | `POST /api/chat/report` (Bearer) | `{id}` 메시지 신고 (3인 누적 시 자동 숨김) |
 | `/api/admin/chat`, `ban`, `hide`, `backup` | `x-admin-key` 헤더로 채팅 관리·사용자 차단·메시지 숨김·SQLite 온라인 백업 |
 
@@ -266,7 +269,7 @@ r = 시장 요인 × 시장 베타 + 업종 요인 × 업종 베타      같은 
 
 ## 10. 운영
 
-- 채팅: 3초에 1건, 200자, 금칙어 필터, 신고 누적 시 숨김, 관리자 밴.
+- 채팅: 1초에 1건, 200자, 금칙어 필터, `/w` 귓속말(발신자·수신자 전용 노출), 강제청산 전광판 원클릭 티배깅/묵념, 신고 누적 시 숨김, 관리자 밴.
 - 다계정: IP당 가입 제한, 필요하면 Turnstile.
 - 재시작 복구: 계좌·보유·체결은 즉시 DB. 엔진은 600 tick(10분)마다, 그리고 정상 종료 때 전체 상태를 스냅샷(`snapshots` 표, 난수 상태 포함 JSON)으로 저장한다. 다시 켜면 최신 스냅샷에서 시작해 그 뒤의 주문 흐름(`flows` 표)을 넣으며 지금 시각까지 재생한다 (최대 약 10분 분량 + 꺼져 있던 시간). tick은 벽시계 기준이라 꺼져 있던 동안의 시세도 채운다.
   - 주의: 스냅샷 뒤 구간은 재생이라 시즌 중 엔진 코드를 바꾸면 그 구간 경로가 조금 달라질 수 있다. 엔진 변경은 가능하면 시즌 사이에 배포한다.
