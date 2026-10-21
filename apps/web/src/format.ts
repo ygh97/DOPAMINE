@@ -9,9 +9,5 @@ export const change = (price: number, prev: number) => (price / prev - 1) * 100;
 export const dateText = (d: GameDate) => (d.year ? `${d.year}년차 ${d.month}월 ${d.day}일` : "시즌 준비 중");
 export const clock = (ts: number) => new Date(ts).toTimeString().slice(0, 5);
 
-export const badgeText = (n: NewsItem) =>
-  n.event ? `${n.kind} ${n.event.index + 1}/3 · ${n.event.label}` : n.kind === "세력" ? "🐋 세력포착" : n.kind;
-export const badgeClass = (n: NewsItem) => [
-  "badge",
-  n.kind === "세력" ? "whale-badge" : n.event ? "warn" : n.kind === "잡담" ? "muted-badge" : "",
-];
+export const badgeText = (n: NewsItem) => (n.event ? `${n.kind} ${n.event.index + 1}/3 · ${n.event.label}` : n.kind);
+export const badgeClass = (n: NewsItem) => ["badge", n.event ? "warn" : n.kind === "잡담" ? "muted-badge" : ""];

@@ -11,7 +11,7 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   ticksPerBar: 60,        // 1분봉 = 60틱(1초 tick)
   ticksPerDay: 80,        // 게임 하루
   prevResetDays: 7,       // 등락률 기준가(prev) 초기화 주기 = 게임 1주일(7일 = 560틱)
-  whaleChance: 0.08,      // 뉴스 생성 시 세력 작전(개미털기·설거지·숏스퀴즈) 발동 비율
+  whaleChance: 0.08,      // 숨은 세력 움직임(개미털기·설거지·숏스퀴즈) 발동 비율 (뉴스 없이 차트 수급으로만 작동)
   barMs: 60_000,
   warmupBars: 720,        // 시작 전 과거 차트
   maxBars: 1500,
@@ -223,44 +223,35 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   const fillOf = (a: AssetState) => (s: string) => s.replaceAll("{name}", a.name).replaceAll("{sym}", a.sym)
     .replaceAll("{product}", a.product || "주력 제품").replaceAll("{tech}", a.tech || "핵심 기술");
 
-  // ---------- 세력(Whale / Market Maker) 작전 로직 ----------
-  // 1) 개미털기(Shakeout / Bear Trap): 순간적으로 지지선을 깨며 급락시켜 롱 스탑로스를 털어낸 뒤 강하게 V자 말아올림
-  // 2) 설거지(Pump & Dump / Bull Trap): 강하게 슈팅시켜 FOMO 추격 매수를 부른 뒤 위에서 대량 투하해 폭락
-  // 3) 숏스퀴즈(Short Squeeze): 계단식 매집 후 숏 청산 물량을 연쇄 폭발시키며 장대양봉 분출
+  // ---------- 숨은 세력(Whale / Market Maker) 차트 패턴 ----------
+  // 뉴스나 알림을 전혀 띄우지 않고 차트 수급으로만 개미털기(Shakeout)·설거지(Pump & Dump)·숏스퀴즈(Short Squeeze)를 발생시킨다.
   function whaleOperation() {
     const candidates = live().filter(x => x.watchUntil == null && !venturesBusy.has(x.sym));
-    if (!candidates.length) return companyNews();
+    if (!candidates.length) return;
     const a = pick(candidates);
     const scale = a.market === "venture" ? 2.2 : a.market === "coin" ? 1.6 : 1.0;
     const modeRoll = rand();
-    const fill = fillOf(a);
     a.volBoost = Math.max(a.volBoost, 14);
 
     if (modeRoll < 0.36) {
-      // 개미털기 (Shakeout): 초반 5~9틱 급락(-2.5%~-6% * scale) → 직후 25~45틱 동안 +5%~+11% * scale 강력 매집 반등
+      // 개미털기 (Shakeout): 초반 급락 후 V자 매집 반등
       const dip = -uni(0.025, 0.055) * scale;
       const rip = uni(0.05, 0.11) * scale;
       impulse(a.pending, dip, Math.round(uni(4, 8)), 0);
       impulse(a.pending, rip, Math.round(uni(20, 40)), Math.round(uni(6, 10)));
-      const tpl = pick(NEWS.whale.shakeout);
-      publish({ kind: "세력", headline: `${a.name}(${a.sym}) · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym] });
     } else if (modeRoll < 0.70) {
-      // 설거지 (Pump & Dump): 초반 8~14틱 급등(+3%~+7% * scale) → 고점에서 25~50틱 동안 -5.5%~-12% * scale 대량 폭락 투하
+      // 설거지 (Pump & Dump): 단기 슈팅 후 고점 대량 투하
       const pump = uni(0.03, 0.07) * scale;
       const dump = -uni(0.055, 0.12) * scale;
       impulse(a.pending, pump, Math.round(uni(7, 13)), 0);
       impulse(a.pending, dump, Math.round(uni(22, 45)), Math.round(uni(10, 16)));
-      const tpl = pick(NEWS.whale.pump);
-      publish({ kind: "세력", headline: `${a.name}(${a.sym}) · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym] });
     } else {
-      // 숏스퀴즈 (Short Squeeze): 1차 급등 + 2차 연쇄 청산 폭발
+      // 숏스퀴즈 (Short Squeeze): 1차 매집 + 2차 연쇄 분출
       const wave1 = uni(0.03, 0.06) * scale;
       const wave2 = uni(0.04, 0.09) * scale;
       impulse(a.pending, wave1, Math.round(uni(5, 10)), 0);
       impulse(a.pending, wave2, Math.round(uni(15, 30)), Math.round(uni(6, 12)));
       impulse(a.pending, -wave2 * 0.35, Math.round(uni(30, 50)), Math.round(uni(35, 55)));
-      const tpl = pick(NEWS.whale.squeeze);
-      publish({ kind: "세력", headline: `${a.name}(${a.sym}) · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym] });
     }
   }
 
@@ -331,14 +322,14 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     publish({ kind: "잡담", headline: tpl.h, body: tpl.b, symbols: [] });
   }
   function makeNews() {
+    if (rand() < cfg.whaleChance) whaleOperation();
     const r = rand();
     // 과거 차트 구간 앞 80%에서는 신흥주 검증을 생략해 시작가 맞추기(rebase) 때 비율이 극단적이지 않게
     const ventureOk = !warm || tick > cfg.warmupBars * cfg.ticksPerBar * 0.8;
-    if (r < 0.14) marketNews();
-    else if (r < 0.36) sectorNews();
-    else if (r < 0.82 - cfg.whaleChance) companyNews();
-    else if (r < 0.82) whaleOperation();
-    else if (r < 0.90 && ventureOk) ventureEvent();
+    if (r < 0.15) marketNews();
+    else if (r < 0.4) sectorNews();
+    else if (r < 0.87) companyNews();
+    else if (r < 0.9 && ventureOk) ventureEvent();
     else noiseNews();
   }
 
@@ -574,7 +565,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     nextGradAt = d.nextGradAt ?? Infinity; startTime = d.startTime; news = d.news; scheduled = d.scheduled;
     marketPending = d.marketPending; sectorPending = d.sectorPending; venturesBusy = new Set(d.venturesBusy);
     sparePool = d.sparePool; state = d.state;
-    // 카탈로그에 새로 추가된 fairPER·cap(예: 코인 PER·시총)이 기존 스냅샷에 없으면 현재 적정가(anchor) 기준으로 채워 넣는다
+    // 이전 스냅샷에 남아 있던 '세력' 뉴스 정리 및 카탈로그 fairPER·cap 보강
+    news = news.filter(n => n.kind !== "세력");
     for (const def of assets) {
       const a = state[def.sym];
       if (!a) continue;

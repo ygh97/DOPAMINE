@@ -492,7 +492,7 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
   width: 100%; border: 1px solid var(--line); border-radius: 5px;
   padding: 5px 8px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px;
 }
-.watch-sorts { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+.watch-sorts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .watch-sorts button {
   border: 1px solid var(--line); background: var(--panel); border-radius: 4px;
   padding: 3px 2px; font-size: 11px; color: var(--muted); white-space: nowrap;
@@ -500,7 +500,6 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
 .watch-sorts button[aria-pressed="true"] {
   border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700;
 }
-.stage.whale-tag { background: var(--up); color: #fff; font-weight: 700; }
 
 .fill-mkt-badge {
   display: inline-block; padding: 1px 6px; border-radius: 4px;

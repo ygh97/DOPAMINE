@@ -10,28 +10,15 @@ const TABS: { id: MarketKind; label: string }[] = [
   { id: "coin", label: "코인" },
   { id: "venture", label: "신흥주" },
 ];
-type SortKey = "default" | "up" | "down" | "whale" | "cap";
+type SortKey = "default" | "up" | "down" | "cap";
 const SORTS: { id: SortKey; label: string }[] = [
   { id: "default", label: "기본" },
   { id: "up", label: "급등순" },
   { id: "down", label: "급락순" },
-  { id: "whale", label: "세력포착" },
   { id: "cap", label: "시총순" },
 ];
 const sortBy = ref<SortKey>("default");
 const query = ref("");
-
-// 최근 뉴스(최대 80건) 중 종목별 마지막 '세력' 작전 뉴스 시점(tick)
-const whaleSyms = computed(() => {
-  const map: Record<string, number> = {};
-  for (const n of m.news.slice(0, 80)) {
-    if (n.kind !== "세력") continue;
-    for (const s of n.symbols) {
-      if (!map[s] || n.tick > map[s]) map[s] = n.tick;
-    }
-  }
-  return map;
-});
 
 const rows = computed(() => {
   const kw = query.value.trim().toLowerCase();
@@ -40,9 +27,6 @@ const rows = computed(() => {
     arr = [...arr].sort((a, b) => change(b.price, b.prev) - change(a.price, a.prev));
   } else if (sortBy.value === "down") {
     arr = [...arr].sort((a, b) => change(a.price, a.prev) - change(b.price, b.prev));
-  } else if (sortBy.value === "whale") {
-    const w = whaleSyms.value;
-    arr = [...arr].sort((a, b) => (w[b.sym] ?? 0) - (w[a.sym] ?? 0) || Math.abs(change(b.price, b.prev)) - Math.abs(change(a.price, a.prev)));
   } else if (sortBy.value === "cap") {
     arr = [...arr].sort((a, b) => (b.cap ?? 0) - (a.cap ?? 0));
   }
@@ -86,7 +70,6 @@ const flash = (q: Quote) => {
             <td class="sym">
               <b>
                 {{ q.sym }}
-                <span v-if="whaleSyms[q.sym]" class="stage whale-tag" title="최근 세력 포착 종목">🐋세력</span>
                 <span v-if="q.stage" class="stage" :class="{ danger: q.stage === '관리종목' }">{{ q.stage }}</span>
               </b>
               <small>{{ q.name }} · {{ m.sectors[q.sector] }}</small>

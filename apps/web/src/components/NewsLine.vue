@@ -21,7 +21,7 @@ function symMove(n: NewsItem, sym: string): number | null {
 
 <template>
   <div class="newsline-wrap">
-    <div :key="latest?.id ?? 'empty'" class="newsline" :class="{ 'is-whale': latest?.kind === '세력', 'is-event': !!latest?.event }" aria-live="polite" title="눌러서 자세히 보기" @click="openLatest">
+    <div :key="latest?.id ?? 'empty'" class="newsline" :class="{ 'is-event': !!latest?.event }" aria-live="polite" title="눌러서 자세히 보기" @click="openLatest">
       <span class="live">LIVE</span>
       <template v-if="latest">
         <span :class="badgeClass(latest)">{{ badgeText(latest) }}</span>
@@ -43,7 +43,7 @@ function symMove(n: NewsItem, sym: string): number | null {
       <button type="button" class="icon-btn news-act-btn" @click.stop="m.newsDialog = { mode: 'list' }">전체 뉴스</button>
     </div>
     <ul v-if="expanded" id="newsRecent5" class="news-recent5">
-      <li v-for="(n, idx) in recent5" :key="n.id" class="recent5-item" :class="{ 'is-latest': idx === 0, 'is-whale': n.kind === '세력' }" @click="openDetail(n.id)">
+      <li v-for="(n, idx) in recent5" :key="n.id" class="recent5-item" :class="{ 'is-latest': idx === 0 }" @click="openDetail(n.id)">
         <span class="recent5-idx">{{ idx + 1 }}</span>
         <span :class="badgeClass(n)">{{ badgeText(n) }}</span>
         <div class="recent5-content">

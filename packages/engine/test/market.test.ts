@@ -166,8 +166,8 @@ test("스냅샷에서 이어 돌리면 끊김 없이 같은 경로", () => {
   assert.deepEqual(b.bars("LMQ").slice(-50), a.bars("LMQ").slice(-50));
 });
 
-test("등락률 기준가(prev)는 게임 1주일(7일) 주기로만 초기화되고 세력(Whale) 작전 뉴스가 발생한다", () => {
-  const m = make(15, { ticksPerDay: 80, prevResetDays: 7, whaleChance: 0.25 });
+test("등락률 기준가(prev)는 게임 1주일(7일) 주기로만 초기화된다", () => {
+  const m = make(15, { ticksPerDay: 80, prevResetDays: 7 });
   // warmupBars=200 * ticksPerBar=10 = 2000틱에서 시작. 다음 560배수는 2240틱.
   const initialPrev = m.quote("NVDA")!.prev;
   // 하루(80틱)가 지나도 2080틱은 560의 배수가 아니므로 prev가 바뀌지 않는다
@@ -177,7 +177,4 @@ test("등락률 기준가(prev)는 게임 1주일(7일) 주기로만 초기화�
   run(m, 160);
   assert.equal(m.tick, 2240);
   assert.equal(m.quote("NVDA")!.prev, m.quote("NVDA")!.price, "게임 1주일(560틱) 주기마다 기준가 갱신");
-  // 충분히 돌리면 세력 작전 뉴스(kind='세력')가 생성된다
-  run(m, 1500);
-  assert.ok(m.news.some(n => n.kind === "세력"), "세력 작전(개미털기·설거지·숏스퀴즈) 뉴스 발생");
 });
