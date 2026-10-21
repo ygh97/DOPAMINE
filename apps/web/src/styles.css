@@ -600,39 +600,113 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
 
 /* 포트폴리오 스캔 & 저격 모달 + 뉴비 가이드 모달 */
 dialog#spyDlg, dialog#guideDlg {
-  width: min(760px, 95vw); max-height: 86vh; overflow-y: auto;
+  width: min(780px, 95vw); max-height: 88vh; overflow-y: auto;
   border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px;
   background: var(--panel); color: var(--text); box-shadow: 0 18px 48px rgba(0,0,0,.35);
 }
 dialog#spyDlg::backdrop, dialog#guideDlg::backdrop { background: rgba(0,0,0,.55); }
 .dlg-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line);
 }
-.dlg-head h2 { margin: 0; font-size: 17px; }
-.dlg-head-actions { display: flex; gap: 6px; align-items: center; }
-.dlg-head .dlg-close { float: none; }
-.spy-name { color: var(--accent); margin-left: 6px; }
+.dlg-head h2 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 6px; }
+.dlg-head-actions { display: inline-flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.dlg-act-btn {
+  position: static; display: inline-flex; align-items: center; justify-content: center;
+  height: 34px; padding: 0 13px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+  font-size: 12.5px; font-weight: 700; line-height: 1; white-space: nowrap; cursor: pointer;
+}
+.dlg-act-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.dlg-act-btn.close:hover { border-color: var(--up); color: var(--up); background: var(--up-soft); }
+
+.spy-name { color: var(--accent); }
 .spy-summary {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px;
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px;
 }
 .spy-stat {
-  padding: 9px 11px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line);
-  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--line);
+  display: flex; flex-direction: column; gap: 4px;
 }
 .spy-stat span { font-size: 11.5px; color: var(--muted); }
-.spy-stat b { font-size: 15px; font-variant-numeric: tabular-nums; }
-.spy-body h3 {
-  margin: 14px 0 6px; font-size: 13.5px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+.spy-stat b { font-size: 15.5px; font-variant-numeric: tabular-nums; }
+
+.spy-sections {
+  display: flex; flex-direction: column; gap: 16px;
 }
-.spy-sub { font-size: 11.5px; font-weight: 500; color: var(--warn); }
-.liq-price { color: #dc2626; font-weight: 800; }
+.spy-section {
+  border: 1px solid var(--line); border-radius: 10px; padding: 14px;
+  background: var(--panel-2); display: flex; flex-direction: column; gap: 10px;
+}
+.spy-section.fut-section {
+  border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+}
+.spy-section.spot-section {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+}
+.spy-sec-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+  padding-bottom: 8px; border-bottom: 1px solid var(--line);
+}
+.spy-sec-title { display: inline-flex; align-items: center; gap: 8px; font-size: 14.5px; }
+.spy-sec-badge {
+  padding: 3px 8px; border-radius: 5px; font-size: 11.5px; font-weight: 800;
+}
+.spy-sec-badge.fut { background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn); }
+.spy-sec-badge.spot { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+.spy-sub { font-size: 12px; font-weight: 600; color: var(--muted); }
+.spy-empty-box {
+  padding: 18px; border-radius: 8px; background: var(--panel); border: 1px dashed var(--line);
+  text-align: center; color: var(--muted); font-size: 13px;
+}
+
+.spy-card-list { display: flex; flex-direction: column; gap: 10px; }
+.spy-pos-card {
+  border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px;
+  background: var(--panel); display: flex; flex-direction: column; gap: 10px;
+  box-shadow: 0 2px 6px rgba(0,0,0,.04);
+}
+.spy-pos-card.long { border-left: 4px solid var(--up); }
+.spy-pos-card.short { border-left: 4px solid var(--down); }
+.spy-pos-card.spot { border-left: 4px solid var(--accent); }
+.spy-pos-top {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+}
+.spy-pos-sym { display: inline-flex; align-items: center; gap: 8px; }
+.spy-pos-sym b { font-size: 16px; letter-spacing: -0.2px; }
+.spy-side-tag {
+  padding: 2px 8px; border-radius: 5px; font-size: 12px; font-weight: 800;
+}
+.spy-side-tag.long { background: var(--up-soft); color: var(--up); }
+.spy-side-tag.short { background: var(--down-soft); color: var(--down); }
+.spy-side-tag.spot { background: var(--accent-soft); color: var(--accent); }
+
+.spy-pos-metrics {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px;
+  padding-top: 8px; border-top: 1px dashed var(--line);
+}
+.spy-pos-metrics.spot-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.spy-metric {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 8px; border-radius: 6px; background: var(--panel-2);
+}
+.spy-metric.liq { background: var(--up-soft); border: 1px solid color-mix(in srgb, var(--up) 35%, var(--line)); }
+.spy-metric span { font-size: 11px; color: var(--muted); font-weight: 600; }
+.spy-metric b { font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.liq-price { color: var(--up); font-weight: 800; }
 .snipe-btn {
-  border: 0; border-radius: 5px; padding: 4px 9px; font-size: 11.5px; font-weight: 800; color: #fff; cursor: pointer;
+  border: 0; border-radius: 6px; padding: 6px 12px; font-size: 12.5px; font-weight: 800; color: #fff; cursor: pointer;
 }
 .snipe-btn.long { background: var(--up); }
 .snipe-btn.short { background: var(--down); }
 .snipe-btn:hover { filter: brightness(1.08); }
+
+@media (max-width: 680px) {
+  .spy-summary { grid-template-columns: repeat(2, 1fr); }
+  .spy-pos-metrics, .spy-pos-metrics.spot-metrics { grid-template-columns: repeat(2, 1fr); }
+}
 
 .guide-grid { display: grid; gap: 10px; }
 .guide-card {

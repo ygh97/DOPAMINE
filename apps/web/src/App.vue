@@ -144,8 +144,8 @@ onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷�
     <div class="dlg-head">
       <h2>🎯 트레이더 포지션 스캔 <span v-if="spyData" class="spy-name">@{{ spyData.name }}</span></h2>
       <div class="dlg-head-actions">
-        <button v-if="m.spyTarget" type="button" class="mini-btn" @click="fetchSpy(m.spyTarget!)">🔄 새로고침</button>
-        <button type="button" class="dlg-close icon-btn" @click="closeSpy">닫기</button>
+        <button v-if="m.spyTarget" type="button" class="dlg-act-btn" @click="fetchSpy(m.spyTarget!)">🔄 새로고침</button>
+        <button type="button" class="dlg-act-btn close" @click="closeSpy">✕ 닫기</button>
       </div>
     </div>
     <p v-if="spyLoading" class="empty">포트폴리오 스캔 중…</p>
@@ -170,76 +170,108 @@ onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷�
         </div>
       </div>
 
-      <h3>🔥 선물 레버리지 포지션 ({{ spyData.futures.length }}) <span class="spy-sub">청산가 근처 종목을 반대 포지션으로 타격해 강제청산을 유도하세요!</span></h3>
-      <p v-if="!spyData.futures.length" class="empty">보유 중인 선물 포지션이 없습니다</p>
-      <table v-else class="tbl spy-tbl">
-        <thead>
-          <tr>
-            <th>종목</th>
-            <th>포지션</th>
-            <th>진입가</th>
-            <th>현재가</th>
-            <th>💀 강제청산가</th>
-            <th>증거금</th>
-            <th>미실현 손익</th>
-            <th>반대 저격</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="f in spyData.futures" :key="f.id">
-            <td><b>{{ f.sym }}</b></td>
-            <td><span class="side-badge" :class="f.side">{{ f.lev }}x {{ f.side === "long" ? "롱" : "숏" }}</span></td>
-            <td class="num">{{ money(f.entry) }}</td>
-            <td class="num">{{ money(m.quotes[f.sym]?.price ?? f.price) }}</td>
-            <td class="num liq-price">{{ money(f.liq) }}</td>
-            <td class="num">{{ money(f.margin) }}</td>
-            <td class="num" :class="signClass(f.pnl)">{{ money(f.pnl) }} ({{ pct(f.pnlPct) }})</td>
-            <td>
-              <button
-                type="button"
-                class="snipe-btn"
-                :class="f.side === 'long' ? 'short' : 'long'"
-                @click="snipePosition(f.sym, 'fut', f.side === 'long' ? 'sell' : 'buy', f.lev)"
-              >
-                🎯 {{ f.side === "long" ? `${f.lev}x 숏 저격` : `${f.lev}x 롱 저격` }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="spy-sections">
+        <!-- 선물 레버리지 포지션 구역 (div 분리) -->
+        <div class="spy-section fut-section">
+          <div class="spy-sec-head">
+            <div class="spy-sec-title">
+              <span class="spy-sec-badge fut">선물 레버리지</span>
+              <b>보유 포지션 ({{ spyData.futures.length }})</b>
+            </div>
+            <span class="spy-sub">강제청산가 근처 종목을 반대 포지션으로 타격해 보세요</span>
+          </div>
 
-      <h3>📦 현물 보유 종목 ({{ spyData.positions.length }})</h3>
-      <p v-if="!spyData.positions.length" class="empty">보유 중인 현물 종목이 없습니다</p>
-      <table v-else class="tbl spy-tbl">
-        <thead>
-          <tr>
-            <th>종목</th>
-            <th>수량</th>
-            <th>평단가</th>
-            <th>현재가</th>
-            <th>평가손익</th>
-            <th>반대 저격</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="p in spyData.positions" :key="p.sym">
-            <td><b>{{ p.sym }}</b></td>
-            <td class="num">{{ qtyText(p.sym, p.qty) }}</td>
-            <td class="num">{{ money(p.avg) }}</td>
-            <td class="num">{{ money(m.quotes[p.sym]?.price ?? p.price) }}</td>
-            <td class="num" :class="signClass(p.pnl)">{{ money(p.pnl) }} ({{ pct(p.pnlPct) }})</td>
-            <td>
-              <button
-                type="button"
-                class="snipe-btn short"
-                @click="snipePosition(p.sym, 'fut', 'sell', 5)"
-              >
-                🎯 5x 숏 타격
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+          <div v-if="!spyData.futures.length" class="spy-empty-box">보유 중인 선물 레버리지 포지션이 없습니다</div>
+          <div v-else class="spy-card-list">
+            <div v-for="f in spyData.futures" :key="f.id" class="spy-pos-card" :class="f.side">
+              <div class="spy-pos-top">
+                <div class="spy-pos-sym">
+                  <b>{{ f.sym }}</b>
+                  <span class="spy-side-tag" :class="f.side">{{ f.lev }}x {{ f.side === "long" ? "롱 (LONG)" : "숏 (SHORT)" }}</span>
+                </div>
+                <button
+                  type="button"
+                  class="snipe-btn"
+                  :class="f.side === 'long' ? 'short' : 'long'"
+                  @click="snipePosition(f.sym, 'fut', f.side === 'long' ? 'sell' : 'buy', f.lev)"
+                >
+                  🎯 {{ f.side === "long" ? `${f.lev}x 숏 저격` : `${f.lev}x 롱 저격` }}
+                </button>
+              </div>
+              <div class="spy-pos-metrics">
+                <div class="spy-metric">
+                  <span>진입가</span>
+                  <b>{{ money(f.entry) }}</b>
+                </div>
+                <div class="spy-metric">
+                  <span>현재가</span>
+                  <b>{{ money(m.quotes[f.sym]?.price ?? f.price) }}</b>
+                </div>
+                <div class="spy-metric liq">
+                  <span>💀 강제청산가</span>
+                  <b class="liq-price">{{ money(f.liq) }}</b>
+                </div>
+                <div class="spy-metric">
+                  <span>증거금</span>
+                  <b>{{ money(f.margin) }}</b>
+                </div>
+                <div class="spy-metric pnl">
+                  <span>미실현 손익</span>
+                  <b :class="signClass(f.pnl)">{{ money(f.pnl) }} ({{ pct(f.pnlPct) }})</b>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 현물 보유 종목 구역 (div 분리) -->
+        <div class="spy-section spot-section">
+          <div class="spy-sec-head">
+            <div class="spy-sec-title">
+              <span class="spy-sec-badge spot">현물 보유</span>
+              <b>보유 종목 ({{ spyData.positions.length }})</b>
+            </div>
+            <span class="spy-sub">현물 대량 보유 종목을 선물 숏으로 타격할 수 있습니다</span>
+          </div>
+
+          <div v-if="!spyData.positions.length" class="spy-empty-box">보유 중인 현물 종목이 없습니다</div>
+          <div v-else class="spy-card-list">
+            <div v-for="p in spyData.positions" :key="p.sym" class="spy-pos-card spot">
+              <div class="spy-pos-top">
+                <div class="spy-pos-sym">
+                  <b>{{ p.sym }}</b>
+                  <span class="spy-side-tag spot">현물 {{ qtyText(p.sym, p.qty) }}주/개</span>
+                </div>
+                <button
+                  type="button"
+                  class="snipe-btn short"
+                  @click="snipePosition(p.sym, 'fut', 'sell', 5)"
+                >
+                  🎯 5x 숏 타격
+                </button>
+              </div>
+              <div class="spy-pos-metrics spot-metrics">
+                <div class="spy-metric">
+                  <span>보유 수량</span>
+                  <b>{{ qtyText(p.sym, p.qty) }}</b>
+                </div>
+                <div class="spy-metric">
+                  <span>평균 단가</span>
+                  <b>{{ money(p.avg) }}</b>
+                </div>
+                <div class="spy-metric">
+                  <span>현재가</span>
+                  <b>{{ money(m.quotes[p.sym]?.price ?? p.price) }}</b>
+                </div>
+                <div class="spy-metric pnl">
+                  <span>평가 손익</span>
+                  <b :class="signClass(p.pnl)">{{ money(p.pnl) }} ({{ pct(p.pnlPct) }})</b>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </dialog>
 
@@ -247,7 +279,9 @@ onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷�
   <dialog id="guideDlg" ref="guideDlg" aria-label="도파민 센터 뉴비 생존 가이드" @click="onGuideBackdrop">
     <div class="dlg-head">
       <h2>🔥 도파민 센터 뉴비 생존 &amp; 사냥 가이드</h2>
-      <button type="button" class="dlg-close icon-btn" @click="closeGuide">닫기</button>
+      <div class="dlg-head-actions">
+        <button type="button" class="dlg-act-btn close" @click="closeGuide">✕ 닫기</button>
+      </div>
     </div>
     <div class="guide-grid">
       <div class="guide-card">
