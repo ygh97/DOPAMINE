@@ -5,14 +5,19 @@ export const SECTORS: Record<string, string> = {
   bigtech: "빅테크",
   platform: "플랫폼",
   growth: "성장주",
+  finance: "금융·결제",
+  bio: "헬스케어",
+  consumer: "소비재·유통",
+  energy: "에너지",
   newgrowth: "신성장",
   crypto: "코인",
   venture: "신흥주",
 };
 
-// 시즌 시작가·시총·적정 PER은 실제 시장 밸류에이션(S&P500 기술주 Forward/Trailing PER, 코인은 온체인 수수료·생태계 수익 및 NVT/MVRV 멀티플)을 기반으로 초기화.
-// 시작 시점에는 이 데이터로 출발하며, 이후에는 게임 엔진의 실적·온체인 뉴스 및 수급 충격에 따라 EPS와 PER이 실시간으로 움직인다.
+// 시즌 시작가·시총·적정 PER은 실제 미국 증시 시가총액 상위 20대 종목 밸류에이션을 기반으로 초기화.
+// 주식만 적정 PER(fairPER)을 가지며, 코인은 PER 없이 시총·유동성만 가진다.
 export const ASSETS: AssetDef[] = [
+  // 기존 10개 미국 대형 기술·성장주
   { sym: "NVDA", name: "엔비디아", market: "stock", sector: "semi", price: 219.43, cap: 5.27e12, fairPER: 36.5, product: "AI 가속기", parValue: 1 },
   { sym: "AMD", name: "AMD", market: "stock", sector: "semi", price: 172.66, cap: 2.8e11, fairPER: 31.2, product: "서버 CPU", parValue: 0.5 },
   { sym: "AAPL", name: "애플", market: "stock", sector: "bigtech", price: 242.1, cap: 3.64e12, fairPER: 31.8, product: "스마트폰", parValue: 1 },
@@ -23,9 +28,24 @@ export const ASSETS: AssetDef[] = [
   { sym: "NFLX", name: "넷플릭스", market: "stock", sector: "platform", price: 1120.3, cap: 4.79e11, fairPER: 38.2, product: "스트리밍", parValue: 5 },
   { sym: "TSLA", name: "테슬라", market: "stock", sector: "growth", price: 405.12, cap: 1.3e12, fairPER: 88.5, product: "전기차", parValue: 1 },
   { sym: "PLTR", name: "팔란티어", market: "stock", sector: "growth", price: 148.9, cap: 3.51e11, fairPER: 96.0, product: "데이터 분석 소프트웨어", parValue: 0.5 },
-  { sym: "BTC", name: "비트코인", market: "coin", sector: "crypto", price: 94880.1, cap: 1.88e12, fairPER: 44.5, liquidity: 3e7 },
-  { sym: "ETH", name: "이더리움", market: "coin", sector: "crypto", price: 3412.55, cap: 4.11e11, fairPER: 58.0, liquidity: 2e7 },
-  { sym: "DOGE", name: "도지코인", market: "coin", sector: "crypto", price: 0.3121, cap: 4.58e10, fairPER: 75.0, liquidity: 8e6 },
+  // 추가 10개 미국 시가총액 상위 종목 (총 20종목)
+  { sym: "AVGO", name: "브로드컴", market: "stock", sector: "semi", price: 236.4, cap: 1.11e12, fairPER: 34.8, product: "맞춤형 AI 칩·네트워크", parValue: 1 },
+  { sym: "BRK", name: "버크셔 해서웨이", market: "stock", sector: "finance", price: 468.2, cap: 1.01e12, fairPER: 21.5, product: "보험·지주 포트폴리오", parValue: 5 },
+  { sym: "LLY", name: "일라이 릴리", market: "stock", sector: "bio", price: 912.5, cap: 8.65e11, fairPER: 48.0, product: "비만·대사 치료제", parValue: 1 },
+  { sym: "WMT", name: "월마트", market: "stock", sector: "consumer", price: 94.8, cap: 7.62e11, fairPER: 36.2, product: "글로벌 리테일·이커머스", parValue: 0.5 },
+  { sym: "JPM", name: "JP모건 체이스", market: "stock", sector: "finance", price: 248.6, cap: 7.02e11, fairPER: 13.8, product: "글로벌 투자·상업은행", parValue: 1 },
+  { sym: "V", name: "비자", market: "stock", sector: "finance", price: 318.9, cap: 6.32e11, fairPER: 29.5, product: "글로벌 결제 네트워크", parValue: 0.5 },
+  { sym: "UNH", name: "유나이티드헬스", market: "stock", sector: "bio", price: 588.4, cap: 5.42e11, fairPER: 20.4, product: "헬스케어·보험 서비스", parValue: 1 },
+  { sym: "XOM", name: "엑슨모빌", market: "stock", sector: "energy", price: 118.2, cap: 5.18e11, fairPER: 14.2, product: "원유·천연가스", parValue: 1 },
+  { sym: "ORCL", name: "오라클", market: "stock", sector: "bigtech", price: 186.5, cap: 5.15e11, fairPER: 32.0, product: "클라우드 데이터베이스", parValue: 0.5 },
+  { sym: "COST", name: "코스트코", market: "stock", sector: "consumer", price: 978.0, cap: 4.34e11, fairPER: 52.4, product: "회원제 창고형 할인점", parValue: 1 },
+  // 코인 5종 (PER 없음)
+  { sym: "BTC", name: "비트코인", market: "coin", sector: "crypto", price: 94880.1, cap: 1.88e12, liquidity: 3e7 },
+  { sym: "ETH", name: "이더리움", market: "coin", sector: "crypto", price: 3412.55, cap: 4.11e11, liquidity: 2e7 },
+  { sym: "XRP", name: "리플", market: "coin", sector: "crypto", price: 2.48, cap: 1.42e11, liquidity: 1.5e7 },
+  { sym: "SOL", name: "솔라나", market: "coin", sector: "crypto", price: 238.4, cap: 1.13e11, liquidity: 1.5e7 },
+  { sym: "DOGE", name: "도지코인", market: "coin", sector: "crypto", price: 0.3121, cap: 4.58e10, liquidity: 8e6 },
+  // 신흥주 10종
   { sym: "LMQ", name: "루미큐 양자", market: "venture", sector: "venture", price: 6.88, cap: 1.1e9, tech: "양자 오류 보정", parValue: 0.1 },
   { sym: "BNXT", name: "바이오넥스", market: "venture", sector: "venture", price: 2.14, cap: 4.2e8, tech: "유전자 치료", parValue: 0.1 },
   { sym: "ORBL", name: "오르빗랩", market: "venture", sector: "venture", price: 11.4, cap: 2.3e9, tech: "소형 위성 통신", parValue: 0.1 },

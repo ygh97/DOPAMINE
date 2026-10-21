@@ -159,8 +159,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     state[def.sym] = {
       ...def, ...KIND[def.market], def,
       prev: def.price,
-      eps: def.fairPER ? def.price / def.fairPER : null,
-      baseEps: def.fairPER ? def.price / def.fairPER : null,
+      eps: def.market === "stock" && def.fairPER ? def.price / def.fairPER : null,
+      baseEps: def.market === "stock" && def.fairPER ? def.price / def.fairPER : null,
       anchor: def.price,
       shares: def.cap ? def.cap / def.price : null,
       variance: 1, regime: rand() < 0.5 ? "range" : "trend",
@@ -542,7 +542,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       if (a.hi != null) a.hi *= k;
       if (a.lo != null) a.lo *= k;
       for (const n of news) if (n.priceAt[a.sym]) n.priceAt[a.sym] *= k;
-      if (a.fairPER) a.eps = a.baseEps = a.price / a.fairPER; else a.anchor = a.price;
+      if (a.market === "stock" && a.fairPER) a.eps = a.baseEps = a.price / a.fairPER; else a.anchor = a.price;
       a.successes = 0;
       if (!venturesBusy.has(a.sym)) a.stage = null;
     }
@@ -565,12 +565,22 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     nextGradAt = d.nextGradAt ?? Infinity; startTime = d.startTime; news = d.news; scheduled = d.scheduled;
     marketPending = d.marketPending; sectorPending = d.sectorPending; venturesBusy = new Set(d.venturesBusy);
     sparePool = d.sparePool; state = d.state;
-    // 이전 스냅샷에 남아 있던 '세력' 뉴스 정리 및 카탈로그 fairPER·cap 보강
+    for (const k in sectors) sectorPending[k] ??= [];
     news = news.filter(n => n.kind !== "세력");
+    const lastBarTs = Object.values(state)[0]?.bars.at(-1)?.timestamp ?? barTime(Math.max(1, tick));
     for (const def of assets) {
       const a = state[def.sym];
-      if (!a) continue;
-      if (def.fairPER && !a.fairPER) {
+      if (!a) {
+        if (def.market === "venture") continue;
+        addAsset(def);
+        state[def.sym].bars.push({ timestamp: lastBarTs, open: def.price, high: def.price, low: def.price, close: def.price, volume: 0 });
+        continue;
+      }
+      if (def.market === "coin") {
+        a.eps = null;
+        a.baseEps = null;
+        a.fairPER = undefined;
+      } else if (def.fairPER && !a.fairPER) {
         a.fairPER = def.fairPER;
         const refPrice = a.anchor || a.price;
         a.eps = refPrice / def.fairPER;
