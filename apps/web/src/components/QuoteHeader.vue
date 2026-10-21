@@ -15,7 +15,7 @@ const diff = computed(() => (q.value ? change(q.value.price, q.value.prev) : 0))
       <div class="big-price" :class="diff >= 0 ? 'up' : 'down'">{{ money(q.price) }}</div>
       <b :class="diff >= 0 ? 'up' : 'down'">{{ diff >= 0 ? "▲" : "▼" }} {{ money(Math.abs(q.price - q.prev)) }} ({{ pct(diff) }})</b>
       <div class="stats">
-        <div class="kv"><span>전일 종가</span><b>{{ money(q.prev) }}</b></div>
+        <div class="kv"><span>주간 기준가</span><b>{{ money(q.prev) }}</b></div>
         <div class="kv"><span>액면가</span><b>{{ q.parValue ? `$${q.parValue.toFixed(2)}` : "-" }}</b></div>
         <div class="kv"><span>시총</span><b>{{ big(q.cap) }}</b></div>
         <div class="kv"><span>PER</span><b>{{ q.per ? `${q.per.toFixed(1)}배` : "-" }}</b></div>

@@ -1,15 +1,17 @@
 // 도파민 센터 시세 엔진. 서버 GameLoop가 1초마다 step()을 부른다.
 //
 // 틱 수익률 r = 시장 요인 × 베타 + 업종 요인 × 업종 베타 + 개별 노이즈 × 변동성 군집
-//             + 뉴스 반응(즉시 → 따라붙음 → 과열 되돌림) + 적정가 회귀
-//             + RSI 기울기(국면에 따라 역추세/추세) + 지지·저항 + 점프
-// 숨은 상태(대기 충격, 국면, 앵커, EPS)는 이 모듈 밖으로 나가지 않는다. 밖으로는 Quote·Bar·NewsItem만.
+//             + 뉴스·세력 반응(즉시 → 따라붙음 → 과열 되돌림 / 개미털기 / 설거지 / 스퀴즈)
+//             + 적정가 회귀 + RSI 기울기(국면에 따라 역추세/추세) + 지지·저항 + 스탑헌팅 + 점프
+// 숨은 상태(대기 충격, 국면, 앵커, EPS, 세력 페이즈)는 이 모듈 밖으로 나가지 않는다. 밖으로는 Quote·Bar·NewsItem만.
 import { NEWS, type Template } from "./news-templates.ts";
 import type { AssetDef, Bar, CorporateAction, GameDate, MarketKind, MarketOptions, NewsItem, Quote, SpareDef, StepResult } from "./types.ts";
 
 export const DEFAULT_OPTIONS: MarketOptions = {
   ticksPerBar: 60,        // 1분봉 = 60틱(1초 tick)
   ticksPerDay: 80,        // 게임 하루
+  prevResetDays: 7,       // 등락률 기준가(prev) 초기화 주기 = 게임 1주일(7일 = 560틱)
+  whaleChance: 0.08,      // 뉴스 생성 시 세력 작전(개미털기·설거지·숏스퀴즈) 발동 비율
   barMs: 60_000,
   warmupBars: 720,        // 시작 전 과거 차트
   maxBars: 1500,
@@ -221,6 +223,47 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   const fillOf = (a: AssetState) => (s: string) => s.replaceAll("{name}", a.name).replaceAll("{sym}", a.sym)
     .replaceAll("{product}", a.product || "주력 제품").replaceAll("{tech}", a.tech || "핵심 기술");
 
+  // ---------- 세력(Whale / Market Maker) 작전 로직 ----------
+  // 1) 개미털기(Shakeout / Bear Trap): 순간적으로 지지선을 깨며 급락시켜 롱 스탑로스를 털어낸 뒤 강하게 V자 말아올림
+  // 2) 설거지(Pump & Dump / Bull Trap): 강하게 슈팅시켜 FOMO 추격 매수를 부른 뒤 위에서 대량 투하해 폭락
+  // 3) 숏스퀴즈(Short Squeeze): 계단식 매집 후 숏 청산 물량을 연쇄 폭발시키며 장대양봉 분출
+  function whaleOperation() {
+    const candidates = live().filter(x => x.watchUntil == null && !venturesBusy.has(x.sym));
+    if (!candidates.length) return companyNews();
+    const a = pick(candidates);
+    const scale = a.market === "venture" ? 2.2 : a.market === "coin" ? 1.6 : 1.0;
+    const modeRoll = rand();
+    const fill = fillOf(a);
+    a.volBoost = Math.max(a.volBoost, 14);
+
+    if (modeRoll < 0.36) {
+      // 개미털기 (Shakeout): 초반 5~9틱 급락(-2.5%~-6% * scale) → 직후 25~45틱 동안 +5%~+11% * scale 강력 매집 반등
+      const dip = -uni(0.025, 0.055) * scale;
+      const rip = uni(0.05, 0.11) * scale;
+      impulse(a.pending, dip, Math.round(uni(4, 8)), 0);
+      impulse(a.pending, rip, Math.round(uni(20, 40)), Math.round(uni(6, 10)));
+      const tpl = pick(NEWS.whale.shakeout);
+      publish({ kind: "세력", headline: `${a.name}(${a.sym}) · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym] });
+    } else if (modeRoll < 0.70) {
+      // 설거지 (Pump & Dump): 초반 8~14틱 급등(+3%~+7% * scale) → 고점에서 25~50틱 동안 -5.5%~-12% * scale 대량 폭락 투하
+      const pump = uni(0.03, 0.07) * scale;
+      const dump = -uni(0.055, 0.12) * scale;
+      impulse(a.pending, pump, Math.round(uni(7, 13)), 0);
+      impulse(a.pending, dump, Math.round(uni(22, 45)), Math.round(uni(10, 16)));
+      const tpl = pick(NEWS.whale.pump);
+      publish({ kind: "세력", headline: `${a.name}(${a.sym}) · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym] });
+    } else {
+      // 숏스퀴즈 (Short Squeeze): 1차 급등 + 2차 연쇄 청산 폭발
+      const wave1 = uni(0.03, 0.06) * scale;
+      const wave2 = uni(0.04, 0.09) * scale;
+      impulse(a.pending, wave1, Math.round(uni(5, 10)), 0);
+      impulse(a.pending, wave2, Math.round(uni(15, 30)), Math.round(uni(6, 12)));
+      impulse(a.pending, -wave2 * 0.35, Math.round(uni(30, 50)), Math.round(uni(35, 55)));
+      const tpl = pick(NEWS.whale.squeeze);
+      publish({ kind: "세력", headline: `${a.name}(${a.sym}) · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym] });
+    }
+  }
+
   // ---------- 뉴스 ----------
   function marketNews() {
     const good = rand() < 0.5, tpl = pick(good ? NEWS.market.good : NEWS.market.bad);
@@ -291,10 +334,11 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const r = rand();
     // 과거 차트 구간 앞 80%에서는 신흥주 검증을 생략해 시작가 맞추기(rebase) 때 비율이 극단적이지 않게
     const ventureOk = !warm || tick > cfg.warmupBars * cfg.ticksPerBar * 0.8;
-    if (r < 0.15) marketNews();
-    else if (r < 0.4) sectorNews();
-    else if (r < 0.87) companyNews();
-    else if (r < 0.9 && ventureOk) ventureEvent();
+    if (r < 0.14) marketNews();
+    else if (r < 0.36) sectorNews();
+    else if (r < 0.82 - cfg.whaleChance) companyNews();
+    else if (r < 0.82) whaleOperation();
+    else if (r < 0.90 && ventureOk) ventureEvent();
     else noiseNews();
   }
 
@@ -423,15 +467,24 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     }
     return Math.max(-1, Math.min(1, t)) * cfg.srWeight * a.sigma;
   }
-  // 전고점 돌파·전저점 이탈: 거래량 급증 + 같은 방향으로 한 번 더 밀어줌 (봉당 1회)
+  // 전고점 돌파·전저점 이탈: 65%는 진짜 추세 돌파(스퀴즈), 35%는 세력의 스탑헌팅(가짜 돌파 후 반대 방향 급반전휩쏘)
   function checkBreak(a: AssetState, before: number, barIndex: number) {
     if (a.hi == null || a.lo == null || a.breakBar === barIndex) return;
     const up = before <= a.hi && a.price > a.hi * (1 + cfg.srBand / 2);
     const down = before >= a.lo && a.price < a.lo * (1 - cfg.srBand / 2);
     if (!up && !down) return;
-    react(a.pending, (up ? 1 : -1) * a.sigma * uni(4, 9));
+    const dir = up ? 1 : -1;
+    if (rand() < 0.35) {
+      // 세력 스탑헌팅(Fakeout): 돌파 방향으로 살짝 더 찌른 뒤 반대 방향으로 강하게 되돌림
+      impulse(a.pending, dir * a.sigma * uni(1.5, 3), 3, 0);
+      impulse(a.pending, -dir * a.sigma * uni(6, 12), Math.round(uni(12, 25)), 3);
+    } else {
+      react(a.pending, dir * a.sigma * uni(4, 9));
+    }
     a.volBoost = 10; a.breakBar = barIndex;
   }
+
+  const prevResetTicks = Math.max(1, cfg.ticksPerDay * Math.max(1, cfg.prevResetDays));
 
   function step(): StepResult {
     tick++;
@@ -476,9 +529,12 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       }
       if (barEnd) updateBarStats(a);
     }
-    if (tick % cfg.ticksPerDay === 0) {
+    // 등락률 기준가(prev)는 게임 시간 1주일(prevResetDays = 7일)마다 갱신
+    if (tick % prevResetTicks === 0) {
       for (const a of live()) a.prev = a.price;
-      if (!warm) reviewListings();
+    }
+    if (tick % cfg.ticksPerDay === 0 && !warm) {
+      reviewListings();
     }
     const published: NewsItem[] = [];
     for (const n of news) { if (n.id === before) break; published.push(n); }

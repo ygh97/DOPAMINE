@@ -8,6 +8,7 @@ export interface NewsTemplates {
   sector: GoodBad;
   company: GoodBad;
   coin: GoodBad;
+  whale: { squeeze: Template[]; shakeout: Template[]; pump: Template[] };
   venture: Template[];
   listing: Record<"graduate" | "delist" | "ipo" | "split" | "watch" | "release" | "acquire" | "raise", Template>;
   noise: Template[];
@@ -58,6 +59,20 @@ export const NEWS: NewsTemplates = {
     bad: [
       {h: "가상 거래소 입출금 일시 중단", b: "가상 거래소가 시스템 점검을 이유로 {sym} 입출금을 일시 중단했다. 재개 시점은 아직 공지되지 않았다."},
       {h: "규제 해석 불확실성 확대", b: "가상 금융당국이 {name} 관련 상품의 분류 기준을 다시 검토한다고 밝혔다. 기관 자금 유입이 늦어질 수 있다."},
+    ],
+  },
+  whale: {
+    squeeze: [
+      {h: "[세력 포착] 고래 지갑 대량 매집 · 숏 스퀴즈 경보", b: "{name}({sym}) 선물 시장에서 숏 포지션이 과밀해진 틈을 타 익명 고래 계좌들이 현물과 롱을 대거 쓸어 담고 있다. 연쇄 숏 청산(숏 스퀴즈)이 터지면 단기 급등이 나올 수 있다."},
+      {h: "[세력 포착] 공매도 환매수 유입 · 손절 라인 연쇄 돌파", b: "{name}({sym}) 전고점 부근에 몰려 있던 공매도 스탑로스 물량이 한꺼번에 체결되며 매수세가 폭발하고 있다."},
+    ],
+    shakeout: [
+      {h: "[세력 포착] 개미 털기(Shakeout) 의심 · 급락 후 대량 받아내기", b: "{name}({sym}) 호가창을 순간적으로 무너뜨려 개인 투자자들의 스탑로스·투매 물량을 쏟아내게 한 뒤, 아래에서 대량 매수세가 물량을 통째로 흡수하는 움직임이 포착됐다."},
+      {h: "[세력 포착] 베어트랩(Bear Trap) 포착 · 허매도 벽 철거 후 반등", b: "{name}({sym}) 지지선 이탈을 유도하던 대규모 매도 벽이 순식간에 취소되고 시장가 매수 체결이 급증하고 있다."},
+    ],
+    pump: [
+      {h: "[세력 포착] 작전 세력 설거지 경보 · 폭등 뒤 대량 물량 떠넘기기", b: "{name}({sym}) 단기 급등으로 추격 매수세가 몰리자 초기 매집 지갑에서 시장가로 대량 차익 실현 물량을 쏟아내고 있다. 급격한 되돌림 폭락에 주의가 필요하다."},
+      {h: "[세력 포착] 불트랩(Bull Trap) 주의 · 고점 대량 자전거래 의심", b: "{name}({sym}) 거래량이 비정상적으로 급증하며 고점을 높였으나, 기관·고래 창구에서는 순매도가 빠르게 늘고 있다."},
     ],
   },
   venture: [

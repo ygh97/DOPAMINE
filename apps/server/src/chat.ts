@@ -15,20 +15,38 @@ export interface ChatAdminMsg extends ChatMsg { reports: number; hidden: boolean
 export class Chat {
   private db: Db;
   private lastSent = new Map<number, number>();
+  private recentCache: ChatMsg[] | null = null;
+  private stmts;
 
-  constructor(db: Db) { this.db = db; }
+  constructor(db: Db) {
+    this.db = db;
+    this.stmts = {
+      ensureSys: db.prepare("INSERT OR IGNORE INTO users (id, name, pass, created_at) VALUES (0, '⚡전광판', '-', 0)"),
+      insMsg: db.prepare("INSERT INTO chat_messages (user_id, name, text, at) VALUES (?, ?, ?, ?)"),
+      selUser: db.prepare("SELECT name, banned FROM users WHERE id = ?"),
+      selRecent: db.prepare("SELECT id, name, text, at FROM chat_messages WHERE hidden = 0 ORDER BY id DESC LIMIT ?"),
+      selMsg: db.prepare("SELECT id, user_id, hidden FROM chat_messages WHERE id = ?"),
+      insReport: db.prepare("INSERT OR IGNORE INTO chat_reports (msg_id, user_id) VALUES (?, ?)"),
+      cntReport: db.prepare("SELECT COUNT(*) AS c FROM chat_reports WHERE msg_id = ?"),
+      updReport: db.prepare("UPDATE chat_messages SET reports = ?, hidden = ? WHERE id = ?"),
+      selAdmin: db.prepare("SELECT id, name, text, at, reports, hidden FROM chat_messages ORDER BY id DESC LIMIT ?"),
+      selBanned: db.prepare("SELECT name FROM users WHERE banned = 1 ORDER BY id DESC"),
+      updHidden: db.prepare("UPDATE chat_messages SET hidden = ? WHERE id = ?"),
+      updBan: db.prepare("UPDATE users SET banned = ? WHERE name = ?"),
+      hideUserMsgs: db.prepare("UPDATE chat_messages SET hidden = 1 WHERE name = ? COLLATE NOCASE"),
+    };
+  }
 
   /** 시스템 전광판 방송 메시지 기록 (100배 졸업·강제청산 알림) */
   system(text: string, now = Date.now()): ChatMsg {
-    this.db.prepare("INSERT OR IGNORE INTO users (id, name, pass, created_at) VALUES (0, '⚡전광판', '-', 0)").run();
-    const id = Number(
-      this.db.prepare("INSERT INTO chat_messages (user_id, name, text, at) VALUES (0, '⚡전광판', ?, ?)").run(text, now).lastInsertRowid,
-    );
+    this.stmts.ensureSys.run();
+    const id = Number(this.stmts.insMsg.run(0, "⚡전광판", text, now).lastInsertRowid);
+    this.recentCache = null;
     return { id, name: "⚡전광판", text, at: now };
   }
 
   post(userId: number, rawText: string, now = Date.now()): ChatMsg {
-    const user = this.db.prepare("SELECT name, banned FROM users WHERE id = ?").get(userId) as { name: string; banned: number } | undefined;
+    const user = this.stmts.selUser.get(userId) as { name: string; banned: number } | undefined;
     if (!user) throw new ChatError("참가가 필요합니다.");
     if (user.banned) throw new ChatError("채팅이 정지된 계정입니다.");
 
@@ -44,34 +62,35 @@ export class Chat {
     }
 
     this.lastSent.set(userId, now);
-    const id = Number(
-      this.db.prepare("INSERT INTO chat_messages (user_id, name, text, at) VALUES (?, ?, ?, ?)").run(userId, user.name, text, now).lastInsertRowid,
-    );
+    const id = Number(this.stmts.insMsg.run(userId, user.name, text, now).lastInsertRowid);
+    this.recentCache = null;
     return { id, name: user.name, text, at: now };
   }
 
   recent(limit = 50): ChatMsg[] {
-    const rows = this.db.prepare("SELECT id, name, text, at FROM chat_messages WHERE hidden = 0 ORDER BY id DESC LIMIT ?")
-      .all(limit) as unknown as ChatMsg[];
-    return rows.reverse();
+    if (limit === 50 && this.recentCache) return this.recentCache;
+    const rows = this.stmts.selRecent.all(limit) as unknown as ChatMsg[];
+    const res = rows.reverse();
+    if (limit === 50) this.recentCache = res;
+    return res;
   }
 
   report(userId: number, msgId: number): { id: number; reports: number; hidden: boolean } {
-    const msg = this.db.prepare("SELECT id, user_id, hidden FROM chat_messages WHERE id = ?").get(msgId) as { id: number; user_id: number; hidden: number } | undefined;
+    const msg = this.stmts.selMsg.get(msgId) as { id: number; user_id: number; hidden: number } | undefined;
     if (!msg) throw new ChatError("메시지를 찾을 수 없습니다.");
     if (msg.user_id === userId) throw new ChatError("본인 메시지는 신고할 수 없습니다.");
-    const r = this.db.prepare("INSERT OR IGNORE INTO chat_reports (msg_id, user_id) VALUES (?, ?)").run(msgId, userId);
+    const r = this.stmts.insReport.run(msgId, userId);
     if (!r.changes) throw new ChatError("이미 신고한 메시지입니다.");
-    const { c } = this.db.prepare("SELECT COUNT(*) AS c FROM chat_reports WHERE msg_id = ?").get(msgId) as { c: number };
+    const { c } = this.stmts.cntReport.get(msgId) as { c: number };
     const hidden = Boolean(msg.hidden) || c >= HIDE_REPORTS;
-    this.db.prepare("UPDATE chat_messages SET reports = ?, hidden = ? WHERE id = ?").run(c, hidden ? 1 : 0, msgId);
+    this.stmts.updReport.run(c, hidden ? 1 : 0, msgId);
+    if (hidden) this.recentCache = null;
     return { id: msgId, reports: c, hidden };
   }
 
   adminList(limit = 100) {
-    const rows = this.db.prepare("SELECT id, name, text, at, reports, hidden FROM chat_messages ORDER BY id DESC LIMIT ?")
-      .all(limit) as { id: number; name: string; text: string; at: number; reports: number; hidden: number }[];
-    const banned = (this.db.prepare("SELECT name FROM users WHERE banned = 1 ORDER BY id DESC").all() as { name: string }[]).map(u => u.name);
+    const rows = this.stmts.selAdmin.all(limit) as { id: number; name: string; text: string; at: number; reports: number; hidden: number }[];
+    const banned = (this.stmts.selBanned.all() as { name: string }[]).map(u => u.name);
     return {
       messages: rows.map(r => ({ ...r, hidden: Boolean(r.hidden) })),
       banned,
@@ -79,13 +98,15 @@ export class Chat {
   }
 
   setHidden(msgId: number, hidden: boolean) {
-    this.db.prepare("UPDATE chat_messages SET hidden = ? WHERE id = ?").run(hidden ? 1 : 0, msgId);
+    this.stmts.updHidden.run(hidden ? 1 : 0, msgId);
+    this.recentCache = null;
   }
 
   setBan(rawName: string, banned: boolean) {
     const name = String(rawName ?? "").trim();
-    const r = this.db.prepare("UPDATE users SET banned = ? WHERE name = ?").run(banned ? 1 : 0, name);
+    const r = this.stmts.updBan.run(banned ? 1 : 0, name);
     if (!r.changes) throw new ChatError("사용자를 찾을 수 없습니다.");
-    if (banned) this.db.prepare("UPDATE chat_messages SET hidden = 1 WHERE name = ? COLLATE NOCASE").run(name);
+    if (banned) this.stmts.hideUserMsgs.run(name);
+    this.recentCache = null;
   }
 }

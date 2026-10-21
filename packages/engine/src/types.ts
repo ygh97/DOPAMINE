@@ -96,6 +96,8 @@ export interface StepResult {
 export interface MarketOptions {
   ticksPerBar: number;
   ticksPerDay: number;
+  prevResetDays: number;
+  whaleChance: number;
   barMs: number;
   warmupBars: number;
   maxBars: number;

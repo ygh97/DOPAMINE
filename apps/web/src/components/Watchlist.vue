@@ -32,7 +32,7 @@ const flash = (q: Quote) => {
     </div>
     <div class="watch-scroll">
       <table class="watch-table">
-        <thead><tr><th>종목</th><th>현재가</th><th>등락</th></tr></thead>
+        <thead><tr><th>종목</th><th>현재가</th><th>주간등락</th></tr></thead>
         <tbody id="watchBody">
           <tr v-for="q in m.list" :key="q.sym" :data-sym="q.sym" :aria-selected="q.sym === m.selected" @click="m.select(q.sym)">
             <td class="sym">

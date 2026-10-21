@@ -52,9 +52,39 @@ export class Broker {
   private pending: Pending[] = [];
   private broadcasts: string[] = [];
   private recent = new Map<number, { tick: number; count: number }>(); // 주문 속도 제한
+  private rankCache: { tick: number; rows: RankRow[]; rankByUser: Map<string, number> } | null = null;
+  private stmts;
 
   constructor(db: Db, season: Season, market: Market) {
     this.db = db; this.season = season; this.market = market;
+    this.stmts = {
+      selUser: db.prepare("SELECT name FROM users WHERE id = ?"),
+      selAcc: db.prepare("SELECT cash, reset_at, cleared_tick FROM accounts WHERE user_id = ? AND season_id = ?"),
+      insAcc: db.prepare("INSERT INTO accounts (user_id, season_id, cash) VALUES (?, ?, ?)"),
+      selPos: db.prepare("SELECT sym, qty, avg FROM positions WHERE user_id = ? AND season_id = ?"),
+      selFut: db.prepare("SELECT id, sym, side, lev, qty, entry, margin, stop, tp FROM futures WHERE user_id = ? AND season_id = ?"),
+      selSeasonUsers: db.prepare("SELECT user_id FROM accounts WHERE season_id = ?"),
+      selFills: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE user_id = ? AND season_id = ? ORDER BY id DESC LIMIT 50"),
+      delPosAll: db.prepare("DELETE FROM positions WHERE user_id = ? AND season_id = ?"),
+      delFutAll: db.prepare("DELETE FROM futures WHERE user_id = ? AND season_id = ?"),
+      resetAcc: db.prepare("UPDATE accounts SET cash = ?, reset_at = ? WHERE user_id = ? AND season_id = ?"),
+      updStop: db.prepare("UPDATE futures SET stop = ? WHERE id = ?"),
+      updTp: db.prepare("UPDATE futures SET tp = ? WHERE id = ?"),
+      insFlow: db.prepare("INSERT INTO flows (season_id, tick, sym, notional) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET notional = notional + excluded.notional"),
+      updCash: db.prepare("UPDATE accounts SET cash = ? WHERE user_id = ? AND season_id = ?"),
+      insFill: db.prepare("INSERT INTO fills (user_id, season_id, tick, at, sym, side, qty, price, fee, pnl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+      insFut: db.prepare("INSERT INTO futures (user_id, season_id, sym, side, lev, qty, entry, margin, stop, tp, opened_tick) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)"),
+      delFut: db.prepare("DELETE FROM futures WHERE id = ?"),
+      updFutPart: db.prepare("UPDATE futures SET qty = ?, margin = ? WHERE id = ?"),
+      updFutSplit: db.prepare("UPDATE futures SET qty = ?, entry = ?, stop = ?, tp = ? WHERE id = ?"),
+      delPos: db.prepare("DELETE FROM positions WHERE user_id = ? AND season_id = ? AND sym = ?"),
+      upsertPos: db.prepare("INSERT INTO positions (user_id, season_id, sym, qty, avg) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET qty = excluded.qty, avg = excluded.avg"),
+      updCleared: db.prepare("UPDATE accounts SET cleared_tick = ? WHERE user_id = ? AND season_id = ?"),
+      selDrawings: db.prepare("SELECT sym, factor, items FROM drawings WHERE user_id = ? AND season_id = ?"),
+      delDrawing: db.prepare("DELETE FROM drawings WHERE user_id = ? AND season_id = ? AND sym = ?"),
+      upsertDrawing: db.prepare("INSERT INTO drawings (user_id, season_id, sym, factor, items, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, season_id, sym) DO UPDATE SET factor = excluded.factor, items = excluded.items, updated_at = excluded.updated_at"),
+      clearDrawings: db.prepare("DELETE FROM drawings WHERE user_id = ? AND season_id = ?"),
+    };
   }
 
   // ---------- 계좌 ----------
@@ -62,26 +92,27 @@ export class Broker {
     const hit = this.accounts.get(userId);
     if (hit) return hit;
     const sid = this.season.id;
-    const user = this.db.prepare("SELECT name FROM users WHERE id = ?").get(userId) as { name: string };
-    let row = this.db.prepare("SELECT cash, reset_at, cleared_tick FROM accounts WHERE user_id = ? AND season_id = ?").get(userId, sid) as
+    const user = this.stmts.selUser.get(userId) as { name: string };
+    let row = this.stmts.selAcc.get(userId, sid) as
       { cash: number; reset_at: number | null; cleared_tick: number | null } | undefined;
     if (!row) {
-      this.db.prepare("INSERT INTO accounts (user_id, season_id, cash) VALUES (?, ?, ?)").run(userId, sid, START_CASH);
+      this.stmts.insAcc.run(userId, sid, START_CASH);
       row = { cash: START_CASH, reset_at: null, cleared_tick: null };
     }
     const positions = new Map<string, Position>();
-    for (const p of this.db.prepare("SELECT sym, qty, avg FROM positions WHERE user_id = ? AND season_id = ?").all(userId, sid) as { sym: string; qty: number; avg: number }[])
+    for (const p of this.stmts.selPos.all(userId, sid) as { sym: string; qty: number; avg: number }[])
       positions.set(p.sym, { qty: p.qty, avg: p.avg });
     const futures = new Map<number, Future>();
-    for (const f of this.db.prepare("SELECT id, sym, side, lev, qty, entry, margin, stop, tp FROM futures WHERE user_id = ? AND season_id = ?").all(userId, sid) as unknown as Future[])
+    for (const f of this.stmts.selFut.all(userId, sid) as unknown as Future[])
       futures.set(f.id, { ...f, tp: f.tp ?? null, closing: false });
     const acc: Account = { userId, name: user.name, cash: row.cash, positions, futures, clearedTick: row.cleared_tick, resetAt: row.reset_at };
     this.accounts.set(userId, acc);
+    this.rankCache = null;
     return acc;
   }
   /** 서버 시작 시 이번 시즌 계좌를 모두 올린다 (랭킹·청산 감시용) */
   loadAll() {
-    for (const r of this.db.prepare("SELECT user_id FROM accounts WHERE season_id = ?").all(this.season.id) as { user_id: number }[]) this.account(r.user_id);
+    for (const r of this.stmts.selSeasonUsers.all(this.season.id) as { user_id: number }[]) this.account(r.user_id);
   }
   get players() { return this.accounts.size; }
 
@@ -98,26 +129,27 @@ export class Broker {
 
   me(userId: number) {
     const acc = this.account(userId);
-    const fills = this.db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE user_id = ? AND season_id = ? ORDER BY id DESC LIMIT 50")
-      .all(userId, this.season.id) as unknown as Fill[];
+    const fills = this.stmts.selFills.all(userId, this.season.id) as unknown as Fill[];
     const equity = this.equity(acc);
+    this.ensureRankCache();
     return {
       name: acc.name, cash: acc.cash, equity, returnPct: (equity / START_CASH - 1) * 100, goal: GOAL,
       clearedTick: acc.clearedTick, resetAt: acc.resetAt, tick: this.market.tick,
       positions: [...acc.positions].map(([sym, p]) => ({ sym, qty: p.qty, avg: p.avg })),
       futures: [...acc.futures.values()].map(f => ({ id: f.id, sym: f.sym, side: f.side, lev: f.lev, qty: f.qty, entry: f.entry, margin: f.margin, stop: f.stop, tp: f.tp, liq: liqPrice(f) })),
-      fills, rank: this.ranking().findIndex(r => r.name === acc.name) + 1 || null,
+      fills, rank: this.rankCache?.rankByUser.get(acc.name) ?? null,
     };
   }
 
   reset(userId: number) {
     const acc = this.account(userId);
     tx(this.db, () => {
-      this.db.prepare("DELETE FROM positions WHERE user_id = ? AND season_id = ?").run(userId, this.season.id);
-      this.db.prepare("DELETE FROM futures WHERE user_id = ? AND season_id = ?").run(userId, this.season.id);
-      this.db.prepare("UPDATE accounts SET cash = ?, reset_at = ? WHERE user_id = ? AND season_id = ?").run(START_CASH, this.market.tick, userId, this.season.id);
+      this.stmts.delPosAll.run(userId, this.season.id);
+      this.stmts.delFutAll.run(userId, this.season.id);
+      this.stmts.resetAcc.run(START_CASH, this.market.tick, userId, this.season.id);
     });
     acc.cash = START_CASH; acc.positions.clear(); acc.futures.clear(); acc.resetAt = this.market.tick;
+    this.rankCache = null;
   }
 
   // ---------- 주문 접수 (다음 tick 정산 때 체결되며 Promise가 풀린다) ----------
@@ -200,7 +232,7 @@ export class Broker {
       if (f.side === "long" ? price >= now : price <= now) throw new OrderError(f.side === "long" ? "롱 스탑로스는 현재가보다 낮아야 합니다." : "숏 스탑로스는 현재가보다 높아야 합니다.");
     }
     f.stop = price;
-    this.db.prepare("UPDATE futures SET stop = ? WHERE id = ?").run(price, posId);
+    this.stmts.updStop.run(price, posId);
   }
 
   /** 익절(TP) 설정·해제 (price = null). 롱은 현재가 위, 숏은 현재가 아래여야 한다 */
@@ -213,7 +245,7 @@ export class Broker {
       if (f.side === "long" ? price <= now : price >= now) throw new OrderError(f.side === "long" ? "롱 익절가는 현재가보다 높아야 합니다." : "숏 익절가는 현재가보다 낮아야 합니다.");
     }
     f.tp = price;
-    this.db.prepare("UPDATE futures SET tp = ? WHERE id = ?").run(price, posId);
+    this.stmts.updTp.run(price, posId);
   }
 
   // ---------- tick 정산 ----------
@@ -221,10 +253,15 @@ export class Broker {
   settle(): { type: string; sym: string }[] {
     if (!this.pending.length) return [];
     const orders = this.pending; this.pending = [];
+    this.rankCache = null;
     const auto: { type: string; sym: string }[] = [];
     const tick = this.market.tick + 1, at = Date.now();
     const bySym = new Map<string, Pending[]>();
-    for (const o of orders) bySym.set(o.sym, [...(bySym.get(o.sym) ?? []), o]);
+    for (const o of orders) {
+      let arr = bySym.get(o.sym);
+      if (!arr) { arr = []; bySym.set(o.sym, arr); }
+      arr.push(o);
+    }
 
     for (const [sym, group] of bySym) {
       const q = this.market.quote(sym);
@@ -246,8 +283,7 @@ export class Broker {
       const done: { o: Pending; fill: Fill }[] = [], failed: { o: Pending; err: OrderError }[] = [];
       try {
         tx(this.db, () => {
-          if (net) this.db.prepare("INSERT INTO flows (season_id, tick, sym, notional) VALUES (?, ?, ?, ?) ON CONFLICT DO UPDATE SET notional = notional + excluded.notional")
-            .run(this.season.id, tick, sym, net);
+          if (net) this.stmts.insFlow.run(this.season.id, tick, sym, net);
           for (const o of group) {
             try { done.push({ o, fill: this.execute(o, flow.price, tick, at) }); }
             catch (e) { if (e instanceof OrderError) failed.push({ o, err: e }); else throw e; }
@@ -272,9 +308,8 @@ export class Broker {
   private execute(o: Pending, base: number, tick: number, at: number): Fill {
     const acc = this.account(o.userId), q = this.market.quote(o.sym)!;
     const record = (side: string, qty: number, price: number, fee: number, pnl?: number): Fill => {
-      this.db.prepare("UPDATE accounts SET cash = ? WHERE user_id = ? AND season_id = ?").run(acc.cash, acc.userId, this.season.id);
-      const id = Number(this.db.prepare("INSERT INTO fills (user_id, season_id, tick, at, sym, side, qty, price, fee, pnl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-        .run(acc.userId, this.season.id, tick, at, o.sym, side, qty, price, fee, pnl ?? null).lastInsertRowid);
+      this.stmts.updCash.run(acc.cash, acc.userId, this.season.id);
+      const id = Number(this.stmts.insFill.run(acc.userId, this.season.id, tick, at, o.sym, side, qty, price, fee, pnl ?? null).lastInsertRowid);
       return { id, tick, at, sym: o.sym, side, qty, price, fee, pnl };
     };
 
@@ -311,8 +346,7 @@ export class Broker {
       if (margin < 1) throw new OrderError("예수금이 부족합니다.");
       acc.cash -= margin + fee;
       const f: Future = { id: 0, sym: o.sym, side: o.side, lev: o.lev, qty: notional / price, entry: price, margin, stop: null, tp: null, closing: false };
-      f.id = Number(this.db.prepare("INSERT INTO futures (user_id, season_id, sym, side, lev, qty, entry, margin, stop, tp, opened_tick) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)")
-        .run(acc.userId, this.season.id, o.sym, o.side, o.lev, f.qty, f.entry, f.margin, tick).lastInsertRowid);
+      f.id = Number(this.stmts.insFut.run(acc.userId, this.season.id, o.sym, o.side, o.lev, f.qty, f.entry, f.margin, tick).lastInsertRowid);
       acc.futures.set(f.id, f);
       return record(`${o.side}-open`, f.qty, price, fee);
     }
@@ -327,10 +361,10 @@ export class Broker {
     acc.cash += Math.max(0, margin + pnl - fee); // 격리: 증거금보다 더 잃지는 않는다
     if (share >= 1) {
       acc.futures.delete(f.id);
-      this.db.prepare("DELETE FROM futures WHERE id = ?").run(f.id);
+      this.stmts.delFut.run(f.id);
     } else {
       f.qty -= qty; f.margin -= margin; // 스탑로스는 남은 포지션에 유지
-      this.db.prepare("UPDATE futures SET qty = ?, margin = ? WHERE id = ?").run(f.qty, f.margin, f.id);
+      this.stmts.updFutPart.run(f.qty, f.margin, f.id);
     }
     const side = o.reason === "liquidation" ? "liquidation" : o.reason === "stop" ? "stop" : o.reason === "tp" ? "tp" : `${f.side}-close`;
     if (o.reason === "liquidation") {
@@ -356,21 +390,21 @@ export class Broker {
   private savePosition(acc: Account, sym: string, pos: Position) {
     if (pos.qty <= 1e-12) {
       acc.positions.delete(sym);
-      this.db.prepare("DELETE FROM positions WHERE user_id = ? AND season_id = ? AND sym = ?").run(acc.userId, this.season.id, sym);
+      this.stmts.delPos.run(acc.userId, this.season.id, sym);
     } else {
       acc.positions.set(sym, pos);
-      this.db.prepare("INSERT INTO positions (user_id, season_id, sym, qty, avg) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET qty = excluded.qty, avg = excluded.avg")
-        .run(acc.userId, this.season.id, sym, pos.qty, pos.avg);
+      this.stmts.upsertPos.run(acc.userId, this.season.id, sym, pos.qty, pos.avg);
     }
   }
 
   // ---------- 상장 변화 정산 ----------
   /** market.step() 뒤에 부른다. 영향을 받은 사용자 id를 돌려준다 */
   applyActions(actions: CorporateAction[]): number[] {
+    if (!actions.length) return [];
     const touched = new Set<number>();
     const tick = this.market.tick, at = Date.now();
     const log = (userId: number, sym: string, side: string, qty: number, price: number) =>
-      this.db.prepare("INSERT INTO fills (user_id, season_id, tick, at, sym, side, qty, price, fee) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)").run(userId, this.season.id, tick, at, sym, side, qty, price);
+      this.stmts.insFill.run(userId, this.season.id, tick, at, sym, side, qty, price, 0, null);
     for (const act of actions) {
       if (act.type !== "split" && act.type !== "delist") continue;
       tx(this.db, () => {
@@ -388,7 +422,7 @@ export class Broker {
             }
             for (const f of futs) {
               f.qty /= act.ratio; f.entry *= act.ratio; if (f.stop != null) f.stop *= act.ratio; if (f.tp != null) f.tp *= act.ratio;
-              this.db.prepare("UPDATE futures SET qty = ?, entry = ?, stop = ?, tp = ? WHERE id = ?").run(f.qty, f.entry, f.stop, f.tp, f.id);
+              this.stmts.updFutSplit.run(f.qty, f.entry, f.stop, f.tp, f.id);
             }
           } else {
             // 상장폐지: 마지막 가격으로 전부 정산 (수수료 없음)
@@ -397,30 +431,40 @@ export class Broker {
               acc.cash += Math.max(0, f.margin + pnlOf(f, act.price));
               log(acc.userId, act.sym, "delist", f.qty, act.price);
               acc.futures.delete(f.id);
-              this.db.prepare("DELETE FROM futures WHERE id = ?").run(f.id);
+              this.stmts.delFut.run(f.id);
             }
           }
-          this.db.prepare("UPDATE accounts SET cash = ? WHERE user_id = ? AND season_id = ?").run(acc.cash, acc.userId, this.season.id);
+          this.stmts.updCash.run(acc.cash, acc.userId, this.season.id);
         }
       });
     }
+    if (touched.size) this.rankCache = null;
     return [...touched];
   }
 
   // ---------- 랭킹 ----------
-  /** 총자산 순. 같으면 100배를 먼저 달성한 사람이 위. 100배 달성 시점도 여기서 기록한다 */
-  ranking(limit = 50): RankRow[] {
-    const rows = [...this.accounts.values()].map(acc => {
+  private ensureRankCache() {
+    if (this.rankCache && this.rankCache.tick === this.market.tick) return this.rankCache;
+    const raw = [...this.accounts.values()].map(acc => {
       const equity = this.equity(acc);
       if (equity >= GOAL && acc.clearedTick == null) {
         acc.clearedTick = this.market.tick;
-        this.db.prepare("UPDATE accounts SET cleared_tick = ? WHERE user_id = ? AND season_id = ?").run(acc.clearedTick, acc.userId, this.season.id);
+        this.stmts.updCleared.run(acc.clearedTick, acc.userId, this.season.id);
         this.broadcasts.push(`[100배졸업] 🏆 ${acc.name}님이 총자산 $${Math.round(equity).toLocaleString()} 달성으로 100배 졸업에 성공했습니다!`);
       }
       return { name: acc.name, equity, returnPct: (equity / START_CASH - 1) * 100, clearedTick: acc.clearedTick };
     });
-    rows.sort((a, b) => b.equity - a.equity || (a.clearedTick ?? Infinity) - (b.clearedTick ?? Infinity));
-    return rows.slice(0, limit).map((r, i) => ({ rank: i + 1, ...r }));
+    raw.sort((a, b) => b.equity - a.equity || (a.clearedTick ?? Infinity) - (b.clearedTick ?? Infinity));
+    const rows = raw.map((r, i) => ({ rank: i + 1, ...r }));
+    const rankByUser = new Map<string, number>();
+    for (const r of rows) rankByUser.set(r.name, r.rank);
+    this.rankCache = { tick: this.market.tick, rows, rankByUser };
+    return this.rankCache;
+  }
+
+  /** 총자산 순. 같으면 100배를 먼저 달성한 사람이 위. 100배 달성 시점도 여기서 기록한다 */
+  ranking(limit = 50): RankRow[] {
+    return this.ensureRankCache().rows.slice(0, limit);
   }
 
   /** 이번 tick에 발생한 전광판 알림(100배 졸업·강제청산)을 꺼낸다 */
@@ -433,8 +477,7 @@ export class Broker {
 
   // ---------- 차트 그리기 서버 보관 ----------
   getDrawings(userId: number): Record<string, { factor: number; items: unknown[] }> {
-    const rows = this.db.prepare("SELECT sym, factor, items FROM drawings WHERE user_id = ? AND season_id = ?")
-      .all(userId, this.season.id) as { sym: string; factor: number; items: string }[];
+    const rows = this.stmts.selDrawings.all(userId, this.season.id) as { sym: string; factor: number; items: string }[];
     const out: Record<string, { factor: number; items: unknown[] }> = {};
     for (const r of rows) {
       try { out[r.sym] = { factor: r.factor, items: JSON.parse(r.items) }; } catch { /* 손상된 항목 무시 */ }
@@ -446,16 +489,14 @@ export class Broker {
     if (!sym || sym.length > 12 || !Number.isFinite(factor) || factor <= 0 || !Array.isArray(items))
       throw new OrderError("그리기 데이터 형식이 올바르지 않습니다.");
     if (!items.length) {
-      this.db.prepare("DELETE FROM drawings WHERE user_id = ? AND season_id = ? AND sym = ?").run(userId, this.season.id, sym);
+      this.stmts.delDrawing.run(userId, this.season.id, sym);
       return;
     }
     const json = JSON.stringify(items.slice(0, 100));
-    this.db.prepare(
-      "INSERT INTO drawings (user_id, season_id, sym, factor, items, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, season_id, sym) DO UPDATE SET factor = excluded.factor, items = excluded.items, updated_at = excluded.updated_at",
-    ).run(userId, this.season.id, sym, factor, json, Date.now());
+    this.stmts.upsertDrawing.run(userId, this.season.id, sym, factor, json, Date.now());
   }
 
   clearDrawings(userId: number) {
-    this.db.prepare("DELETE FROM drawings WHERE user_id = ? AND season_id = ?").run(userId, this.season.id);
+    this.stmts.clearDrawings.run(userId, this.season.id);
   }
 }

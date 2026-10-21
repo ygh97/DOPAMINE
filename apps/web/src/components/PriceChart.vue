@@ -144,8 +144,11 @@ watch(() => m.lastBars, bars => {
   if (b.timestamp === last.timestamp) base[base.length - 1] = b;
   else if (b.timestamp > last.timestamp) { base.push(b); if (base.length > 1500) base.shift(); }
   else return;
+  if (period.value === 1) { chart.updateData(b); return; }
   const span = period.value * 60_000, t0 = Math.floor(b.timestamp / span) * span;
-  chart.updateData(aggregate(base.filter(x => x.timestamp >= t0), period.value)[0]);
+  let i = base.length - 1;
+  while (i > 0 && base[i - 1].timestamp >= t0) i--;
+  chart.updateData(aggregate(base.slice(i), period.value)[0]);
 });
 watch(() => m.selected, sym => void show(sym));
 watch(() => m.barsEpoch[m.selected], () => void show(m.selected)); // 주식병합 등으로 과거 봉이 바뀜

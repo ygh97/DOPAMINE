@@ -1,4 +1,4 @@
-// 도파민 센터 서버: 벽시계 기준 GameLoop + SSE 시세 방송 + 참가·현물 주문.
+// 도파민 센터 서버: 벽시계 기준 GameLoop + SSE 시세 방송 + 참가·현물·선물 주문.
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
@@ -41,6 +41,7 @@ function rollover() {
   season = finishSeason(db, season, broker.ranking(Infinity));
   ({ market, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS));
   broker = new Broker(db, season, market);
+  cachedTick = -1;
   saveSnapshot(db, season, market);
   app.log.info(`시즌 ${prev} 종료 → 시즌 ${season.id} 시작 (seed ${season.seed})`);
   send("season", seasonInfo());
@@ -52,8 +53,27 @@ const r7 = (v: number) => Number(v.toPrecision(7));
 const packBar = (b: Bar) => [b.timestamp, r7(b.open), r7(b.high), r7(b.low), r7(b.close), b.volume];
 const packQuote = (q: Quote) => ({ ...q, price: r7(q.price), prev: r7(q.prev), per: q.per && r7(q.per), cap: q.cap && Math.round(q.cap) });
 
+// 틱당 1회만 압축 봉·시세를 계산해 SSE 및 /api/poll 요청에서 공유한다
+let cachedTick = -1;
+let cachedBars: Record<string, number[]> = {};
+let cachedQuotes: Quote[] = [];
+
+function ensureTickCache() {
+  if (cachedTick === market.tick) return;
+  const bars: Record<string, number[]> = {};
+  const quotes = market.quotes().map(packQuote);
+  for (const q of quotes) {
+    const b = market.bars(q.sym).at(-1);
+    if (b) bars[q.sym] = [...packBar(b), q.prev];
+  }
+  cachedQuotes = quotes;
+  cachedBars = bars;
+  cachedTick = market.tick;
+}
+
 function snapshot() {
-  return { tick: market.tick, date: market.gameDate(), season: seasonInfo(), sectors: SECTORS, quotes: market.quotes().map(packQuote), news: market.news.slice(0, 50), chat: chat.recent(50) };
+  ensureTickCache();
+  return { tick: market.tick, date: market.gameDate(), season: seasonInfo(), sectors: SECTORS, quotes: cachedQuotes, news: market.news.slice(0, 50), chat: chat.recent(50) };
 }
 
 // ---------- SSE ----------
@@ -63,6 +83,7 @@ const settledLog: { tick: number; type: string; sym: string }[] = [];
 const splitLog: { tick: number; sym: string }[] = [];
 let lastAssetsTick = 0;
 const send = (event: string, data: unknown) => {
+  if (!clients.size) return;
   const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const c of clients) c.write(chunk);
 };
@@ -87,21 +108,25 @@ const loop = setInterval(() => {
     assetsChanged ||= result.assetsChanged;
     if (market.tick % SNAPSHOT_EVERY === 0) saveSnapshot(db, season, market);
   }
+  ensureTickCache();
   for (const n of news.slice(-50)) send("news", n);
   // 상장 변화: 목록 갱신. 주식병합된 종목은 과거 차트가 바뀌었으니 다시 받으라고 알린다
-  if (assetsChanged) { lastAssetsTick = market.tick; for (const s of reload) splitLog.push({ tick: market.tick, sym: s }); send("assets", { quotes: market.quotes().map(packQuote), reload }); }
+  if (assetsChanged) {
+    lastAssetsTick = market.tick;
+    for (const s of reload) splitLog.push({ tick: market.tick, sym: s });
+    if (splitLog.length > 200) splitLog.splice(0, splitLog.length - 200);
+    send("assets", { quotes: cachedQuotes, reload });
+  }
   // 보유 종목이 병합·폐지로 정산됐다: 그 종목을 가진 사람은 계좌를 다시 받는다
-  if (settled.length) { for (const s of settled) settledLog.push({ tick: market.tick, ...s }); if (settledLog.length > 200) settledLog.splice(0, settledLog.length - 200); send("settled", settled); }
+  if (settled.length) {
+    for (const s of settled) settledLog.push({ tick: market.tick, ...s });
+    if (settledLog.length > 200) settledLog.splice(0, settledLog.length - 200);
+    send("settled", settled);
+  }
   const rankRows = market.tick % 5 === 0 ? broker.ranking(20) : null;
   for (const text of broker.drainBroadcasts()) send("chat", chat.system(text));
   if (!clients.size) return;
-  // 종목별 [timestamp, open, high, low, close, volume, 전일 종가]
-  const bars: Record<string, number[]> = {};
-  for (const q of market.quotes()) {
-    const b = market.bars(q.sym).at(-1);
-    if (b) bars[q.sym] = [...packBar(b), r7(q.prev)];
-  }
-  send("tick", { tick: market.tick, date: market.gameDate(), bars });
+  send("tick", { tick: market.tick, date: market.gameDate(), bars: cachedBars });
   if (rankRows) send("ranking", { rows: rankRows, players: broker.players });
 }, Math.max(10, Math.min(250, TICK_MS / 2)));
 
@@ -133,23 +158,19 @@ app.get("/api/snapshot", async () => snapshot());
 
 app.get<{ Querystring: { tick?: string } }>("/api/poll", async req => {
   const since = Number(req.query.tick) || market.tick;
-  const bars: Record<string, number[]> = {};
-  for (const q of market.quotes()) {
-    const b = market.bars(q.sym).at(-1);
-    if (b) bars[q.sym] = [...packBar(b), r7(q.prev)];
-  }
+  ensureTickCache();
   const settled = settledLog.filter(s => s.tick > since).map(({ type, sym }) => ({ type, sym }));
   const reload = [...new Set(splitLog.filter(s => s.tick > since).map(s => s.sym))];
   return {
     tick: market.tick,
     date: market.gameDate(),
     season: seasonInfo(),
-    bars,
+    bars: cachedBars,
     news: market.news.filter(n => n.tick > since).slice(0, 30).reverse(),
     chat: chat.recent(50),
     ranking: { rows: broker.ranking(20), players: broker.players },
     settled: settled.length ? settled : undefined,
-    assets: lastAssetsTick > since ? { quotes: market.quotes().map(packQuote), reload } : undefined,
+    assets: lastAssetsTick > since ? { quotes: cachedQuotes, reload } : undefined,
   };
 });
 
@@ -355,6 +376,7 @@ const MIME: Record<string, string> = {
   ".ico": "image/x-icon",
   ".json": "application/json; charset=utf-8",
 };
+const staticCache = new Map<string, { mtimeMs: number; buf: Buffer; mime: string; immutable: boolean }>();
 if (existsSync(join(WEB_DIST, "index.html"))) {
   const root = resolve(WEB_DIST);
   app.setNotFoundHandler((req, reply) => {
@@ -362,9 +384,20 @@ if (existsSync(join(WEB_DIST, "index.html"))) {
     const reqPath = req.url.split("?")[0];
     const target = resolve(root, `.${reqPath}`);
     const file = target.startsWith(root) && existsSync(target) && statSync(target).isFile() ? target : join(root, "index.html");
-    const ext = extname(file);
-    if (file.includes(`${join("dist", "assets")}`)) reply.header("Cache-Control", "public, max-age=31536000, immutable");
-    return reply.type(MIME[ext] ?? "application/octet-stream").send(readFileSync(file));
+    const st = statSync(file);
+    let hit = staticCache.get(file);
+    if (!hit || hit.mtimeMs !== st.mtimeMs) {
+      const ext = extname(file);
+      hit = {
+        mtimeMs: st.mtimeMs,
+        buf: readFileSync(file),
+        mime: MIME[ext] ?? "application/octet-stream",
+        immutable: file.includes(`${join("dist", "assets")}`),
+      };
+      staticCache.set(file, hit);
+    }
+    if (hit.immutable) reply.header("Cache-Control", "public, max-age=31536000, immutable");
+    return reply.type(hit.mime).send(hit.buf);
   });
 }
 
