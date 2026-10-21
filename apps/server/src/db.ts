@@ -57,6 +57,7 @@ export function openDb(file: string): Db {
       entry REAL NOT NULL,
       margin REAL NOT NULL,
       stop REAL,
+      tp REAL,
       opened_tick INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS futures_by_user ON futures (user_id, season_id);
@@ -127,6 +128,7 @@ export function openDb(file: string): Db {
     "ALTER TABLE seasons ADD COLUMN ended_at INTEGER",
     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE fills ADD COLUMN pnl REAL",
+    "ALTER TABLE futures ADD COLUMN tp REAL",
   ]) {
     try { db.exec(sql); } catch { /* 이미 있음 */ }
   }

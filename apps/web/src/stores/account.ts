@@ -10,7 +10,7 @@ const writeToken = (t: string) => { try { if (t) localStorage.setItem(TOKEN_KEY,
 export interface Fill { id: number; tick: number; at: number; sym: string; side: string; qty: number; price: number; fee: number; pnl?: number }
 export interface FuturePos {
   id: number; sym: string; side: "long" | "short"; lev: number;
-  qty: number; entry: number; margin: number; stop: number | null; liq: number;
+  qty: number; entry: number; margin: number; stop: number | null; tp: number | null; liq: number;
 }
 export interface Me {
   name: string; cash: number; equity: number; returnPct: number; goal: number;
@@ -133,6 +133,14 @@ export const useAccount = defineStore("account", () => {
     } catch (e) { notify((e as Error).message, "error"); }
   }
 
+  async function setTp(posId: number, price: number | null) {
+    try {
+      const r = await api<{ me: Me }>("/api/tp", { posId, price });
+      me.value = r.me;
+      notify(price == null ? "익절가를 해제했습니다." : `익절가 $${price.toFixed(price < 1 ? 4 : 2)} 설정`);
+    } catch (e) { notify((e as Error).message, "error"); }
+  }
+
   async function reset() {
     try { me.value = (await api<{ me: Me }>("/api/reset", { confirm: true })).me; notify("$100,000부터 다시 시작합니다."); }
     catch (e) { notify((e as Error).message, "error"); }
@@ -206,6 +214,7 @@ export const useAccount = defineStore("account", () => {
     if (latest && latest.id > prevId) {
       if (latest.side === "liquidation") notify(`${latest.sym} 선물 포지션이 강제 청산됐습니다.`, "error");
       else if (latest.side === "stop") notify(`${latest.sym} 스탑로스가 체결됐습니다.`);
+      else if (latest.side === "tp") notify(`${latest.sym} 목표 익절가가 체결됐습니다!`);
     }
   });
   // 새 시즌: 계좌가 $100,000으로 새로 생긴다
@@ -213,5 +222,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, closeAll, setStop, reset, fetchDrawings, syncDrawing, sendChat, reportChat, adminChat, adminBan, adminHide };
+  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, closeAll, setStop, setTp, reset, fetchDrawings, syncDrawing, sendChat, reportChat, adminChat, adminBan, adminHide };
 });

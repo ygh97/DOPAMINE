@@ -38,8 +38,13 @@ function restart() {
     <div class="clock" :title="left">S{{ m.season?.id ?? 1 }} · <b>{{ dateText(m.date) }}</b> <small id="seasonLeft" class="muted">{{ left }}</small></div>
     <span class="conn" :class="{ on: m.connected }">{{ m.connected ? "실시간" : "재연결 중" }}</span>
 
+    <div v-if="a.me" id="topUserNick" class="top-center-nick">
+      <span class="nick-label">트레이더</span>
+      <b class="nick-name">{{ a.me.name }}</b>
+      <span class="nick-rank">{{ a.me.rank ? `#${a.me.rank}위` : "순위 집계중" }}</span>
+    </div>
+
     <div v-if="a.me" class="account">
-      <div class="kv"><span>{{ a.me.name }}</span><b>{{ a.me.rank ? `${a.me.rank}위` : "-" }}</b></div>
       <div class="kv"><span>총자산</span><b id="equity">{{ money(a.equity) }}</b></div>
       <div class="kv"><span>수익률</span><b :class="ret >= 0 ? 'up' : 'down'">{{ pct(ret) }}</b></div>
       <div class="kv"><span>예수금</span><b>{{ money(a.me.cash) }}</b></div>

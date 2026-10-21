@@ -23,7 +23,7 @@ const RESET_MAX_LEV = 5;
 export class OrderError extends Error {}
 
 export interface Position { qty: number; avg: number }
-export interface Future { id: number; sym: string; side: "long" | "short"; lev: number; qty: number; entry: number; margin: number; stop: number | null; closing: boolean }
+export interface Future { id: number; sym: string; side: "long" | "short"; lev: number; qty: number; entry: number; margin: number; stop: number | null; tp: number | null; closing: boolean }
 interface Account {
   userId: number; name: string; cash: number; positions: Map<string, Position>; futures: Map<number, Future>;
   clearedTick: number | null; resetAt: number | null;
@@ -33,7 +33,7 @@ type Settle = { resolve: (f: Fill) => void; reject: (e: Error) => void };
 type Pending =
   | ({ kind: "spot"; userId: number; sym: string; side: "buy" | "sell"; pct: number } & Settle)
   | ({ kind: "open"; userId: number; sym: string; side: "long" | "short"; lev: number; pct: number } & Settle)
-  | ({ kind: "close"; userId: number; sym: string; posId: number; pct: number; reason: "user" | "liquidation" | "stop" } & Partial<Settle>);
+  | ({ kind: "close"; userId: number; sym: string; posId: number; pct: number; reason: "user" | "liquidation" | "stop" | "tp" } & Partial<Settle>);
 export interface RankRow { rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }
 
 /** 주식·신흥주는 1주 단위, 코인은 0.000001 단위 */
@@ -72,8 +72,8 @@ export class Broker {
     for (const p of this.db.prepare("SELECT sym, qty, avg FROM positions WHERE user_id = ? AND season_id = ?").all(userId, sid) as { sym: string; qty: number; avg: number }[])
       positions.set(p.sym, { qty: p.qty, avg: p.avg });
     const futures = new Map<number, Future>();
-    for (const f of this.db.prepare("SELECT id, sym, side, lev, qty, entry, margin, stop FROM futures WHERE user_id = ? AND season_id = ?").all(userId, sid) as unknown as Future[])
-      futures.set(f.id, { ...f, closing: false });
+    for (const f of this.db.prepare("SELECT id, sym, side, lev, qty, entry, margin, stop, tp FROM futures WHERE user_id = ? AND season_id = ?").all(userId, sid) as unknown as Future[])
+      futures.set(f.id, { ...f, tp: f.tp ?? null, closing: false });
     const acc: Account = { userId, name: user.name, cash: row.cash, positions, futures, clearedTick: row.cleared_tick, resetAt: row.reset_at };
     this.accounts.set(userId, acc);
     return acc;
@@ -104,7 +104,7 @@ export class Broker {
       name: acc.name, cash: acc.cash, equity, returnPct: (equity / START_CASH - 1) * 100, goal: GOAL,
       clearedTick: acc.clearedTick, resetAt: acc.resetAt, tick: this.market.tick,
       positions: [...acc.positions].map(([sym, p]) => ({ sym, qty: p.qty, avg: p.avg })),
-      futures: [...acc.futures.values()].map(f => ({ id: f.id, sym: f.sym, side: f.side, lev: f.lev, qty: f.qty, entry: f.entry, margin: f.margin, stop: f.stop, liq: liqPrice(f) })),
+      futures: [...acc.futures.values()].map(f => ({ id: f.id, sym: f.sym, side: f.side, lev: f.lev, qty: f.qty, entry: f.entry, margin: f.margin, stop: f.stop, tp: f.tp, liq: liqPrice(f) })),
       fills, rank: this.ranking().findIndex(r => r.name === acc.name) + 1 || null,
     };
   }
@@ -202,6 +202,19 @@ export class Broker {
     this.db.prepare("UPDATE futures SET stop = ? WHERE id = ?").run(price, posId);
   }
 
+  /** 익절(TP) 설정·해제 (price = null). 롱은 현재가 위, 숏은 현재가 아래여야 한다 */
+  setTp(userId: number, posId: number, price: number | null) {
+    const f = this.account(userId).futures.get(posId);
+    if (!f) throw new OrderError("선물 포지션을 찾을 수 없습니다.");
+    if (price != null) {
+      const now = this.price(f.sym);
+      if (!Number.isFinite(price) || price <= 0) throw new OrderError("익절 가격이 올바르지 않습니다.");
+      if (f.side === "long" ? price <= now : price >= now) throw new OrderError(f.side === "long" ? "롱 익절가는 현재가보다 높아야 합니다." : "숏 익절가는 현재가보다 낮아야 합니다.");
+    }
+    f.tp = price;
+    this.db.prepare("UPDATE futures SET tp = ? WHERE id = ?").run(price, posId);
+  }
+
   // ---------- tick 정산 ----------
   /** 종목별 순매수로 충격을 반영하고 이번 tick 주문을 체결한다. market.step() 전에 부른다 */
   settle(): { type: string; sym: string }[] {
@@ -296,8 +309,8 @@ export class Broker {
       const margin = budget / (1 + o.lev * FEE), notional = margin * o.lev, fee = notional * FEE;
       if (margin < 1) throw new OrderError("예수금이 부족합니다.");
       acc.cash -= margin + fee;
-      const f: Future = { id: 0, sym: o.sym, side: o.side, lev: o.lev, qty: notional / price, entry: price, margin, stop: null, closing: false };
-      f.id = Number(this.db.prepare("INSERT INTO futures (user_id, season_id, sym, side, lev, qty, entry, margin, stop, opened_tick) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)")
+      const f: Future = { id: 0, sym: o.sym, side: o.side, lev: o.lev, qty: notional / price, entry: price, margin, stop: null, tp: null, closing: false };
+      f.id = Number(this.db.prepare("INSERT INTO futures (user_id, season_id, sym, side, lev, qty, entry, margin, stop, tp, opened_tick) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)")
         .run(acc.userId, this.season.id, o.sym, o.side, o.lev, f.qty, f.entry, f.margin, tick).lastInsertRowid);
       acc.futures.set(f.id, f);
       return record(`${o.side}-open`, f.qty, price, fee);
@@ -318,7 +331,7 @@ export class Broker {
       f.qty -= qty; f.margin -= margin; // 스탑로스는 남은 포지션에 유지
       this.db.prepare("UPDATE futures SET qty = ?, margin = ? WHERE id = ?").run(f.qty, f.margin, f.id);
     }
-    const side = o.reason === "liquidation" ? "liquidation" : o.reason === "stop" ? "stop" : `${f.side}-close`;
+    const side = o.reason === "liquidation" ? "liquidation" : o.reason === "stop" ? "stop" : o.reason === "tp" ? "tp" : `${f.side}-close`;
     return record(side, qty, price, fee, pnl);
   }
 
@@ -329,9 +342,10 @@ export class Broker {
       const p = this.price(f.sym), liq = liqPrice(f), long = f.side === "long";
       const liquidate = long ? p <= liq : p >= liq;
       const stopped = f.stop != null && (long ? p <= f.stop : p >= f.stop);
-      if (!liquidate && !stopped) continue;
+      const tookProfit = f.tp != null && (long ? p >= f.tp : p <= f.tp);
+      if (!liquidate && !stopped && !tookProfit) continue;
       f.closing = true;
-      this.pending.push({ kind: "close", userId: acc.userId, sym: f.sym, posId: f.id, pct: 100, reason: liquidate ? "liquidation" : "stop" });
+      this.pending.push({ kind: "close", userId: acc.userId, sym: f.sym, posId: f.id, pct: 100, reason: liquidate ? "liquidation" : stopped ? "stop" : "tp" });
     }
   }
 
@@ -369,8 +383,8 @@ export class Broker {
               this.savePosition(acc, act.sym, { qty: whole, avg: pos.avg * act.ratio });
             }
             for (const f of futs) {
-              f.qty /= act.ratio; f.entry *= act.ratio; if (f.stop != null) f.stop *= act.ratio;
-              this.db.prepare("UPDATE futures SET qty = ?, entry = ?, stop = ? WHERE id = ?").run(f.qty, f.entry, f.stop, f.id);
+              f.qty /= act.ratio; f.entry *= act.ratio; if (f.stop != null) f.stop *= act.ratio; if (f.tp != null) f.tp *= act.ratio;
+              this.db.prepare("UPDATE futures SET qty = ?, entry = ?, stop = ?, tp = ? WHERE id = ?").run(f.qty, f.entry, f.stop, f.tp, f.id);
             }
           } else {
             // 상장폐지: 마지막 가격으로 전부 정산 (수수료 없음)

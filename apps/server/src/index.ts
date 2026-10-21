@@ -219,6 +219,15 @@ app.post<{ Body: { posId: number; price: number | null } }>("/api/stop", {
   return { me: broker.me(id) };
 });
 
+app.post<{ Body: { posId: number; price: number | null } }>("/api/tp", {
+  schema: { body: { type: "object", required: ["posId"], properties: { posId: { type: "integer" }, price: { type: ["number", "null"] } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  broker.setTp(id, req.body.posId, req.body.price ?? null);
+  return { me: broker.me(id) };
+});
+
 app.post<{ Body: { scope?: "spot" | "futures" | "all" } }>("/api/close-all", {
   schema: { body: { type: "object", properties: { scope: { type: "string", enum: ["spot", "futures", "all"] } } } },
 }, async (req, reply) => {

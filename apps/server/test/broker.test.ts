@@ -397,3 +397,22 @@ test("일괄매도·일괄종료(closeAll): 현물 다종목과 선물 포지션
   assert.equal(after.positions.length, 0);
   assert.equal(after.futures.length, 0);
 });
+
+
+test("익절(TP): 설정 검증 및 목표가 도달 시 자동 익절 체결", async () => {
+  const s = setup();
+  const u = s.user("tp_trader");
+  await openFut(s, u, "NVDA", "long", 3, 30);
+  const f = s.broker.me(u).futures[0];
+  const now = s.market.quote("NVDA")!.price;
+  assert.throws(() => s.broker.setTp(u, f.id, now * 0.95), OrderError, "롱 익절가는 현재가 위여야 함");
+  s.broker.setTp(u, f.id, now * 1.002);
+  while (s.market.quote("NVDA")!.price <= now * 1.003) s.market.applyFlow("NVDA", 1e11);
+  s.broker.checkTriggers();
+  const auto = s.broker.settle();
+  assert.deepEqual(auto, [{ type: "tp", sym: "NVDA" }]);
+  const me = s.broker.me(u);
+  assert.equal(me.futures.length, 0);
+  assert.equal(me.fills[0].side, "tp");
+  assert.ok((me.fills[0].pnl ?? 0) > 0, "익절 실현손익 양수");
+});

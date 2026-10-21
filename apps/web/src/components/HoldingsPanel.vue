@@ -7,6 +7,7 @@ import { useMarket } from "../stores/market";
 const a = useAccount();
 const m = useMarket();
 const stops = reactive<Record<number, string>>({});
+const tps = reactive<Record<number, string>>({});
 
 const SIDE: Record<string, string> = {
   buy: "매수",
@@ -17,11 +18,12 @@ const SIDE: Record<string, string> = {
   "short-close": "숏 종료",
   liquidation: "강제 청산",
   stop: "스탑로스",
+  tp: "익절",
   delist: "상장폐지 정산",
   "split-cash": "병합 단주 정산",
 };
 const sideClass = (s: string) =>
-  s === "buy" || s === "long-open" ? "up" : s === "sell" || s === "short-open" || s === "liquidation" ? "down" : "muted";
+  s === "buy" || s === "long-open" || s === "tp" ? "up" : s === "sell" || s === "short-open" || s === "liquidation" ? "down" : "muted";
 const qtyText = (sym: string, q: number) => (m.quotes[sym]?.market === "coin" || !Number.isInteger(q) ? +q.toFixed(6) : q.toLocaleString());
 const signedMoney = (v: number) => `${v >= 0 ? "+" : "-"}${money(Math.abs(v))}`;
 
@@ -48,13 +50,22 @@ const fillStats = computed(() => {
 async function applyStop(id: number) {
   const raw = (stops[id] ?? "").trim();
   if (!raw) return;
-  const price = Number(raw);
-  await a.setStop(id, price);
+  await a.setStop(id, Number(raw));
   stops[id] = "";
 }
 async function clearStop(id: number) {
   await a.setStop(id, null);
   stops[id] = "";
+}
+async function applyTp(id: number) {
+  const raw = (tps[id] ?? "").trim();
+  if (!raw) return;
+  await a.setTp(id, Number(raw));
+  tps[id] = "";
+}
+async function clearTp(id: number) {
+  await a.setTp(id, null);
+  tps[id] = "";
 }
 async function shareSpot(p: { sym: string; avg: number; price: number; pnl: number; pnlPct: number }) {
   m.socialTab = "chat";
@@ -145,7 +156,7 @@ async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; e
     </div>
     <div v-else-if="a.holdTab === 'fut'" class="table-scroll">
       <table v-if="a.futures.length" id="futures" class="grid">
-        <thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>청산가</th><th>증거금</th><th>손익</th><th>스탑로스</th><th>즉시 종료·공유</th></tr></thead>
+        <thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>청산가</th><th>증거금</th><th>손익</th><th>익절(TP)</th><th>손절(SL)</th><th>즉시 종료·공유</th></tr></thead>
         <tbody>
           <tr v-for="f in a.futures" :key="f.id" :data-sym="f.sym" :data-id="f.id" class="clickable" @click="m.select(f.sym)">
             <td><b>{{ f.sym }}</b> <small class="muted">{{ f.name }}</small></td>
@@ -157,7 +168,12 @@ async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; e
             <td>{{ money(f.margin) }}</td>
             <td :class="f.pnl >= 0 ? 'up' : 'down'">{{ signedMoney(f.pnl) }} <small>({{ pct(f.pnlPct) }})</small></td>
             <td class="stop-cell" @click.stop>
-              <input v-model="stops[f.id]" class="stop-input" inputmode="decimal" :placeholder="f.stop != null ? money(f.stop) : '미설정'" aria-label="스탑로스 가격" @keydown.enter="applyStop(f.id)">
+              <input v-model="tps[f.id]" class="stop-input" inputmode="decimal" :placeholder="f.tp != null ? money(f.tp) : '익절가'" aria-label="익절 가격" @keydown.enter="applyTp(f.id)">
+              <button class="mini-btn" data-act="tp-set" @click="applyTp(f.id)">설정</button>
+              <button v-if="f.tp != null" class="mini-btn" data-act="tp-clear" @click="clearTp(f.id)">해제</button>
+            </td>
+            <td class="stop-cell" @click.stop>
+              <input v-model="stops[f.id]" class="stop-input" inputmode="decimal" :placeholder="f.stop != null ? money(f.stop) : '손절가'" aria-label="스탑로스 가격" @keydown.enter="applyStop(f.id)">
               <button class="mini-btn" data-act="stop-set" @click="applyStop(f.id)">설정</button>
               <button v-if="f.stop != null" class="mini-btn" data-act="stop-clear" @click="clearStop(f.id)">해제</button>
             </td>

@@ -357,3 +357,38 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
 @media (max-width: 760px) {
   .my-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+
+/* 상단 바 정중앙 닉네임 및 LIVE 최근 5개 뉴스 펼치기 */
+.topbar { position: relative; }
+.top-center-nick {
+  margin-left: auto; margin-right: auto;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 12px; border-radius: 999px;
+  background: var(--accent-soft); border: 1px solid var(--line);
+}
+.top-center-nick + .account { margin-left: 0; }
+.nick-label { font-size: 11px; color: var(--muted); }
+.nick-name { font-size: 14px; color: var(--accent); }
+.nick-rank { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 99px; background: var(--panel); color: var(--text); }
+
+.newsline-wrap { position: relative; z-index: 40; }
+.news-recent5 {
+  list-style: none; margin: 0; padding: 4px 16px 8px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+  box-shadow: 0 8px 20px rgba(0,0,0,.1);
+  display: grid; gap: 2px;
+}
+.recent5-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 6px; border-radius: 6px; cursor: pointer;
+}
+.recent5-item:hover { background: var(--panel-2); }
+.recent5-idx { width: 18px; text-align: center; font-size: 11px; font-weight: 700; color: var(--muted); }
+.recent5-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent5-syms { display: inline-flex; gap: 3px; }
+.recent5-empty { padding: 8px; text-align: center; }
+
+@media (max-width: 900px) {
+  .top-center-nick { margin: 0; }
+}
