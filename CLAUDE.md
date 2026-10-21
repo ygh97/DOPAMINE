@@ -18,7 +18,7 @@
 npm install
 npm run dev:server        # http://127.0.0.1:4810  (8787은 다른 프로그램이 쓰고 있음)
 npm run dev:web           # http://127.0.0.1:5173  (/api는 4810으로 프록시)
-npm test                  # 엔진 11개 + 서버 13개 테스트 (node --test, 약 5초)
+npm test                  # 엔진 11개 + 서버 18개 테스트 (node --test, 약 5초)
 npm run typecheck         # engine·server는 tsc, web은 vue-tsc
 npm run check             # 빠른 전체 확인: 테스트 + 타입체크 + 1일 시뮬레이션 + 빠른 E2E (약 16초)
 npm run sim               # 1주 시즌 시뮬레이션, seed 3개 병렬 (약 16초). --days N으로 기간 조절
@@ -26,6 +26,7 @@ npm run e2e               # 서버+Vite를 띄우고 Playwright로 확인, 재�
 npm run e2e:split         # 주식병합 뒤 그린 선·액면가가 같은 배수로 옮겨지는지 (약 5초)
 npm run e2e:m2            # 두 사람 참가·매수·매도·랭킹·새로고침·다시 시작 (약 8초)
 npm run e2e:season        # 스냅샷 재시작, 15초 시즌 종료 → 명예의 전당 → 새 시즌 (약 16초)
+npm run e2e:m4            # 선물 롱·숏·레버리지·스탑로스·분할 종료·강제 청산·리셋 제한 (약 6초)
 ```
 
 ## 규칙
@@ -44,4 +45,4 @@ npm run e2e:season        # 스냅샷 재시작, 15초 시즌 종료 → 명예�
 
 ## 현재 단계
 
-M3 완료 (시즌 종료·리셋, 명예의 전당, 엔진 스냅샷 재시작). 다음은 M4: 선물(롱·숏, 레버리지, 강제 청산, 분할 종료, 스탑로스).
+M4 완료 (선물 롱·숏·레버리지, 강제 청산, 스탑로스, 분할 종료). 다음은 M5: 그리기 서버 저장, 모바일 다듬기.

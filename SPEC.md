@@ -232,7 +232,10 @@ r = 시장 요인 × 시장 베타 + 업종 요인 × 업종 베타      같은 
 | `POST /api/logout`, `GET /api/ranking`, `GET /api/hall` (명예의 전당 최근 10시즌) | |
 | SSE `season` | 시즌이 바뀜 → 스냅샷·계좌·차트를 다시 받는다 |
 | SSE 추가 | `ranking`: 상위 20명 + 참가자 수 (5 tick마다) / `settled`: 병합·폐지로 정산된 종목 (보유자는 계좌 다시 받기) |
-| M4~ | `/api/futures/open`, `/api/futures/close`, `/api/stop`, `/api/chat` |
+| `POST /api/futures/open` (Bearer) | `{sym, side: long\|short, lev, pct}` → 다음 tick에 체결 → `{fill, me}` |
+| `POST /api/futures/close` (Bearer) | `{posId, pct}` → 다음 tick에 체결 → `{fill, me}` |
+| `POST /api/stop` (Bearer) | `{posId, price}` (null이면 해제) → `{me}` |
+| M6~ | `/api/chat` |
 
 - 대역폭: tick 이벤트 약 1.5KB/s (실측). 원본(315KB/2초)의 약 1/100.
 - 포트: 서버 4810, Vite 5173 (8787은 이 PC에서 다른 프로그램이 사용).
@@ -248,7 +251,7 @@ r = 시장 요인 × 시장 베타 + 업종 요인 × 업종 베타      같은 
 | M1 ✅ | 모노레포 + 엔진 TS 이전 + 서버 SSE + Vue 화면(시세·차트·뉴스) | 브라우저에서 서버 시세로 캔들 실시간 갱신, 엔진 테스트 통과 |
 | M2 ✅ | 참가 + 현물 주문(주문 충격 포함) + 보유종목 + 랭킹 + SQLite + 병합·폐지 정산 + 재시작 재생 | 두 계정이 거래하고 랭킹 반영 |
 | M3 ✅ | 시즌 리셋, 명예의 전당, 엔진 스냅샷(재생 시간 단축) | 시즌 교체 시나리오 테스트 |
-| M4 | 선물 + 강제 청산 + 스탑로스 | 강제 청산 테스트 통과 |
+| M4 ✅ | 선물 + 강제 청산 + 스탑로스 | 강제 청산 테스트 통과 |
 | M5 | 그리기 저장(서버), 모바일 다듬기 | |
 | M6 | 채팅 + 속도 제한 + 금칙어 + 신고·밴 + 관리자 화면 | 도배 차단 확인 |
 | M7 | Docker + Oracle 배포 + 개인정보 처리방침·고지 | 공개 URL 접속 |

@@ -67,10 +67,11 @@ const loop = setInterval(() => {
   const news: NewsItem[] = [], reload: string[] = [], settled: { type: string; sym: string }[] = [];
   let assetsChanged = false;
   while (market.tick < target) {
-    broker.settle();
+    settled.push(...broker.settle());
     const result = market.step();
     if (broker.applyActions(result.actions).length)
       for (const a of result.actions) if (a.type === "split" || a.type === "delist") settled.push({ type: a.type, sym: a.sym });
+    broker.checkTriggers();
     news.push(...[...result.news].reverse());
     for (const a of result.actions) if (a.type === "split") reload.push(a.sym);
     assetsChanged ||= result.assetsChanged;
@@ -157,6 +158,33 @@ app.post<{ Body: { sym: string; side: string; pct: number } }>("/api/order", {
   if (!id) return;
   const fill = await broker.place(id, req.body.sym, req.body.side, req.body.pct);
   return { fill, me: broker.me(id) };
+});
+
+app.post<{ Body: { sym: string; side: string; lev: number; pct: number } }>("/api/futures/open", {
+  schema: { body: { type: "object", required: ["sym", "side", "lev", "pct"], properties: { sym: { type: "string", maxLength: 10 }, side: { type: "string" }, lev: { type: "integer" }, pct: { type: "number" } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const fill = await broker.openFuture(id, req.body.sym, req.body.side, req.body.lev, req.body.pct);
+  return { fill, me: broker.me(id) };
+});
+
+app.post<{ Body: { posId: number; pct: number } }>("/api/futures/close", {
+  schema: { body: { type: "object", required: ["posId", "pct"], properties: { posId: { type: "integer" }, pct: { type: "number" } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const fill = await broker.closeFuture(id, req.body.posId, req.body.pct);
+  return { fill, me: broker.me(id) };
+});
+
+app.post<{ Body: { posId: number; price: number | null } }>("/api/stop", {
+  schema: { body: { type: "object", required: ["posId"], properties: { posId: { type: "integer" }, price: { type: ["number", "null"] } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  broker.setStop(id, req.body.posId, req.body.price ?? null);
+  return { me: broker.me(id) };
 });
 
 app.post<{ Body: { confirm: boolean } }>("/api/reset", {

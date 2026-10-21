@@ -255,3 +255,13 @@ tr.mine { background: var(--accent-soft); }
   .join input { width: 100%; }
   .account.join { flex-wrap: wrap; }
 }
+
+
+/* 선물 포지션 */
+.liq-cell { color: var(--warn); font-weight: 600; }
+.stop-cell, .act-cell { white-space: nowrap; }
+.stop-input { width: 84px; border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; background: var(--panel-2); color: var(--text); font: inherit; text-align: right; margin-right: 4px; }
+.mini-btn { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 3px 7px; font-size: 12px; margin-left: 2px; }
+.mini-btn:hover { background: var(--panel-2); }
+.mini-btn.danger { color: var(--up); border-color: var(--up); }
+.mini-btn:disabled { opacity: .5; cursor: not-allowed; }

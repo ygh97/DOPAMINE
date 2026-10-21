@@ -46,6 +46,20 @@ export function openDb(file: string): Db {
       avg REAL NOT NULL,
       PRIMARY KEY (user_id, season_id, sym)
     );
+    CREATE TABLE IF NOT EXISTS futures (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      season_id INTEGER NOT NULL REFERENCES seasons(id),
+      sym TEXT NOT NULL,
+      side TEXT NOT NULL,
+      lev INTEGER NOT NULL,
+      qty REAL NOT NULL,
+      entry REAL NOT NULL,
+      margin REAL NOT NULL,
+      stop REAL,
+      opened_tick INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS futures_by_user ON futures (user_id, season_id);
     CREATE TABLE IF NOT EXISTS fills (
       id INTEGER PRIMARY KEY,
       user_id INTEGER NOT NULL,

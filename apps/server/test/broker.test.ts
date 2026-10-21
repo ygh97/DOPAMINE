@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Auth, AuthError } from "../src/auth.ts";
-import { Broker, GOAL, OrderError, START_CASH } from "../src/broker.ts";
+import { Broker, GOAL, OrderError, START_CASH, liqPrice } from "../src/broker.ts";
 import { openDb } from "../src/db.ts";
 import { bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot } from "../src/season.ts";
 
@@ -15,7 +15,7 @@ function setup(seed = 1) {
   const broker = new Broker(db, season, market);
   const auth = new Auth(db);
   /** 한 tick: 정산 → 엔진 → 상장 변화 정산 */
-  const tick = () => { broker.settle(); const r = market.step(); broker.applyActions(r.actions); return r; };
+  const tick = () => { broker.settle(); const r = market.step(); broker.applyActions(r.actions); broker.checkTriggers(); return r; };
   // 서버처럼 참가하면 계좌가 생긴다
   const user = (name: string) => { const id = auth.join(name, "secret1").userId; broker.me(id); return id; };
   return { db, season, market, broker, auth, tick, user };
@@ -23,6 +23,15 @@ function setup(seed = 1) {
 /** 주문을 넣고 다음 tick에 체결 */
 async function order(s: ReturnType<typeof setup>, userId: number, sym: string, side: string, pct: number) {
   const p = s.broker.place(userId, sym, side, pct);
+  s.tick();
+  return p; }
+async function openFut(s: ReturnType<typeof setup>, userId: number, sym: string, side: string, lev: number, pct: number) {
+  const p = s.broker.openFuture(userId, sym, side, lev, pct);
+  s.tick();
+  return p;
+}
+async function closeFut(s: ReturnType<typeof setup>, userId: number, posId: number, pct: number) {
+  const p = s.broker.closeFuture(userId, posId, pct);
   s.tick();
   return p;
 }
@@ -201,4 +210,102 @@ test("시즌 종료: 명예의 전당 기록, 새 시즌은 새 seed와 $100,000
   const broker = new Broker(s.db, next, market);
   assert.equal(broker.me(a).equity, START_CASH);
   assert.equal(broker.me(a).positions.length, 0);
+});
+
+
+test("선물 진입·분할 종료·전량 종료: 격리 증거금, 수수료, 스탑로스 유지", async () => {
+  const s = setup();
+  const u = s.user("fut_trader");
+  const open = await openFut(s, u, "NVDA", "long", 5, 20);
+  assert.equal(open.side, "long-open");
+  const me1 = s.broker.me(u);
+  assert.equal(me1.futures.length, 1);
+  const f = me1.futures[0];
+  const expectedMargin = (START_CASH * 0.2) / (1 + 5 * 0.0005);
+  assert.ok(Math.abs(f.margin - expectedMargin) < 1e-6, "예산 안에 진입 수수료 포함");
+  assert.ok(Math.abs(me1.cash - START_CASH * 0.8) < 1e-6);
+  assert.ok(Math.abs(f.liq - liqPrice(f)) < 1e-9);
+
+  // 스탑로스 설정 후 50% 분할 종료해도 스탑로스는 남은 포지션에 유지
+  const stop = f.entry * 0.9;
+  s.broker.setStop(u, f.id, stop);
+  const half = await closeFut(s, u, f.id, 50);
+  assert.equal(half.side, "long-close");
+  const me2 = s.broker.me(u);
+  assert.equal(me2.futures.length, 1);
+  assert.ok(Math.abs(me2.futures[0].qty - f.qty / 2) < 1e-9);
+  assert.ok(Math.abs(me2.futures[0].margin - f.margin / 2) < 1e-9);
+  assert.equal(me2.futures[0].stop, stop);
+
+  // 전량 종료하면 포지션 삭제
+  await closeFut(s, u, f.id, 100);
+  assert.equal(s.broker.me(u).futures.length, 0);
+});
+
+test("선물 레버리지 한도 및 다시 시작 후 10분간 5배 초과 금지", async () => {
+  const s = setup();
+  const u = s.user("lev_tester");
+  assert.throws(() => s.broker.openFuture(u, "BTC", "long", 10, 10), OrderError, "코인은 최대 5배");
+  assert.throws(() => s.broker.openFuture(u, "LMQ", "short", 10, 10), OrderError, "신흥주는 최대 5배");
+  await openFut(s, u, "NVDA", "short", 10, 10);
+  s.broker.reset(u);
+  assert.equal(s.broker.me(u).futures.length, 0);
+  assert.throws(() => s.broker.openFuture(u, "NVDA", "long", 10, 10), OrderError, "리셋 직후 10배 금지");
+  await openFut(s, u, "NVDA", "long", 5, 10);
+  for (let i = 0; i < 600; i++) s.tick();
+  await openFut(s, u, "NVDA", "long", 10, 10);
+  assert.equal(s.broker.me(u).futures.length, 2);
+});
+
+test("강제 청산: 증거금 90% 손실 시 다음 tick에 시장가 강제 청산", async () => {
+  const s = setup();
+  const u = s.user("degen");
+  await openFut(s, u, "LMQ", "long", 5, 50); // 청산가 = 진입가 × (1 - 0.9/5) = 0.82
+  const f = s.broker.me(u).futures[0];
+  while (s.market.quote("LMQ")!.price > f.liq * 0.98) s.market.applyFlow("LMQ", -1e9);
+  s.broker.checkTriggers(); // 트리거 감지 → 다음 tick 정산 대기열에 등록
+  const auto = s.broker.settle();
+  assert.deepEqual(auto, [{ type: "liquidation", sym: "LMQ" }]);
+  const me = s.broker.me(u);
+  assert.equal(me.futures.length, 0);
+  assert.equal(me.fills[0].side, "liquidation");
+  assert.ok(me.cash >= START_CASH * 0.5 - 1e-6, "격리 증거금: 남은 현금은 건드리지 않음");
+});
+
+test("스탑로스: 설정 검증 및 목표가 도달 시 자동 종료", async () => {
+  const s = setup();
+  const u = s.user("stopper");
+  await openFut(s, u, "NVDA", "short", 3, 30);
+  const f = s.broker.me(u).futures[0];
+  const now = s.market.quote("NVDA")!.price;
+  assert.throws(() => s.broker.setStop(u, f.id, now * 0.95), OrderError, "숏 스탑로스는 현재가 위여야 함");
+  s.broker.setStop(u, f.id, now * 1.002);
+  while (s.market.quote("NVDA")!.price <= now * 1.003) s.market.applyFlow("NVDA", 1e11);
+  s.broker.checkTriggers();
+  const auto = s.broker.settle();
+  assert.deepEqual(auto, [{ type: "stop", sym: "NVDA" }]);
+  const me = s.broker.me(u);
+  assert.equal(me.futures.length, 0);
+  assert.equal(me.fills[0].side, "stop");
+});
+
+test("주식병합·상장폐지 시 선물 포지션도 함께 조정·정산", async () => {
+  const s = setup();
+  const u = s.user("corp_fut");
+  await openFut(s, u, "LMQ", "long", 3, 20);
+  const before = s.broker.me(u).futures[0];
+  s.broker.setStop(u, before.id, before.entry * 0.85);
+  s.broker.applyActions([{ type: "split", sym: "LMQ", ratio: 10 }]);
+  const split = s.broker.me(u).futures[0];
+  assert.ok(Math.abs(split.qty - before.qty / 10) < 1e-9);
+  assert.ok(Math.abs(split.entry - before.entry * 10) < 1e-9);
+  assert.ok(Math.abs(split.stop! - before.entry * 0.85 * 10) < 1e-9);
+
+  const cashBefore = s.broker.me(u).cash;
+  const exitPrice = split.entry * 1.1;
+  s.broker.applyActions([{ type: "delist", sym: "LMQ", price: exitPrice }]);
+  const after = s.broker.me(u);
+  assert.equal(after.futures.length, 0);
+  const expectedPnl = split.qty * (exitPrice - split.entry);
+  assert.ok(Math.abs(after.cash - (cashBefore + split.margin + expectedPnl)) < 1e-6);
 });

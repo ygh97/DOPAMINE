@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 주문 패널. 현물은 M2에서 실제 주문, 선물은 M4에서 연결한다 (지금은 계산 미리보기만).
+// 주문 패널: 현물 매수·매도, 선물 롱·숏 진입 (격리 증거금, 종목별 레버리지).
 import { LEVERAGE } from "@dopamine/engine";
 import { computed, ref, watch } from "vue";
 import { money } from "../format";
@@ -21,7 +21,7 @@ const cash = computed(() => a.me?.cash ?? 100_000);
 const held = computed(() => (m.current ? a.holding(m.current.sym) : 0));
 const fractional = computed(() => m.current?.market === "coin");
 const unit = computed(() => (m.current?.market === "coin" ? ` ${m.current.sym}` : "주"));
-const fmtQty = (q: number) => (fractional.value ? q.toFixed(6) : Math.floor(q).toLocaleString());
+const fmtQty = (q: number) => (fractional.value ? q.toFixed(6) : mode.value === "fut" ? (+q.toFixed(2)).toLocaleString() : Math.floor(q).toLocaleString());
 
 function setCustom() {
   const v = Number(custom.value);
@@ -37,7 +37,7 @@ const est = computed(() => {
     return { qty: fmtQty(qty), fee: money(value * FEE), total: money(value * (1 - FEE)), liq: "" };
   }
   const budget = (cash.value * pct.value) / 100;
-  const notional = mode.value === "fut" ? budget * lev.value : budget / (1 + FEE + SLIP);
+  const notional = mode.value === "fut" ? (budget / (1 + lev.value * FEE)) * lev.value : budget / (1 + FEE + SLIP);
   return {
     qty: fmtQty(notional / q.price),
     fee: money(notional * (FEE + SLIP)),
@@ -46,16 +46,18 @@ const est = computed(() => {
   };
 });
 const sideLabel = (s: "buy" | "sell") => (mode.value === "fut" ? (s === "buy" ? "롱" : "숏") : s === "buy" ? "매수" : "매도");
-const canOrder = computed(() => !!a.me && mode.value === "spot" && !a.busy && (side.value === "buy" || held.value > 0));
+const canOrder = computed(() => !!a.me && !a.busy && (mode.value === "fut" ? cash.value >= 1 : side.value === "buy" || held.value > 0));
 const ctaText = computed(() => {
   const sym = m.current?.sym ?? "";
-  if (mode.value === "fut") return `${sym} ${lev.value}x ${sideLabel(side.value)} · 선물은 준비 중`;
   if (!a.me) return `${sym} ${sideLabel(side.value)} · 참가 후 가능`;
+  if (mode.value === "fut") return `${sym} ${lev.value}x ${pct.value}% ${sideLabel(side.value)}`;
   if (side.value === "sell" && !held.value) return `${sym} 보유 없음`;
   return `${sym} ${pct.value}% ${sideLabel(side.value)}`;
 });
 function submit() {
-  if (canOrder.value && m.current) void a.order(m.current.sym, side.value, pct.value);
+  if (!canOrder.value || !m.current) return;
+  if (mode.value === "fut") void a.openFuture(m.current.sym, side.value === "buy" ? "long" : "short", lev.value, pct.value);
+  else void a.order(m.current.sym, side.value, pct.value);
 }
 </script>
 
@@ -63,20 +65,20 @@ function submit() {
   <div class="panel" aria-label="주문">
     <div class="panel-head">
       <div class="tabs" role="tablist">
-        <button role="tab" :aria-selected="mode === 'spot'" @click="mode = 'spot'">현물</button>
-        <button role="tab" :aria-selected="mode === 'fut'" @click="mode = 'fut'">선물</button>
+        <button role="tab" data-o="spot" :aria-selected="mode === 'spot'" @click="mode = 'spot'">현물</button>
+        <button role="tab" data-o="fut" :aria-selected="mode === 'fut'" @click="mode = 'fut'">선물</button>
       </div>
       <span class="muted" style="margin-left: auto">{{ m.current?.sym }}</span>
     </div>
     <div v-if="est" class="order-body">
       <div class="seg">
-        <button class="buy" :aria-pressed="side === 'buy'" @click="side = 'buy'">{{ sideLabel("buy") }}</button>
-        <button class="sell" :aria-pressed="side === 'sell'" @click="side = 'sell'">{{ sideLabel("sell") }}</button>
+        <button class="buy" data-s="buy" :aria-pressed="side === 'buy'" @click="side = 'buy'">{{ sideLabel("buy") }}</button>
+        <button class="sell" data-s="sell" :aria-pressed="side === 'sell'" @click="side = 'sell'">{{ sideLabel("sell") }}</button>
       </div>
       <div v-if="mode === 'fut'">
         <div class="field-label"><span>레버리지 (최대 {{ levels[levels.length - 1] }}배)</span><span>격리 증거금</span></div>
         <div class="chips" :style="{ gridTemplateColumns: `repeat(${levels.length}, 1fr)` }">
-          <button v-for="l in levels" :key="l" :aria-pressed="lev === l" @click="lev = l">{{ l }}x</button>
+          <button v-for="l in levels" :key="l" :data-lev="l" :aria-pressed="lev === l" @click="lev = l">{{ l }}x</button>
         </div>
       </div>
       <div>
@@ -93,7 +95,7 @@ function submit() {
         <div><span class="muted">예상 수량</span><b>{{ est.qty }}{{ unit }}</b></div>
         <div><span class="muted">수수료·슬리피지</span><span>{{ est.fee }}</span></div>
         <div><span class="muted">{{ side === "sell" && mode === "spot" ? "받을 금액" : "총액" }}</span><b>{{ est.total }}</b></div>
-        <div v-if="mode === 'fut'"><span class="muted">예상 청산가</span><b>{{ est.liq }}</b></div>
+        <div v-if="mode === 'fut'"><span class="muted">예상 청산가</span><b id="estLiq">{{ est.liq }}</b></div>
       </div>
       <button id="orderBtn" class="cta" :class="{ sell: side === 'sell' }" :disabled="!canOrder" @click="submit">{{ ctaText }}</button>
       <p class="order-note muted">체결은 다음 1초 tick에 같은 tick 주문과 묶어서 됩니다. 큰 주문은 가격을 움직여요.</p>
