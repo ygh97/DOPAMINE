@@ -3,7 +3,10 @@ import { test } from "node:test";
 import { Auth, AuthError } from "../src/auth.ts";
 import { Broker, GOAL, OrderError, START_CASH, liqPrice } from "../src/broker.ts";
 import { Chat, ChatError } from "../src/chat.ts";
-import { openDb } from "../src/db.ts";
+import { mkdtempSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { backupDb, openDb } from "../src/db.ts";
 import { bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot } from "../src/season.ts";
 
 const T0 = 1_792_000_000_000;
@@ -356,4 +359,22 @@ test("실시간 채팅: 전송·3초 쿨타임·200자·금칙어·3회 신고 �
   assert.equal(chat.recent().length, 0, "차단 시 기존 메시지 숨김");
   assert.throws(() => chat.post(u1, "차단됨", 30_000), ChatError);
   assert.deepEqual(chat.adminList().banned, ["alice"]);
+});
+
+
+test("SQLite 무중단 온라인 백업 및 순환 슬롯 유지", async () => {
+  const s = setup();
+  s.user("backup_user");
+  const dir = mkdtempSync(join(tmpdir(), "dc-bak-"));
+  const f1 = await backupDb(s.db, dir, 2);
+  const f2 = await backupDb(s.db, dir, 2);
+  const f3 = await backupDb(s.db, dir, 2);
+  assert.notEqual(f1, f2);
+  assert.equal(f1, f3, "2개 슬롯 순환 덮어쓰기");
+  const list = readdirSync(dir).filter(f => f.endsWith(".db"));
+  assert.equal(list.length, 2, "최근 2개 슬롯만 유지");
+  const restored = openDb(f3);
+  const u = restored.prepare("SELECT name FROM users WHERE name = 'backup_user'").get() as { name: string } | undefined;
+  restored.close();
+  assert.equal(u?.name, "backup_user");
 });

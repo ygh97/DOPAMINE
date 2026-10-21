@@ -1,7 +1,7 @@
 // SQLite (Node 내장 node:sqlite). 네이티브 빌드가 없어 Windows·Docker 모두 그대로 돈다.
 import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { dirname, join } from "node:path";
+import { DatabaseSync, backup } from "node:sqlite";
 
 export type Db = DatabaseSync;
 
@@ -144,4 +144,16 @@ export function tx<T>(db: Db, fn: () => T): T {
     db.exec("ROLLBACK");
     throw e;
   }
+}
+
+
+/** 무중단 SQLite 일일 백업 (VACUUM INTO): 최근 keep개만 남긴다 (SPEC 10장) */
+let backupSeq = 0;
+/** 무중단 SQLite 온라인 백업 (node:sqlite backup API): keep개 슬롯 순환 덮어쓰기 (SPEC 10장) */
+export async function backupDb(db: Db, dir: string, keep = 7): Promise<string> {
+  mkdirSync(dir, { recursive: true });
+  const slot = backupSeq++ % Math.max(1, keep);
+  const out = join(dir, `dopamine-slot-${slot}.db`);
+  await backup(db, out);
+  return out;
 }

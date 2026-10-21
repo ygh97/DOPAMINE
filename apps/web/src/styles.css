@@ -325,3 +325,14 @@ tr.mine { background: var(--accent-soft); }
 .admin-banned { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .admin-list { max-height: 120px; overflow: auto; display: grid; gap: 4px; }
 .admin-item { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+
+
+/* 개인정보 처리방침 및 고지 모달 (M7) */
+.link-btn { border: 0; background: none; color: var(--muted); font: inherit; text-decoration: underline; padding: 0; cursor: pointer; }
+.link-btn:hover { color: var(--text); }
+dialog#policyDlg { width: min(600px, calc(100vw - 32px)); max-height: 80vh; border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; background: var(--panel); color: var(--text); box-shadow: 0 16px 48px rgba(0,0,0,.25); }
+dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
+#policyDlg h2 { font-size: 18px; margin: 4px 40px 10px 0; }
+#policyDlg h3 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); font-weight: 600; }
+#policyDlg p, #policyDlg ul { margin: 0; line-height: 1.7; font-size: 13px; }
+#policyDlg ul { padding-left: 18px; }

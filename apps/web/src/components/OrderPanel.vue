@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 주문 패널: 현물 매수·매도, 선물 롱·숏 진입 (격리 증거금, 종목별 레버리지).
 import { LEVERAGE } from "@dopamine/engine";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { money } from "../format";
 import { useAccount } from "../stores/account";
 import { useMarket } from "../stores/market";
@@ -60,6 +60,20 @@ function submit() {
   if (mode.value === "fut") void a.openFuture(m.current.sym, side.value === "buy" ? "long" : "short", lev.value, pct.value);
   else void a.order(m.current.sym, side.value, pct.value);
 }
+
+const PCT_KEYS: Record<string, number> = { "1": 10, "2": 20, "3": 50, "4": 100 };
+function onKey(e: KeyboardEvent) {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  const tag = (e.target as HTMLElement | null)?.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement | null)?.isContentEditable) return;
+  if (document.querySelector("dialog[open]")) return;
+  const k = e.key.toLowerCase();
+  if (k === "b") { side.value = "buy"; e.preventDefault(); }
+  else if (k === "s") { side.value = "sell"; e.preventDefault(); }
+  else if (PCT_KEYS[k]) { pct.value = PCT_KEYS[k]; custom.value = ""; e.preventDefault(); }
+}
+onMounted(() => window.addEventListener("keydown", onKey));
+onUnmounted(() => window.removeEventListener("keydown", onKey));
 </script>
 
 <template>
@@ -103,7 +117,7 @@ function submit() {
         <div v-if="mode === 'fut'"><span class="muted">예상 청산가</span><b id="estLiq">{{ est.liq }}</b></div>
       </div>
       <button id="orderBtn" class="cta" :class="{ sell: side === 'sell' }" :disabled="!canOrder" @click="submit">{{ ctaText }}</button>
-      <p class="order-note muted">체결은 다음 1초 tick에 같은 tick 주문과 묶어서 됩니다. 큰 주문은 가격을 움직여요.</p>
+      <p class="order-note muted">체결은 다음 1초 tick에 묶어서 됩니다 · 단축키: B(매수/롱) S(매도/숏) 1~4(10~100%)</p>
     </div>
   </div>
 </template>

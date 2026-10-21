@@ -1,0 +1,14 @@
+# Caddy 리버스 프록시 설정 (자동 HTTPS + SSE 즉시 플러시)
+{$DOMAIN::80} {
+  encode zstd gzip
+
+  handle /api/stream {
+    reverse_proxy app:4810 {
+      flush_interval -1
+    }
+  }
+
+  handle {
+    reverse_proxy app:4810
+  }
+}

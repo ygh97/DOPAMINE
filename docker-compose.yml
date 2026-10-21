@@ -1,0 +1,33 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "4810"
+      DB_FILE: "/app/data/dopamine.db"
+      ADMIN_KEY: "${ADMIN_KEY:-dopamine-admin}"
+      SEED: "${SEED:-20261021}"
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "4810:4810"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN:-:80}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

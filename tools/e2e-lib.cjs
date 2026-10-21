@@ -35,7 +35,7 @@ const waitWeb = () => waitFor(APP);
 const killAll = () => { for (const p of procs) p.kill(); };
 
 /** 브라우저를 열고 오류를 모은다. ignore()가 true인 동안의 콘솔 오류는 무시 */
-async function openApp(ignore = () => false) {
+async function openApp(ignore = () => false, url = APP) {
   const { chromium } = require(PW);
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
@@ -43,7 +43,7 @@ async function openApp(ignore = () => false) {
   const errors = [];
   page.on("pageerror", e => errors.push(e.message));
   page.on("console", m => m.type() === "error" && !ignore() && errors.push(m.text()));
-  await page.goto(APP);
+  await page.goto(url);
   await page.waitForSelector("#watchBody tr");
   await page.waitForSelector(".conn.on");
   return { browser, page, errors };

@@ -1,11 +1,13 @@
 // 도파민 센터 서버: 벽시계 기준 GameLoop + SSE 시세 방송 + 참가·현물 주문.
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SECTORS, type Bar, type NewsItem, type Quote } from "@dopamine/engine";
 import { Auth, AuthError } from "./auth.ts";
 import { Broker, OrderError } from "./broker.ts";
 import { Chat, ChatError } from "./chat.ts";
-import { openDb } from "./db.ts";
+import { backupDb, openDb } from "./db.ts";
 import { bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, targetTick } from "./season.ts";
 
 const PORT = Number(process.env.PORT ?? 4810);
@@ -15,6 +17,8 @@ const TICK_MS = Number(process.env.TICK_MS ?? 1000);
 const SEASON_MS = Number(process.env.SEASON_MS ?? 7 * 24 * 3600 * 1000); // 시즌 길이 (새 시즌부터 적용)
 const SNAPSHOT_EVERY = 600; // tick마다 엔진 스냅샷 저장 (10분)
 const DB_FILE = process.env.DB_FILE ?? fileURLToPath(new URL("../../../data/dopamine.db", import.meta.url));
+const BACKUP_DIR = process.env.BACKUP_DIR ?? join(dirname(DB_FILE), "backups");
+const WEB_DIST = process.env.WEB_DIST ?? fileURLToPath(new URL("../../web/dist", import.meta.url));
 // ENGINE_OPTIONS: 테스트용 엔진 설정 덮어쓰기 (JSON). 예: {"splitPrice":1000,"warmupBars":120}
 const ENGINE_OPTIONS = JSON.parse(process.env.ENGINE_OPTIONS ?? "{}");
 
@@ -265,6 +269,19 @@ app.post<{ Body: { id: number; hidden: boolean } }>("/api/admin/hide", {
   return { ok: true };
 });
 
+app.post("/api/admin/backup", async (req, reply) => {
+  if (!adminOk(req, reply)) return;
+  saveSnapshot(db, season, market);
+  return { ok: true, file: await backupDb(db, BACKUP_DIR) };
+});
+
+// 하루 1회 자동 SQLite 백업 (SPEC 10장)
+const backupTimer = setInterval(() => {
+  try { saveSnapshot(db, season, market); void backupDb(db, BACKUP_DIR); }
+  catch (e) { app.log.error(e); }
+}, 24 * 3600 * 1000);
+backupTimer.unref();
+
 app.get("/api/stream", (req, reply) => {
   reply.hijack();
   const res = reply.raw;
@@ -282,6 +299,29 @@ app.get("/api/stream", (req, reply) => {
 });
 
 app.get("/api/health", async () => ({ ok: true, tick: market.tick, season: season.id, clients: clients.size, bootMs, replayed, fromSnapshot }));
+
+// 프로덕션 정적 파일 서빙: apps/web/dist가 빌드되어 있으면 단일 포트로 화면까지 제공한다 (M7)
+const MIME: Record<string, string> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".ico": "image/x-icon",
+  ".json": "application/json; charset=utf-8",
+};
+if (existsSync(join(WEB_DIST, "index.html"))) {
+  const root = resolve(WEB_DIST);
+  app.setNotFoundHandler((req, reply) => {
+    if (req.url.startsWith("/api/") || req.method !== "GET") return reply.code(404).send({ error: "찾을 수 없습니다." });
+    const reqPath = req.url.split("?")[0];
+    const target = resolve(root, `.${reqPath}`);
+    const file = target.startsWith(root) && existsSync(target) && statSync(target).isFile() ? target : join(root, "index.html");
+    const ext = extname(file);
+    if (file.includes(`${join("dist", "assets")}`)) reply.header("Cache-Control", "public, max-age=31536000, immutable");
+    return reply.type(MIME[ext] ?? "application/octet-stream").send(readFileSync(file));
+  });
+}
 
 const shutdown = async () => { clearInterval(loop); saveSnapshot(db, season, market); await app.close(); db.close(); process.exit(0); };
 process.on("SIGINT", shutdown);
