@@ -59,6 +59,9 @@ function snapshot() {
 // ---------- SSE ----------
 type Client = { write: (chunk: string) => boolean };
 const clients = new Set<Client>();
+const settledLog: { tick: number; type: string; sym: string }[] = [];
+const splitLog: { tick: number; sym: string }[] = [];
+let lastAssetsTick = 0;
 const send = (event: string, data: unknown) => {
   const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
   for (const c of clients) c.write(chunk);
@@ -86,9 +89,9 @@ const loop = setInterval(() => {
   }
   for (const n of news.slice(-50)) send("news", n);
   // 상장 변화: 목록 갱신. 주식병합된 종목은 과거 차트가 바뀌었으니 다시 받으라고 알린다
-  if (assetsChanged) send("assets", { quotes: market.quotes().map(packQuote), reload });
+  if (assetsChanged) { lastAssetsTick = market.tick; for (const s of reload) splitLog.push({ tick: market.tick, sym: s }); send("assets", { quotes: market.quotes().map(packQuote), reload }); }
   // 보유 종목이 병합·폐지로 정산됐다: 그 종목을 가진 사람은 계좌를 다시 받는다
-  if (settled.length) send("settled", settled);
+  if (settled.length) { for (const s of settled) settledLog.push({ tick: market.tick, ...s }); if (settledLog.length > 200) settledLog.splice(0, settledLog.length - 200); send("settled", settled); }
   if (!clients.size) return;
   // 종목별 [timestamp, open, high, low, close, volume, 전일 종가]
   const bars: Record<string, number[]> = {};
@@ -125,6 +128,28 @@ function joinAllowed(ip: string) {
 }
 
 app.get("/api/snapshot", async () => snapshot());
+
+app.get<{ Querystring: { tick?: string } }>("/api/poll", async req => {
+  const since = Number(req.query.tick) || market.tick;
+  const bars: Record<string, number[]> = {};
+  for (const q of market.quotes()) {
+    const b = market.bars(q.sym).at(-1);
+    if (b) bars[q.sym] = [...packBar(b), r7(q.prev)];
+  }
+  const settled = settledLog.filter(s => s.tick > since).map(({ type, sym }) => ({ type, sym }));
+  const reload = [...new Set(splitLog.filter(s => s.tick > since).map(s => s.sym))];
+  return {
+    tick: market.tick,
+    date: market.gameDate(),
+    season: seasonInfo(),
+    bars,
+    news: market.news.filter(n => n.tick > since).slice(0, 30).reverse(),
+    chat: chat.recent(50),
+    ranking: { rows: broker.ranking(20), players: broker.players },
+    settled: settled.length ? settled : undefined,
+    assets: lastAssetsTick > since ? { quotes: market.quotes().map(packQuote), reload } : undefined,
+  };
+});
 
 app.get<{ Querystring: { sym?: string; limit?: string } }>("/api/bars", async (req, reply) => {
   const sym = req.query.sym ?? "";

@@ -1,4 +1,5 @@
 // 시세·뉴스 상태. 접속 시 /api/snapshot 한 번, 이후 /api/stream(SSE)으로 변경분만 받는다.
+// Cloudflare Quick Tunnel(*.trycloudflare.com)처럼 무한 SSE 스트림을 버퍼링하는 프록시에서는 자동으로 /api/poll(1초 폴링)로 전환한다.
 import type { GameDate, MarketKind, NewsItem, Quote } from "@dopamine/engine";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
@@ -48,6 +49,26 @@ export const useMarket = defineStore("market", () => {
     else tab.value = cur.market;
   }
 
+  function applyTick(d: TickEvent) {
+    const dir: Record<string, number> = {}, bars: Record<string, PackedBar> = {};
+    for (const [sym, packed] of Object.entries(d.bars)) {
+      const q = quotes.value[sym];
+      if (!q) continue;
+      const [ts, o, h, l, c, v, prev] = packed;
+      const k = c / q.price;
+      dir[sym] = Math.sign(c - q.price);
+      // EPS·발행 주식 수는 tick 사이에 그대로라 가격 비율로 PER·시총을 갱신
+      q.price = c; q.prev = prev;
+      if (q.per) q.per *= k;
+      if (q.cap) q.cap *= k;
+      bars[sym] = [ts, o, h, l, c, v];
+    }
+    direction.value = dir;
+    lastBars.value = bars;
+    date.value = d.date;
+    tick.value = d.tick;
+  }
+
   async function loadSnapshot() {
     const s = await (await fetch("/api/snapshot")).json();
     sectors.value = s.sectors;
@@ -62,8 +83,48 @@ export const useMarket = defineStore("market", () => {
   }
 
   let source: EventSource | null = null;
-  let lastMessageAt = 0, watchdog = 0;
+  let lastMessageAt = 0, watchdog = 0, pollTimer = 0;
+
+  function startPolling() {
+    source?.close(); source = null;
+    clearInterval(watchdog);
+    clearInterval(pollTimer);
+    void loadSnapshot().then(() => { connected.value = true; }).catch(() => { connected.value = false; });
+    pollTimer = window.setInterval(async () => {
+      try {
+        const r = await fetch(`/api/poll?tick=${tick.value}`);
+        if (!r.ok) { connected.value = false; return; }
+        const d = await r.json();
+        connected.value = true;
+        if (season.value && d.season && season.value.id !== d.season.id) {
+          await loadSnapshot();
+          return;
+        }
+        if (d.assets) {
+          applyQuotes(d.assets.quotes);
+          for (const sym of d.assets.reload) barsEpoch.value[sym] = (barsEpoch.value[sym] ?? 0) + 1;
+        }
+        if (d.tick > tick.value) applyTick(d);
+        if (Array.isArray(d.news) && d.news.length) {
+          for (const n of d.news) {
+            if (!news.value.some(x => x.id === n.id)) news.value.unshift(n);
+          }
+          if (news.value.length > 300) news.value.length = 300;
+        }
+        if (Array.isArray(d.chat)) chat.value = d.chat;
+        if (d.ranking) applyRanking(d.ranking);
+        if (Array.isArray(d.settled) && d.settled.length) settled.value = d.settled;
+      } catch {
+        connected.value = false;
+      }
+    }, 1000);
+  }
+
   function connect() {
+    if (typeof location !== "undefined" && location.hostname.endsWith(".trycloudflare.com")) {
+      startPolling();
+      return;
+    }
     source?.close();
     source = new EventSource("/api/stream");
     lastMessageAt = Date.now();
@@ -78,24 +139,7 @@ export const useMarket = defineStore("market", () => {
     }, 2000);
     source.addEventListener("tick", e => {
       lastMessageAt = Date.now();
-      const d: TickEvent = JSON.parse((e as MessageEvent).data);
-      const dir: Record<string, number> = {}, bars: Record<string, PackedBar> = {};
-      for (const [sym, packed] of Object.entries(d.bars)) {
-        const q = quotes.value[sym];
-        if (!q) continue;
-        const [ts, o, h, l, c, v, prev] = packed;
-        const k = c / q.price;
-        dir[sym] = Math.sign(c - q.price);
-        // EPS·발행 주식 수는 tick 사이에 그대로라 가격 비율로 PER·시총을 갱신
-        q.price = c; q.prev = prev;
-        if (q.per) q.per *= k;
-        if (q.cap) q.cap *= k;
-        bars[sym] = [ts, o, h, l, c, v];
-      }
-      direction.value = dir;
-      lastBars.value = bars;
-      date.value = d.date;
-      tick.value = d.tick;
+      applyTick(JSON.parse((e as MessageEvent).data));
     });
     source.addEventListener("news", e => {
       news.value.unshift(JSON.parse((e as MessageEvent).data));
