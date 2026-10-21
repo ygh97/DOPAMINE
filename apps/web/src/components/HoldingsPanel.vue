@@ -40,6 +40,14 @@ async function clearStop(id: number) {
   await a.setStop(id, null);
   stops[id] = "";
 }
+async function shareSpot(p: { sym: string; avg: number; price: number; pnl: number; pnlPct: number }) {
+  m.socialTab = "chat";
+  await a.sendChat(`[공유] $${p.sym} 현물 평단 ${money(p.avg)} → 현재 ${money(p.price)} (${pct(p.pnlPct)})`);
+}
+async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; entry: number; price: number; pnlPct: number }) {
+  m.socialTab = "chat";
+  await a.sendChat(`[공유] $${f.sym} ${f.lev}x ${f.side === "long" ? "롱" : "숏"} 진입 ${money(f.entry)} → 현재 ${money(f.price)} (${pct(f.pnlPct)})`);
+}
 </script>
 
 <template>
@@ -52,7 +60,7 @@ async function clearStop(id: number) {
     <p v-if="!a.me" class="empty">참가하면 {{ TABS.find(t => t.id === tab)!.label }}이(가) 여기에 표시됩니다.</p>
     <div v-else-if="tab === 'hold'" class="table-scroll">
       <table v-if="a.positions.length" id="holdings" class="grid">
-        <thead><tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>수익률</th></tr></thead>
+        <thead><tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>수익률</th><th>공유</th></tr></thead>
         <tbody>
           <tr v-for="p in a.positions" :key="p.sym" :data-sym="p.sym" class="clickable" @click="m.select(p.sym)">
             <td><b>{{ p.sym }}</b> <small class="muted">{{ p.name }}</small></td>
@@ -62,6 +70,7 @@ async function clearStop(id: number) {
             <td>{{ money(p.value) }}</td>
             <td :class="p.pnl >= 0 ? 'up' : 'down'">{{ p.pnl >= 0 ? "+" : "-" }}{{ money(Math.abs(p.pnl)) }}</td>
             <td :class="p.pnl >= 0 ? 'up' : 'down'">{{ pct(p.pnlPct) }}</td>
+            <td @click.stop><button class="mini-btn" data-act="share-spot" @click="shareSpot(p)">자랑</button></td>
           </tr>
         </tbody>
       </table>
@@ -69,7 +78,7 @@ async function clearStop(id: number) {
     </div>
     <div v-else-if="tab === 'fut'" class="table-scroll">
       <table v-if="a.futures.length" id="futures" class="grid">
-        <thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>청산가</th><th>증거금</th><th>손익</th><th>스탑로스</th><th>종료</th></tr></thead>
+        <thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>청산가</th><th>증거금</th><th>손익</th><th>스탑로스</th><th>종료·공유</th></tr></thead>
         <tbody>
           <tr v-for="f in a.futures" :key="f.id" :data-sym="f.sym" :data-id="f.id" class="clickable" @click="m.select(f.sym)">
             <td><b>{{ f.sym }}</b> <small class="muted">{{ f.name }}</small></td>
@@ -90,6 +99,7 @@ async function clearStop(id: number) {
               <button class="mini-btn" data-act="close-20" :disabled="a.busy" @click="a.closeFuture(f.id, 20)">20%</button>
               <button class="mini-btn" data-act="close-50" :disabled="a.busy" @click="a.closeFuture(f.id, 50)">50%</button>
               <button class="mini-btn danger" data-act="close-100" :disabled="a.busy" @click="a.closeFuture(f.id, 100)">종료</button>
+              <button class="mini-btn" data-act="share-fut" @click="shareFut(f)">자랑</button>
             </td>
           </tr>
         </tbody>

@@ -1,4 +1,4 @@
-// M7 종단 테스트: 웹 프로덕션 빌드 → 단일 포트(4810) 서빙 확인, 단축키(B/S/1~4), 개인정보 처리방침·투자 고지 모달, SQLite 온라인 백업 API.
+// M7 종단 테스트: 웹 프로덕션 빌드 → 단일 포트(4810) 서빙 확인, 단축키(B/S/1~4), 채팅 $종목 태그·수익인증 공유, 개인정보·투자 고지 모달, SQLite 온라인 백업 API.
 // 실행: node tools/e2e-m7.cjs [스크린샷 폴더]
 const fs = require("node:fs");
 const path = require("node:path");
@@ -40,7 +40,24 @@ const PROD_URL = "http://127.0.0.1:4810/";
       pct100Pressed: await page.locator('.pct-chips button:has-text("100%")').getAttribute("aria-pressed"),
     };
 
-    // 4) 개인정보 처리방침 및 투자 유의 고지 모달 열기·Esc 닫기
+    // 4) 참가 → TSLA 매수 → 보유종목 '자랑' 버튼 클릭 → 채팅에 수익인증 배지 + $TSLA 태그 생성 → 클릭 시 차트 이동
+    await page.fill('.join input[name="name"]', "단축키왕");
+    await page.fill('.join input[name="password"]', "secret1");
+    await page.click(".join-btn");
+    await page.waitForSelector("#equity");
+    await page.click("#watchBody tr[data-sym=TSLA]");
+    await page.keyboard.press("2"); // 20%
+    await page.click("#orderBtn");
+    await page.waitForSelector("#holdings tr[data-sym=TSLA]");
+    await page.click("#watchBody tr[data-sym=NVDA]"); // 다른 종목으로 이동해 둔다
+
+    await page.click('#holdings tr[data-sym=TSLA] [data-act="share-spot"]');
+    await page.waitForSelector('#chatLog .share-badge');
+    await page.waitForSelector('#chatLog .sym-tag[data-sym="TSLA"]');
+    await page.click('#chatLog .sym-tag[data-sym="TSLA"]');
+    log.symTagSwitchedTo = await page.locator("#qSym").textContent();
+
+    // 5) 개인정보 처리방침 및 투자 유의 고지 모달 열기·Esc 닫기
     await page.click("#policyBtn");
     await page.waitForSelector("dialog#policyDlg[open]");
     const policyText = await page.locator("#policyDlg").textContent();
@@ -53,7 +70,7 @@ const PROD_URL = "http://127.0.0.1:4810/";
     await page.waitForFunction(() => !document.querySelector("dialog#policyDlg[open]"));
     log.policyClosedByEsc = true;
 
-    // 5) 운영자 SQLite 온라인 백업 API 확인
+    // 6) 운영자 SQLite 온라인 백업 API 확인
     const bak = await fetch("http://127.0.0.1:4810/api/admin/backup", {
       method: "POST",
       headers: { "x-admin-key": "prod-admin-key" },
@@ -67,6 +84,7 @@ const PROD_URL = "http://127.0.0.1:4810/";
       log.shortcutSell50.pct50Pressed !== "true" ||
       log.shortcutBuy100.buyPressed !== "true" ||
       log.shortcutBuy100.pct100Pressed !== "true" ||
+      !log.symTagSwitchedTo?.startsWith("TSLA") ||
       !log.policyModal.hasDisclaimer ||
       !log.policyModal.hasPrivacy ||
       !log.policyClosedByEsc ||

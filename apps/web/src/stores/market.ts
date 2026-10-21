@@ -35,6 +35,7 @@ export const useMarket = defineStore("market", () => {
   const tab = ref<MarketKind>("stock");
   const selected = ref("NVDA");
   const newsDialog = ref<{ mode: "detail"; id: string } | { mode: "list" } | null>(null);
+  const socialTab = ref<"chat" | "rank" | "hall">("rank");
 
   const list = computed(() => Object.values(quotes.value).filter(q => q.market === tab.value));
   const current = computed<Quote | null>(() => quotes.value[selected.value] ?? null);
@@ -142,6 +143,6 @@ export const useMarket = defineStore("market", () => {
     selected.value = sym;
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, season, seasonEpoch, tab, selected, newsDialog, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, season, seasonEpoch, tab, selected, newsDialog, socialTab, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select };
 });

@@ -336,3 +336,11 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
 #policyDlg h3 { font-size: 13px; margin: 16px 0 6px; color: var(--muted); font-weight: 600; }
 #policyDlg p, #policyDlg ul { margin: 0; line-height: 1.7; font-size: 13px; }
 #policyDlg ul { padding-left: 18px; }
+
+
+/* 채팅 종목 태그 및 수익인증 공유 */
+.sym-tag { border: 0; background: var(--accent-soft); color: var(--accent); font: inherit; font-weight: 700; font-size: 12px; padding: 1px 5px; border-radius: 4px; cursor: pointer; margin: 0 1px; }
+.sym-tag:hover { text-decoration: underline; }
+.share-badge { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: var(--up-soft); color: var(--up); margin-right: 4px; }
+.chat-input button.share-btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); padding: 0 8px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.chat-input button.share-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
