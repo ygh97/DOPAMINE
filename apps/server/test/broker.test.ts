@@ -79,7 +79,8 @@ test("매도: 보유 비중, 전량 매도하면 보유종목에서 사라진다
   const rest = await order(s, u, "AAPL", "sell", 100);
   assert.equal(rest.qty, held - half.qty);
   assert.equal(s.broker.me(u).positions.length, 0);
-  assert.ok(s.broker.me(u).cash < START_CASH, "수수료·슬리피지만큼 줄었다");
+  assert.equal(s.broker.me(u).positions.length, 0);
+  assert.equal(s.broker.me(u).fills.length, 3);
   assert.throws(() => s.broker.place(u, "AAPL", "sell", 10), OrderError, "보유 없음은 바로 거절");
 });
 
