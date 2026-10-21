@@ -842,3 +842,99 @@ dialog#spyDlg::backdrop, dialog#guideDlg::backdrop { background: rgba(0,0,0,.55)
   display: flex; align-items: flex-end; justify-content: flex-end;
   padding: 2px; font-size: 12px; color: var(--muted); cursor: nwse-resize;
 }
+
+/* 채팅 펼치기/접기 바 & 모바일(760px 이하) 화면 전면 최적화 */
+.chat-fold-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; border: 0; border-bottom: 1px solid var(--line);
+  padding: 8px 12px; background: var(--panel-2); color: var(--text);
+  font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.chat-fold-bar.bottom-fold { border-top: 1px solid var(--line); border-bottom: 0; }
+.chat-fold-bar:hover { background: var(--accent-soft); }
+.chat-fold-title { font-weight: 800; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.chat-fold-preview {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 12px;
+}
+.chat-fold-btn {
+  flex-shrink: 0; padding: 2px 8px; border-radius: 5px;
+  border: 1px solid var(--line); background: var(--panel);
+  font-size: 11.5px; font-weight: 700; color: var(--accent);
+}
+.right .panel:has(.chat-wrap.is-folded) {
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+@media (max-width: 760px) {
+  /* 상단 바 압축 정렬 */
+  .topbar { padding: 6px 10px; gap: 5px 8px; }
+  .logo b { font-size: 15px; }
+  .logo small { display: none; }
+  .clock { padding: 3px 7px; font-size: 11.5px; }
+  .clock b { font-size: 12px; }
+  .top-center-nick { padding: 2px 9px; font-size: 12px; }
+  .nick-name { font-size: 12.5px; }
+  .account { gap: 6px; padding-top: 2px; }
+  .kv span { font-size: 10px; }
+  .kv b { font-size: 12.5px; }
+  .icon-btn { padding: 4px 8px; font-size: 11.5px; }
+
+  /* LIVE 뉴스 바 모바일 최적화 (헤드라인 찌그러짐 방지) */
+  .newsline {
+    flex-wrap: wrap; padding: 8px 10px; gap: 6px; font-size: 13px;
+  }
+  .newsline .headline {
+    order: 10; flex: 0 0 100%; width: 100%;
+    font-size: 14px; padding-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .newsline-syms, .news-time { display: none; }
+  .news-act-btn { margin-left: 0; padding: 4px 8px; font-size: 11.5px; }
+  #floatNewsToggleBtn { margin-left: auto; }
+  .news-recent5 { padding: 8px 10px 12px; }
+  .recent5-title { font-size: 14px; }
+  .recent5-body { font-size: 12px; }
+
+  /* 실시간 뉴스 플로팅 창 모바일 뷰포트 맞춤 */
+  .float-news-win {
+    left: 6px !important; top: 96px !important;
+    width: calc(100vw - 12px) !important;
+    max-height: 58vh !important;
+  }
+
+  /* 시세 헤더 및 중앙/우측 패널 모바일 여백 최적화 */
+  .center { min-height: 0 !important; gap: 6px; }
+  .quote-head { padding: 8px 10px; gap: 6px 10px; }
+  .quote-head h1 { font-size: 16px; }
+  .big-price { font-size: 20px; }
+  .sym-news-btn { padding: 4px 8px; font-size: 11.5px; }
+  .stats {
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px; width: 100%; padding-top: 4px; border-top: 1px dashed var(--line);
+  }
+  .sec-chart { min-height: 290px; }
+  .chart-body { min-height: 245px; }
+  .chart-area { min-height: 210px; }
+
+  /* 모바일 채팅 패널: 접었을 때는 한 줄로 축소, 펼쳤을 때는 적정 높이 유지 */
+  .right .panel:last-child { min-height: 0; }
+  .chat-log { max-height: 220px; min-height: 150px; padding: 6px; gap: 5px; }
+  .chat-card { padding: 6px 8px; font-size: 12px; }
+  .chat-card-body { font-size: 12.5px; }
+  .chat-input { padding: 6px; gap: 4px; }
+  .chat-input input { padding: 6px 8px; font-size: 12.5px; }
+
+  /* 귓속말 도착 알림 배너 모바일 상단 고정 */
+  .whisper-alert {
+    position: sticky; top: 0; padding: 7px 10px; gap: 6px;
+    font-size: 12px; flex-wrap: wrap; justify-content: space-between;
+  }
+  .whisper-alert-text { max-width: 100%; flex: 1 1 140px; }
+
+  /* 포트폴리오 스캔·가이드 모달 모바일 패딩 최적화 */
+  dialog#spyDlg, dialog#guideDlg { padding: 12px 14px; width: calc(100vw - 16px); }
+  .dlg-head h2 { font-size: 15.5px; }
+  .dlg-act-btn { height: 30px; padding: 0 9px; font-size: 11.5px; }
+}

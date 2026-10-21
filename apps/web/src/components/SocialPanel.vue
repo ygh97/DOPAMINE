@@ -18,6 +18,8 @@ const logEl = ref<HTMLElement | null>(null);
 // 맨 아래에 있으면 새 채팅 수신 시 자동으로 맨 아래로 스크롤하고, 위로 올려서 보고 있으면 현재 스크롤 위치를 그대로 고정한다.
 const stickBottom = ref(true);
 const unreadCount = ref(0);
+// 모바일(760px 이하)에서는 채팅을 펼치기/접기로 여닫을 수 있게 지원
+const chatFolded = ref(typeof window !== "undefined" && window.innerWidth <= 760);
 
 function isNearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= 42;
@@ -63,6 +65,7 @@ watch(() => m.replyWhisperTo, target => {
   if (!target) return;
   whisperTo.value = target;
   m.socialTab = "chat";
+  chatFolded.value = false;
   m.unreadWhispers = 0;
   m.replyWhisperTo = null;
   void nextTick(() => chatInputEl.value?.focus());
@@ -87,6 +90,7 @@ function startWhisper(targetName: string) {
   if (!a.me || targetName === "⚡전광판" || targetName === a.me.name) return;
   whisperTo.value = targetName;
   m.socialTab = "chat";
+  chatFolded.value = false;
   void nextTick(() => chatInputEl.value?.focus());
 }
 
@@ -203,7 +207,7 @@ async function toggleBan(name: string, banned: boolean) {
       <div class="tabs" role="tablist">
         <button role="tab" data-c="rank" :aria-selected="m.socialTab === 'rank'" @click="m.socialTab = 'rank'">랭킹</button>
         <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">명예의 전당</button>
-        <button role="tab" data-c="chat" :aria-selected="m.socialTab === 'chat'" @click="m.socialTab = 'chat'">
+        <button role="tab" data-c="chat" :aria-selected="m.socialTab === 'chat'" @click="m.socialTab = 'chat'; chatFolded = false">
           채팅
           <span v-if="m.unreadWhispers > 0" class="whisper-tab-badge">🔒{{ m.unreadWhispers }}</span>
         </button>
@@ -242,7 +246,18 @@ async function toggleBan(name: string, banned: boolean) {
       </table>
       <p v-else class="empty">아직 끝난 시즌이 없습니다. 시즌이 끝나면 1~3위와 100배 달성자가 여기에 남습니다.</p>
     </div>
-    <div v-else class="chat-wrap">
+    <div v-else class="chat-wrap" :class="{ 'is-folded': chatFolded }">
+      <button type="button" class="chat-fold-bar" :aria-expanded="!chatFolded" @click="chatFolded = !chatFolded; if (!chatFolded) scrollToBottom()">
+        <span class="chat-fold-title">
+          💬 실시간 채팅
+          <span v-if="m.unreadWhispers > 0" class="whisper-tab-badge">🔒귓속말 {{ m.unreadWhispers }}</span>
+        </span>
+        <span v-if="chatFolded && visibleChat.length" class="chat-fold-preview muted">
+          <b>{{ visibleChat[visibleChat.length - 1].name }}:</b> {{ visibleChat[visibleChat.length - 1].text }}
+        </span>
+        <span class="chat-fold-btn">{{ chatFolded ? "펼치기 ▾" : "접기 ▴" }}</span>
+      </button>
+      <template v-if="!chatFolded">
       <div v-if="adminOpen" id="adminPanel" class="admin-box">
         <div class="admin-row">
           <input v-model="adminKey" type="password" placeholder="운영자 키" aria-label="운영자 키" @keydown.enter="loadAdmin">
@@ -271,7 +286,7 @@ async function toggleBan(name: string, banned: boolean) {
           <div
             v-for="c in visibleChat"
             :key="c.id"
-            class="chat-card"
+            class="chat-card msg"
             :class="{
               'is-mine': c.name === a.me?.name,
               'is-broadcast': c.name === '⚡전광판',
@@ -338,6 +353,22 @@ async function toggleBan(name: string, banned: boolean) {
         >
         <button type="submit" :disabled="!a.me || !text.trim()">전송</button>
       </form>
+      </template>
     </div>
+    <button
+      v-if="m.socialTab !== 'chat'"
+      type="button"
+      class="chat-fold-bar bottom-fold"
+      @click="m.socialTab = 'chat'; chatFolded = false; scrollToBottom()"
+    >
+      <span class="chat-fold-title">
+        💬 실시간 채팅
+        <span v-if="m.unreadWhispers > 0" class="whisper-tab-badge">🔒귓속말 {{ m.unreadWhispers }}</span>
+      </span>
+      <span v-if="visibleChat.length" class="chat-fold-preview muted">
+        <b>{{ visibleChat[visibleChat.length - 1].name }}:</b> {{ visibleChat[visibleChat.length - 1].text }}
+      </span>
+      <span class="chat-fold-btn">펼치기 ▾</span>
+    </button>
   </div>
 </template>
