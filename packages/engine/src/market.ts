@@ -159,8 +159,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     state[def.sym] = {
       ...def, ...KIND[def.market], def,
       prev: def.price,
-      eps: def.market === "stock" && def.fairPER ? def.price / def.fairPER : null,
-      baseEps: def.market === "stock" && def.fairPER ? def.price / def.fairPER : null,
+      eps: def.fairPER ? def.price / def.fairPER : null,
+      baseEps: def.fairPER ? def.price / def.fairPER : null,
       anchor: def.price,
       shares: def.cap ? def.cap / def.price : null,
       variance: 1, regime: rand() < 0.5 ? "range" : "trend",
@@ -551,7 +551,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       if (a.hi != null) a.hi *= k;
       if (a.lo != null) a.lo *= k;
       for (const n of news) if (n.priceAt[a.sym]) n.priceAt[a.sym] *= k;
-      if (a.market === "stock" && a.fairPER) a.eps = a.baseEps = a.price / a.fairPER; else a.anchor = a.price;
+      if (a.fairPER) a.eps = a.baseEps = a.price / a.fairPER; else a.anchor = a.price;
       a.successes = 0;
       if (!venturesBusy.has(a.sym)) a.stage = null;
     }
@@ -574,6 +574,20 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     nextGradAt = d.nextGradAt ?? Infinity; startTime = d.startTime; news = d.news; scheduled = d.scheduled;
     marketPending = d.marketPending; sectorPending = d.sectorPending; venturesBusy = new Set(d.venturesBusy);
     sparePool = d.sparePool; state = d.state;
+    // 카탈로그에 새로 추가된 fairPER·cap(예: 코인 PER·시총)이 기존 스냅샷에 없으면 현재 적정가(anchor) 기준으로 채워 넣는다
+    for (const def of assets) {
+      const a = state[def.sym];
+      if (!a) continue;
+      if (def.fairPER && !a.fairPER) {
+        a.fairPER = def.fairPER;
+        const refPrice = a.anchor || a.price;
+        a.eps = refPrice / def.fairPER;
+        a.baseEps = def.price / def.fairPER;
+      }
+      if (def.cap && !a.shares) {
+        a.shares = def.cap / def.price;
+      }
+    }
   }
 
   if (snapshot) restore(snapshot);
