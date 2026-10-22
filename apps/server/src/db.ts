@@ -138,6 +138,7 @@ export function openDb(file: string): Db {
     "ALTER TABLE chat_messages ADD COLUMN to_name TEXT",
     // user: 사람, bot: 🤖 봇, mm: 🏦 세력 계정 (봇·세력은 명예의 전당·졸업에서 빠진다)
     "ALTER TABLE users ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'",
+    "ALTER TABLE accounts ADD COLUMN grad_tick INTEGER", // 20배 졸업 시점 (cleared_tick은 100배 전설)
   ]) {
     try { db.exec(sql); } catch { /* 이미 있음 */ }
   }

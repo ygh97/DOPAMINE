@@ -50,10 +50,11 @@ const health = async () => (await fetch(`${API}/api/health`)).json();
     await page.waitForFunction(() => document.querySelector("#equity")?.textContent === "$100,000.00", null, { timeout: 10000 });
     log.season2 = { clock: await clock(), equity: await page.locator("#equity").innerText(), holdings: await page.locator("#holdings").count() };
 
-    // 4) 명예의 전당에 시즌 1 기록
+    // 4) 명예의 전당: 100배 전설만 들어간다. 이 시나리오는 전설이 없으니 빈 안내가 보여야 한다
     await page.click('[data-c="hall"]');
-    await page.waitForSelector("#hall tr");
-    log.hall = (await page.locator("#hall").innerText()).split("\n");
+    const hallEmpty = page.locator(".table-scroll .empty", { hasText: "전설" });
+    await hallEmpty.waitFor();
+    log.hall = await hallEmpty.innerText();
     await page.screenshot({ path: path.join(OUT, "m3-hall.png") });
     await browser.close();
   } catch (e) {

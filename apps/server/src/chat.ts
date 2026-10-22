@@ -12,7 +12,7 @@ export class ChatError extends Error {}
 export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean }
 
 // 시스템·서버가 만드는 표시. 일반 채팅으로는 이 말머리로 시작할 수 없다 (사칭 방지)
-const RESERVED = ["[티배깅]", "[강제청산]", "[100배졸업]", "[공유]"];
+const RESERVED = ["[티배깅]", "[강제청산]", "[졸업]", "[전설]", "[100배졸업]", "[공유]"];
 const LIQ_RE = /^\[강제청산\] 💥 (\S+)님 \$(\S+) /;
 export interface ChatAdminMsg extends ChatMsg { reports: number; hidden: boolean }
 

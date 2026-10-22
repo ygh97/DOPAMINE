@@ -21,7 +21,9 @@ const left = computed(() => {
   const h = Math.floor(ms / 3_600_000), d = Math.floor(h / 24), min = Math.floor((ms % 3_600_000) / 60_000);
   return d ? `${d}일 ${h % 24}시간 남음` : h ? `${h}시간 ${min}분 남음` : `${min}분 ${Math.floor((ms % 60_000) / 1000)}초 남음`;
 });
-const goalPct = computed(() => Math.min(100, (a.equity / (a.me?.goal ?? 1e7)) * 100));
+// 다음 목표: 20배 졸업 전에는 졸업, 졸업 뒤에는 100배 전설
+const nextGoal = computed(() => (a.me?.gradTick == null ? { label: "20배 졸업", value: a.me?.grad ?? 2e6 } : { label: "100배 전설", value: a.me?.goal ?? 1e7 }));
+const goalPct = computed(() => Math.min(100, (a.equity / nextGoal.value.value) * 100));
 
 async function submit() {
   await a.join(name.value, password.value);
@@ -49,13 +51,13 @@ function restart() {
       <div class="kv"><span>총자산</span><b id="equity">{{ money(a.equity) }}</b></div>
       <div class="kv"><span>수익률</span><b :class="ret >= 0 ? 'up' : 'down'">{{ pct(ret) }}</b></div>
       <div class="kv"><span>예수금</span><b>{{ money(a.me.cash) }}</b></div>
-      <div class="kv goal"><span>100배 목표 · {{ goalPct.toFixed(2) }}%</span><div class="bar"><i :style="{ width: `${goalPct}%` }"></i></div></div>
+      <div class="kv goal"><span>{{ nextGoal.label }} · {{ goalPct.toFixed(2) }}%</span><div class="bar"><i :style="{ width: `${goalPct}%` }"></i></div></div>
       <button class="icon-btn" title="계좌를 $100,000으로 다시 시작" @click="restart">다시 시작</button>
       <button class="icon-btn" @click="a.logout()">나가기</button>
       <button class="icon-btn" data-act="theme" @click="ui.toggleTheme()">{{ ui.theme === "dark" ? "라이트" : "다크" }}</button>
     </div>
     <form v-else class="account join" @submit.prevent="submit">
-      <span class="muted join-hint">$100,000 → $10,000,000 · 100배 도전</span>
+      <span class="muted join-hint">$100,000 → 20배 졸업 · 100배 전설</span>
       <input v-model="name" name="name" placeholder="이름 (2~12자)" maxlength="12" autocomplete="username" required>
       <input v-model="password" name="password" type="password" placeholder="비밀번호 6자 이상" minlength="6" maxlength="64" autocomplete="current-password" required>
       <button class="join-btn" :disabled="a.busy">참가하기</button>

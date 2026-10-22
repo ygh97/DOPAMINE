@@ -111,7 +111,11 @@ function replyWhisper(from: string) {
 }
 
 watch(() => m.selected, () => { if (mView.value === "watch") mView.value = "trade"; });
-onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷부터 받는다
+onMounted(() => {
+  m.connect(); void a.refresh(); // 연결되면 스냅샷부터 받는다
+  // 화면을 보고 있는 동안 1분마다 계좌를 새로 받는다. 서버는 이것을 "활동 중"으로 세서 🤖 봇 수를 맞춘다
+  window.setInterval(() => { if (a.me && document.visibilityState === "visible") void a.refresh(); }, 60_000);
+});
 </script>
 
 <template>
@@ -300,8 +304,8 @@ onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷�
     </div>
     <div class="guide-grid">
       <div class="guide-card">
-        <h3>1. 게임 목표: $100,000 → $10,000,000 (100배)</h3>
-        <p>초기 시드 <b>$100,000</b>으로 시작해 시즌 종료 전까지 최고 수익률을 달성하세요. 100배($10M) 달성 시 <b>전광판 100배 졸업</b>에 등극하며, 파산 시 언제든 초기 시드로 즉시 재도전할 수 있습니다.</p>
+        <h3>1. 게임 목표: 20배 졸업 → 100배 전설</h3>
+        <p>초기 시드 <b>$100,000</b>으로 시작해 시즌 종료 전까지 최고 수익률을 달성하세요. 20배($200만)를 넘기면 <b>졸업</b>, 100배($1,000만)를 넘기면 <b>전설</b>이 되어 명예의 전당에 남습니다. 파산 시 언제든 초기 시드로 즉시 재도전할 수 있습니다.</p>
       </div>
       <div class="guide-card">
         <h3>2. 현물 vs 선물 레버리지 (2x ~ 10x)</h3>

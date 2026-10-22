@@ -198,19 +198,25 @@ test("스냅샷 + 이후 주문 흐름으로 복원해도 같은 시세", async 
   assert.deepEqual(boot.market.quotes(), s.market.quotes());
 });
 
-test("시즌 종료: 명예의 전당 기록, 새 시즌은 새 seed와 $100,000 계좌", async () => {
+test("졸업(20배)·전설(100배) 알림, 시즌 종료: 명예의 전당은 전설만, 새 시즌은 새 seed와 $100,000 계좌", async () => {
   const s = setup(10);
-  const a = s.user("winner"), b = s.user("second"), c = s.user("third"), d = s.user("fourth");
+  const a = s.user("winner"), b = s.user("legend"), c = s.user("grad"), d = s.user("fourth");
   await order(s, a, "NVDA", "buy", 50);
-  void [b, c, d];
+  void d;
+  s.broker.account(b).cash = 11_000_000; // 100배 넘김 → 졸업 + 전설
+  s.broker.account(c).cash = 3_000_000;  // 20배 넘김 → 졸업만
+  s.tick();
   const rows = s.broker.ranking(Infinity);
+  const casts = s.broker.drainBroadcasts();
+  assert.ok(casts.some(t => t.startsWith("[전설]") && t.includes("legend")), "전설 알림");
+  assert.ok(casts.some(t => t.startsWith("[졸업]") && t.includes("grad")), "졸업 알림");
+  assert.equal(rows.find(r => r.name === "grad")?.gradTick != null && rows.find(r => r.name === "grad")?.clearedTick, null, "20배는 졸업만");
   const next = finishSeason(s.db, s.season, rows, T0 + s.season.lengthMs + 1000);
   assert.equal(next.id, s.season.id + 1);
   assert.notEqual(next.seed, s.season.seed);
   assert.equal(next.startedAt, T0 + s.season.lengthMs, "이전 시즌이 끝난 시각에 이어서 시작");
   const hall = hallOfFame(s.db) as { season: number; rank: number; name: string }[];
-  assert.equal(hall.length, 3, "1~3위만 (100배 달성자 없음)");
-  assert.deepEqual(hall.map(h => h.rank), [1, 2, 3]);
+  assert.deepEqual(hall.map(h => h.name), ["legend"], "명예의 전당은 100배 전설만 (1위 자동 등재 없음)");
   assert.equal(currentSeason(s.db, 1, 1000, 1, T0).id, next.id, "진행 중 시즌 = 새 시즌");
   const { market } = bootMarket(s.db, next, FAST, next.startedAt);
   const broker = new Broker(s.db, next, market);
@@ -466,21 +472,44 @@ test("수익인증 공유 문구는 서버가 실제 계좌로 만든다", async
   assert.throws(() => s.broker.shareText(u, { type: "spot", sym: "AMD" }), /보유하지 않은/);
 });
 
-test("봇·세력: 같은 주문 경로로 매매하고, 세력은 랭킹 밖, 명예의 전당은 사람만", () => {
+test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭킹 밖 자기 탭, 명예의 전당은 사람 전설만", () => {
   const s = setup();
   const human = s.user("사람1");
   const bots = new BotRunner(s.db, () => s.broker, () => s.market, { bots: 12, marketMakers: true, seed: 3 });
   assert.equal(bots.size, 12 + 8);
   for (let i = 0; i < 1500; i++) { const r = s.tick(); bots.tick(r.news); }
-  const rows = s.broker.ranking(Infinity), mm = s.broker.mmRanking();
+  const rows = s.broker.ranking(Infinity), mm = s.broker.mmRanking(), whales = s.broker.whaleRanking();
   assert.equal(rows.length, 13, "사람 1 + 봇 12");
-  assert.ok(rows.every(r => r.kind !== "mm") && mm.length === 8 && mm.every(r => r.kind === "mm"));
+  assert.ok(rows.every(r => r.kind === "user" || r.kind === "bot"));
+  assert.ok(mm.length === 7 && mm.every(r => r.kind === "mm"), "세력 7");
+  assert.ok(whales.length === 1 && whales[0].kind === "whale", "🐋 고래는 별도");
   assert.equal(s.broker.players, 13);
   const fills = s.db.prepare("SELECT COUNT(*) AS c FROM fills f JOIN users u ON u.id = f.user_id WHERE u.kind != 'user'").get() as { c: number };
   assert.ok(fills.c > 20, `봇·세력이 실제로 체결 (${fills.c}건)`);
   assert.throws(() => s.auth.join(rows.find(r => r.kind === "bot")!.name, "secret1"), /봇·세력 계정 이름/);
-  finishSeason(s.db, s.season, rows, T0 + s.season.lengthMs + 1000);
+  // 봇이 전설이어도 명예의 전당에는 사람 전설만
+  const bot = rows.find(r => r.kind === "bot")!;
+  const botId = (s.db.prepare("SELECT id FROM users WHERE name = ?").get(bot.name) as { id: number }).id;
+  s.broker.account(botId).cash = 20_000_000;
+  s.broker.account(human).cash = 20_000_000;
+  s.tick();
+  assert.ok(!s.broker.drainBroadcasts().some(t => t.includes(bot.name)), "봇은 전광판 알림 없음");
+  finishSeason(s.db, s.season, s.broker.ranking(Infinity), T0 + s.season.lengthMs + 1000);
   const hall = hallOfFame(s.db) as { name: string }[];
-  assert.deepEqual(hall.map(h => h.name), ["사람1"], "명예의 전당은 사람만");
-  void human;
+  assert.deepEqual(hall.map(h => h.name), ["사람1"], "명예의 전당은 사람 전설만");
+});
+
+test("🤖 봇 교대: 활동 중인 사람만큼 봇이 쉬고, 사람이 빠지면 다시 깨어난다", () => {
+  const s = setup();
+  let humans = 0;
+  const bots = new BotRunner(s.db, () => s.broker, () => s.market, { bots: 10, marketMakers: false, seed: 5, activeHumans: () => humans });
+  for (let i = 0; i < 200; i++) { const r = s.tick(); bots.tick(r.news); }
+  assert.equal(s.broker.players, 10);
+  humans = 4;
+  for (let i = 0; i < 200; i++) { const r = s.tick(); bots.tick(r.news); }
+  assert.equal(s.broker.players, 6, "사람 4명 → 봇 4명 휴식 (랭킹에서 숨김)");
+  assert.equal(s.broker.ranking(Infinity).length, 6);
+  humans = 1;
+  for (let i = 0; i < 50; i++) { const r = s.tick(); bots.tick(r.news); }
+  assert.equal(s.broker.players, 9, "사람이 줄면 봇이 깨어난다");
 });

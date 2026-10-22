@@ -22,9 +22,9 @@ if (seeds.length > 1) {
     p.stdout.on("data", d => (out += d)); p.stderr.on("data", d => (out += d)); p.on("close", () => resolve(out));
   })));
   process.stdout.write(outs.join(""));
-  const totals = outs.map(o => /졸업 (\d+)\/(\d+)/.exec(o)).filter(Boolean).map(m => [Number(m![1]), Number(m![2])]);
-  const g = totals.reduce((s, [a]) => s + a, 0), n = totals.reduce((s, [, b]) => s + b, 0);
-  console.log(`== 전체: 봇 졸업 ${g}/${n} (${((g / Math.max(1, n)) * 100).toFixed(1)}%), 시즌당 평균 ${(g / Math.max(1, totals.length)).toFixed(1)}명`);
+  const totals = outs.map(o => /졸업 (\d+) · 전설 (\d+) \/ (\d+)명/.exec(o)).filter(Boolean).map(m => [Number(m![1]), Number(m![2]), Number(m![3])]);
+  const sum = (k: number) => totals.reduce((s, t) => s + t[k], 0), n = Math.max(1, sum(2));
+  console.log(`== 전체 ${sum(2)}명: 20배 졸업 ${sum(0)} (${((sum(0) / n) * 100).toFixed(1)}%) · 100배 전설 ${sum(1)} (${((sum(1) / n) * 100).toFixed(1)}%)`);
 } else {
   run(seeds[0] ?? 1);
 }
@@ -55,17 +55,17 @@ function run(seed: number) {
   broker.settle();
   const who = new Map(bots.describe().map(d => [broker.account(d.userId).name, d]));
   const rows = broker.ranking(Infinity), mm = broker.mmRanking();
-  const cleared = rows.filter(r => r.clearedTick != null);
+  const cleared = rows.filter(r => r.clearedTick != null), graduated = rows.filter(r => r.gradTick != null);
   const byStyle = new Map<string, { n: number; cleared: number; best: number }>();
   for (const r of rows) {
     const s = who.get(r.name)?.label ?? "?", e = byStyle.get(s) ?? { n: 0, cleared: 0, best: 0 };
-    e.n++; if (r.clearedTick != null) e.cleared++; e.best = Math.max(e.best, r.equity / 100_000);
+    e.n++; if (r.gradTick != null) e.cleared++; e.best = Math.max(e.best, r.equity / 100_000);
     byStyle.set(s, e);
   }
   const mult = rows.map(r => r.equity / 100_000).sort((a, b) => a - b);
   const stockMult = market.quotes().filter(q => q.market === "stock" && start[q.sym]).map(q => q.price / start[q.sym]).sort((a, b) => a - b);
   const ventMax = Math.max(...market.quotes().filter(q => q.market === "venture" && start[q.sym]).map(q => q.price / (start[q.sym] * (q.splitFactor ?? 1)))); // 병합하면 가격이 ×ratio 되므로 나눠서 비교
-  console.log(`seed ${seed} (${((performance.now() - t0) / 1000).toFixed(0)}초): 졸업 ${cleared.length}/${rows.length} · 최종 중앙 ${mult[Math.floor(mult.length / 2)].toFixed(2)}배 · 1위 ${(mult.at(-1)! ).toFixed(1)}배 · 강제청산 ${liqs}회 · 승격 ${grads} · 주식 중앙 ${stockMult[Math.floor(stockMult.length / 2)].toFixed(2)}배 · 신흥주 최고 ${ventMax.toFixed(1)}배`);
+  console.log(`seed ${seed} (${((performance.now() - t0) / 1000).toFixed(0)}초): 졸업 ${graduated.length} · 전설 ${cleared.length} / ${rows.length}명 · 최종 중앙 ${mult[Math.floor(mult.length / 2)].toFixed(2)}배 · 1위 ${(mult.at(-1)! ).toFixed(1)}배 · 강제청산 ${liqs}회 · 승격 ${grads} · 주식 중앙 ${stockMult[Math.floor(stockMult.length / 2)].toFixed(2)}배 · 신흥주 최고 ${ventMax.toFixed(1)}배`);
   console.log(`  도달 [10배 ${reached(10)} · 20배 ${reached(20)} · 30배 ${reached(30)} · 50배 ${reached(50)} · 100배 ${reached(100)}]`);
   console.log("  성향별 졸업: " + [...byStyle].map(([s, e]) => `${s} ${e.cleared}/${e.n}(최고 ${e.best.toFixed(1)}배)`).join(", "));
   if (mm.length) console.log("  세력 수익률: " + mm.map(r => `${who.get(r.name)?.label ?? r.name} ${r.returnPct >= 0 ? "+" : ""}${r.returnPct.toFixed(1)}%`).join(", "));

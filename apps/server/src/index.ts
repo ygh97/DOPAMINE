@@ -40,10 +40,20 @@ const bootMs = Math.round(performance.now() - bootStart);
 // 켤 때마다 백업 (시즌이 8시간이라 하루 1회 백업만으로는 부족하다)
 backupDb(db, BACKUP_DIR, "boot").catch(e => console.error("백업 실패", e));
 
+// 최근 활동한 사람 (로그인한 요청을 받을 때마다 갱신). 🤖 봇 교대가 "사람 + 봇 = BOTS"를 맞추는 데 쓴다
+const lastSeen = new Map<number, number>();
+const ACTIVE_MS = 10 * 60_000;
+function activeHumans() {
+  const now = Date.now();
+  let n = 0;
+  for (const [id, t] of lastSeen) { if (now - t < ACTIVE_MS) n++; else lastSeen.delete(id); }
+  return n;
+}
+
 // 🤖 봇·🏦 세력: BOTS=100, MARKET_MAKERS=1로 켠다 (테스트 서버용. 기본은 꺼짐)
 const BOTS = Number(process.env.BOTS ?? 0), MARKET_MAKERS = process.env.MARKET_MAKERS === "1";
 const bots = BOTS > 0 || MARKET_MAKERS
-  ? new BotRunner(db, () => broker, () => market, { bots: BOTS, marketMakers: MARKET_MAKERS, seed: SEED, tuning: JSON.parse(process.env.MM_TUNING ?? '{"strength":{}}') })
+  ? new BotRunner(db, () => broker, () => market, { bots: BOTS, marketMakers: MARKET_MAKERS, seed: SEED, activeHumans, tuning: JSON.parse(process.env.MM_TUNING ?? '{"strength":{}}') })
   : null;
 
 /** 시즌 종료: 백업 → 통계 로그 → 명예의 전당 기록 → 새 시즌 시작 → 모두에게 알림 */
@@ -61,7 +71,7 @@ function rollover() {
 }
 const seasonInfo = () => ({ id: season.id, startedAt: season.startedAt, endsAt: season.startedAt + season.lengthMs });
 /** 랭킹(사람 + 🤖) 상위 20명, 참가자 수, 🏦 세력 */
-const rankingInfo = (rows = broker.ranking(20)) => ({ rows, players: broker.players, mm: broker.mmRanking() });
+const rankingInfo = (rows = broker.ranking(20)) => ({ rows, players: broker.players, mm: broker.mmRanking(), whales: broker.whaleRanking() });
 
 // JSON 크기를 줄이려고 유효숫자 7자리로 자른다 ($94,880.10, $0.3121 모두 충분)
 const r7 = (v: number) => Number(v.toPrecision(7));
@@ -159,6 +169,7 @@ app.setErrorHandler((err, _req, reply) => {
 function userOf(req: FastifyRequest, reply: FastifyReply): number | null {
   const id = auth.userOf(req.headers.authorization);
   if (!id) void reply.code(401).send({ error: "참가가 필요합니다." });
+  else lastSeen.set(id, Date.now());
   return id;
 }
 
@@ -183,7 +194,9 @@ function joinAllowed(ip: string) {
 
 function viewerOf(req: FastifyRequest): string | null {
   const id = auth.userOf(req.headers.authorization);
-  return id ? broker.account(id).name : null;
+  if (!id) return null;
+  lastSeen.set(id, Date.now()); // 화면 갱신(스냅샷·폴링·채팅 조회)도 활동으로 센다
+  return broker.account(id).name;
 }
 
 app.get("/api/snapshot", async req => snapshot(viewerOf(req)));

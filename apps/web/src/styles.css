@@ -1043,3 +1043,7 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 
 /* ---------- 🤖 봇 · 🏦 세력 배지 ---------- */
 .kind-badge { display: inline-block; margin-right: 3px; font-size: 12px; line-height: 1; }
+
+/* 졸업(20배)·전설(100배) 배지 */
+.stage.grad { background: var(--accent-soft); color: var(--accent); }
+.stage.legend { background: linear-gradient(90deg, #f5b700, #ff6b6b); color: #fff; font-weight: 800; }

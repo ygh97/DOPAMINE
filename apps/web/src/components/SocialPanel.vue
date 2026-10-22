@@ -131,6 +131,12 @@ function tokenize(raw: string): Token[] {
   } else if (s.startsWith("[강제청산] ")) {
     out.push({ kind: "badge", val: "강제청산" });
     s = s.slice(7);
+  } else if (s.startsWith("[졸업] ")) {
+    out.push({ kind: "badge", val: "졸업" });
+    s = s.slice(5);
+  } else if (s.startsWith("[전설] ")) {
+    out.push({ kind: "badge", val: "전설" });
+    s = s.slice(5);
   } else if (s.startsWith("[100배졸업] ")) {
     out.push({ kind: "badge", val: "100배졸업" });
     s = s.slice(9);
@@ -187,6 +193,7 @@ async function toggleBan(name: string, banned: boolean) {
     <div class="panel-head">
       <div class="tabs" role="tablist">
         <button role="tab" data-c="rank" :aria-selected="m.socialTab === 'rank'" @click="m.socialTab = 'rank'">랭킹</button>
+        <button v-if="m.whaleRanking.length" role="tab" data-c="whale" :aria-selected="m.socialTab === 'whale'" @click="m.socialTab = 'whale'">🐋 고래</button>
         <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">명예의 전당</button>
         <button role="tab" data-c="chat" :aria-selected="m.socialTab === 'chat'" @click="m.socialTab = 'chat'; chatFolded = false">
           채팅
@@ -205,7 +212,8 @@ async function toggleBan(name: string, banned: boolean) {
             <td>
               <span v-if="kindBadge(r.kind)" class="kind-badge" :title="r.kind === 'bot' ? '봇' : '세력'">{{ kindBadge(r.kind) }}</span>
               <b>{{ r.name }}</b>
-              <span v-if="r.clearedTick" class="stage">100배</span>
+              <span v-if="r.clearedTick" class="stage legend">전설</span>
+              <span v-else-if="r.gradTick" class="stage grad">졸업</span>
               <span class="spy-chip">🔍포지션</span>
             </td>
             <td>{{ money(r.equity) }}</td>
@@ -228,18 +236,31 @@ async function toggleBan(name: string, banned: boolean) {
         </table>
       </template>
     </div>
+    <div v-else-if="m.socialTab === 'whale'" class="table-scroll">
+      <div class="rank-hint muted">🐋 고래: 큰 자금($200만)으로 가끔 시장을 크게 흔드는 거래자 (봇). 졸업·명예의 전당 제외</div>
+      <table id="whaleRanking" class="grid">
+        <tbody>
+          <tr v-for="r in m.whaleRanking" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">
+            <td><span class="kind-badge">🐋</span></td>
+            <td><b>{{ r.name }}</b> <span class="spy-chip">🔍포지션</span></td>
+            <td>{{ money(r.equity) }}</td>
+            <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
     <div v-else-if="m.socialTab === 'hall'" class="table-scroll">
       <table v-if="hall.length" id="hall" class="grid">
         <tbody>
           <tr v-for="h in hall" :key="`${h.season}-${h.name}`" :class="{ mine: h.name === a.me?.name }">
             <td>S{{ h.season }}</td>
             <td>{{ h.rank <= 3 ? ["🥇", "🥈", "🥉"][h.rank - 1] : `${h.rank}위` }}</td>
-            <td><b>{{ h.name }}</b><span v-if="h.clearedTick" class="stage">100배</span></td>
+            <td><b>{{ h.name }}</b><span v-if="h.clearedTick" class="stage legend">전설</span></td>
             <td :class="h.returnPct >= 0 ? 'up' : 'down'">{{ pct(h.returnPct) }}</td>
           </tr>
         </tbody>
       </table>
-      <p v-else class="empty">아직 끝난 시즌이 없습니다. 시즌이 끝나면 1~3위와 100배 달성자가 여기에 남습니다.</p>
+      <p v-else class="empty">아직 전설이 없습니다. 시즌 중 100배(총자산 $1,000만)를 달성하면 여기에 남습니다.</p>
     </div>
     <div v-else class="chat-wrap" :class="{ 'is-folded': chatFolded }">
       <button type="button" class="chat-fold-bar" :aria-expanded="!chatFolded" @click="chatFolded = !chatFolded; if (!chatFolded) scrollToBottom()">

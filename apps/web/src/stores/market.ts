@@ -4,12 +4,13 @@ import type { GameDate, MarketKind, NewsItem, Quote } from "@dopamine/engine";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 
-/** user: 사람, bot: 🤖 봇, mm: 🏦 세력 */
-export type AccountKind = "user" | "bot" | "mm";
-export interface RankRow { rank: number; name: string; kind?: AccountKind; equity: number; returnPct: number; clearedTick: number | null }
+/** user: 사람, bot: 🤖 봇, mm: 🏦 세력, whale: 🐋 고래 */
+export type AccountKind = "user" | "bot" | "mm" | "whale";
+/** gradTick: 20배 졸업, clearedTick: 100배 전설 */
+export interface RankRow { rank: number; name: string; kind?: AccountKind; equity: number; returnPct: number; clearedTick: number | null; gradTick?: number | null }
 /** reacted: 강제청산 알림에 누군가 이미 티배깅·묵념을 했다 (버튼을 숨긴다) */
 export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean }
-export const kindBadge = (k?: AccountKind) => (k === "bot" ? "🤖" : k === "mm" ? "🏦" : "");
+export const kindBadge = (k?: AccountKind) => (k === "bot" ? "🤖" : k === "mm" ? "🏦" : k === "whale" ? "🐋" : "");
 export interface OrderPreset { mode: "spot" | "fut"; side: "buy" | "sell"; lev?: number; seq: number }
 /** 서버가 보내는 압축 봉: [timestamp, open, high, low, close, volume] */
 export type PackedBar = [number, number, number, number, number, number];
@@ -33,6 +34,8 @@ export const useMarket = defineStore("market", () => {
   const players = ref(0);
   /** 🏦 세력 계정 (수익률 순, 랭킹과 따로) */
   const mmRanking = ref<RankRow[]>([]);
+  /** 🐋 고래 (별도 탭) */
+  const whaleRanking = ref<RankRow[]>([]);
   /** 진행 중 시즌. 시즌이 바뀌면 seasonEpoch가 올라가고 차트·계좌가 새로 받는다 */
   const season = ref<{ id: number; startedAt: number; endsAt: number } | null>(null);
   const seasonEpoch = ref(0);
@@ -57,8 +60,8 @@ export const useMarket = defineStore("market", () => {
     }
     if (msg.name !== "⚡전광판" || msg.id <= lastBannerId || msg.reacted) return;
     lastBannerId = msg.id;
-    const kind: "clear" | "liq" = msg.text.startsWith("[100배졸업]") ? "clear" : "liq";
-    const text = msg.text.replace(/^\[(100배졸업|강제청산)\]\s*/, "");
+    const kind: "clear" | "liq" = msg.text.startsWith("[강제청산]") ? "liq" : "clear"; // 졸업·전설(예전 100배졸업 포함)
+    const text = msg.text.replace(/^\[(졸업|전설|100배졸업|강제청산)\]\s*/, "");
     banner.value = { id: msg.id, text, kind };
     setTimeout(() => { if (banner.value?.id === msg.id) banner.value = null; }, 6000);
   }
@@ -74,7 +77,7 @@ export const useMarket = defineStore("market", () => {
   const guideOpen = ref(false);
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
-  const socialTab = ref<"chat" | "rank" | "hall">("rank");
+  const socialTab = ref<"chat" | "rank" | "whale" | "hall">("rank");
 
   const list = computed(() => Object.values(quotes.value).filter(q => q.market === tab.value));
   const current = computed<Quote | null>(() => quotes.value[selected.value] ?? null);
@@ -237,7 +240,9 @@ export const useMarket = defineStore("market", () => {
     });
   }
 
-  function applyRanking(d: { rows: RankRow[]; players: number; mm?: RankRow[] }) { ranking.value = d.rows; players.value = d.players; mmRanking.value = d.mm ?? []; }
+  function applyRanking(d: { rows: RankRow[]; players: number; mm?: RankRow[]; whales?: RankRow[] }) {
+    ranking.value = d.rows; players.value = d.players; mmRanking.value = d.mm ?? []; whaleRanking.value = d.whales ?? [];
+  }
   /** 강제청산 알림에 누군가 반응함 → 버튼 숨김 (전광판 배너도) */
   function markReacted(id: number) {
     const c = chat.value.find(x => x.id === id);
@@ -267,6 +272,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

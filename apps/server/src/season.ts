@@ -53,7 +53,7 @@ export const targetTick = (season: Season, warmTicks: number, now = Date.now()) 
 export const endTick = (season: Season, warmTicks: number) => warmTicks + Math.floor(season.lengthMs / season.tickMs);
 
 /**
- * 시즌을 닫고 다음 시즌을 연다. 명예의 전당: 1~3위 + 100배 달성자 전원.
+ * 시즌을 닫고 다음 시즌을 연다. 명예의 전당: 100배 전설을 달성한 사람 전원.
  * 다음 시즌은 이전 시즌이 끝난 시각에 이어서 시작한다 (서버가 오래 꺼져 있었으면 지금부터).
  */
 export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = Date.now()): Season {
@@ -62,9 +62,9 @@ export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = D
   const seed = randomInt(1, 2 ** 31);
   return tx(db, () => {
     const add = db.prepare("INSERT OR IGNORE INTO hall_of_fame (season_id, rank, name, equity, return_pct, cleared_tick) VALUES (?, ?, ?, ?, ?, ?)");
-    // 명예의 전당은 사람만. 봇(🤖)을 빼고 순위를 다시 매긴다
+    // 명예의 전당은 100배 전설을 달성한 사람만 (봇 제외). 순위는 사람끼리 다시 매긴다. 예전 시즌 기록(1~3위)은 그대로 둔다
     const people = ranking.filter(r => r.kind === "user").map((r, i) => ({ ...r, rank: i + 1 }));
-    for (const r of people) if (r.rank <= 3 || r.clearedTick != null) add.run(season.id, r.rank, r.name, r.equity, r.returnPct, r.clearedTick);
+    for (const r of people) if (r.clearedTick != null) add.run(season.id, r.rank, r.name, r.equity, r.returnPct, r.clearedTick);
     db.prepare("UPDATE seasons SET ended_at = ? WHERE id = ?").run(now, season.id);
     db.prepare("DELETE FROM snapshots WHERE season_id = ?").run(season.id);
     const id = Number(db.prepare("INSERT INTO seasons (seed, started_at, tick_ms, length_ms) VALUES (?, ?, ?, ?)").run(seed, start, season.tickMs, season.lengthMs).lastInsertRowid);
@@ -77,8 +77,8 @@ export function seasonStats(ranking: RankRow[]) {
   const by = (kind: string) => ranking.filter(r => r.kind === kind);
   const people = by("user"), bots = by("bot");
   return {
-    people: people.length, peopleCleared: people.filter(r => r.clearedTick != null).length,
-    bots: bots.length, botsCleared: bots.filter(r => r.clearedTick != null).length,
+    people: people.length, peopleGrad: people.filter(r => r.gradTick != null).length, peopleLegend: people.filter(r => r.clearedTick != null).length,
+    bots: bots.length, botsGrad: bots.filter(r => r.gradTick != null).length, botsLegend: bots.filter(r => r.clearedTick != null).length,
     top10ReturnPct: people.slice(0, 10).map(r => Math.round(r.returnPct)),
   };
 }

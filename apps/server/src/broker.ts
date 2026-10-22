@@ -11,8 +11,9 @@ import { tx, type Db } from "./db.ts";
 import type { Season } from "./season.ts";
 
 export const START_CASH = 100_000;
-export const MM_CASH = 2_000_000; // 🏦 세력 계정 시작 자금
-export const GOAL = 10_000_000;
+export const MM_CASH = 2_000_000; // 🏦 세력·🐋 고래 계정 시작 자금
+export const GRAD = 2_000_000;    // 20배 = 졸업
+export const GOAL = 10_000_000;   // 100배 = 전설 (명예의 전당)
 const FEE = 0.0005;
 const SLIP = 0.0005;
 const HOLD_SHARE = 0.2;
@@ -25,20 +26,26 @@ export class OrderError extends Error {}
 
 export interface Position { qty: number; avg: number }
 export interface Future { id: number; sym: string; side: "long" | "short"; lev: number; qty: number; entry: number; margin: number; stop: number | null; tp: number | null; closing: boolean }
-/** user: 사람, bot: 🤖 봇, mm: 🏦 세력. 봇·세력은 졸업·명예의 전당에서 빠지고, 세력은 랭킹도 따로 */
-export type AccountKind = "user" | "bot" | "mm";
+/**
+ * user: 사람, bot: 🤖 봇, mm: 🏦 세력, whale: 🐋 고래.
+ * 봇은 랭킹에 나오지만 졸업 알림·명예의 전당에서 빠진다. 세력·고래는 랭킹 밖 자기 탭에 나온다
+ */
+export type AccountKind = "user" | "bot" | "mm" | "whale";
 export interface Account {
   userId: number; name: string; kind: AccountKind; cash: number; positions: Map<string, Position>; futures: Map<number, Future>;
-  clearedTick: number | null; resetAt: number | null;
+  /** clearedTick: 100배 전설 달성 tick, gradTick: 20배 졸업 달성 tick */
+  clearedTick: number | null; gradTick: number | null; resetAt: number | null;
+  /** 🤖 봇 교대로 쉬는 중: 매매하지 않고 랭킹에서 숨는다 (메모리만) */
+  resting?: boolean;
 }
-const startCash = (kind: AccountKind) => (kind === "mm" ? MM_CASH : START_CASH);
+const startCash = (kind: AccountKind) => (kind === "mm" || kind === "whale" ? MM_CASH : START_CASH);
 export interface Fill { id: number; tick: number; at: number; sym: string; side: string; qty: number; price: number; fee: number; pnl?: number }
 type Settle = { resolve: (f: Fill) => void; reject: (e: Error) => void };
 type Pending =
   | ({ kind: "spot"; userId: number; sym: string; side: "buy" | "sell"; pct: number } & Settle)
   | ({ kind: "open"; userId: number; sym: string; side: "long" | "short"; lev: number; pct: number } & Settle)
   | ({ kind: "close"; userId: number; sym: string; posId: number; pct: number; reason: "user" | "liquidation" | "stop" | "tp" } & Partial<Settle>);
-export interface RankRow { rank: number; name: string; kind: AccountKind; equity: number; returnPct: number; clearedTick: number | null }
+export interface RankRow { rank: number; name: string; kind: AccountKind; equity: number; returnPct: number; clearedTick: number | null; gradTick: number | null }
 /** 세력 전략이 보는 종목별 쏠림: 사람·봇의 현물 평가액, 선물 롱·숏 명목, 청산가 목록 */
 export interface Exposure { spot: number; long: number; short: number; liqs: { price: number; notional: number; side: "long" | "short" }[] }
 
@@ -58,7 +65,7 @@ export class Broker {
   private pending: Pending[] = [];
   private broadcasts: string[] = [];
   private recent = new Map<number, { tick: number; count: number }>(); // 주문 속도 제한
-  private rankCache: { tick: number; rows: RankRow[]; mm: RankRow[]; rankByUser: Map<string, number> } | null = null;
+  private rankCache: { tick: number; rows: RankRow[]; mm: RankRow[]; whales: RankRow[]; rankByUser: Map<string, number> } | null = null;
   /** 직전 정산의 종목별 순매수 명목 (세력 계정 주문 제외). 유동성 공급 세력이 반대편을 받는 데 쓴다 */
   lastFlows = new Map<string, number>();
   private stmts;
@@ -67,7 +74,7 @@ export class Broker {
     this.db = db; this.season = season; this.market = market;
     this.stmts = {
       selUser: db.prepare("SELECT name, kind FROM users WHERE id = ?"),
-      selAcc: db.prepare("SELECT cash, reset_at, cleared_tick FROM accounts WHERE user_id = ? AND season_id = ?"),
+      selAcc: db.prepare("SELECT cash, reset_at, cleared_tick, grad_tick FROM accounts WHERE user_id = ? AND season_id = ?"),
       insAcc: db.prepare("INSERT INTO accounts (user_id, season_id, cash) VALUES (?, ?, ?)"),
       selPos: db.prepare("SELECT sym, qty, avg FROM positions WHERE user_id = ? AND season_id = ?"),
       selFut: db.prepare("SELECT id, sym, side, lev, qty, entry, margin, stop, tp FROM futures WHERE user_id = ? AND season_id = ?"),
@@ -89,6 +96,7 @@ export class Broker {
       delPos: db.prepare("DELETE FROM positions WHERE user_id = ? AND season_id = ? AND sym = ?"),
       upsertPos: db.prepare("INSERT INTO positions (user_id, season_id, sym, qty, avg) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET qty = excluded.qty, avg = excluded.avg"),
       updCleared: db.prepare("UPDATE accounts SET cleared_tick = ? WHERE user_id = ? AND season_id = ?"),
+      updGrad: db.prepare("UPDATE accounts SET grad_tick = ? WHERE user_id = ? AND season_id = ?"),
       selDrawings: db.prepare("SELECT sym, factor, items FROM drawings WHERE user_id = ? AND season_id = ?"),
       delDrawing: db.prepare("DELETE FROM drawings WHERE user_id = ? AND season_id = ? AND sym = ?"),
       upsertDrawing: db.prepare("INSERT INTO drawings (user_id, season_id, sym, factor, items, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, season_id, sym) DO UPDATE SET factor = excluded.factor, items = excluded.items, updated_at = excluded.updated_at"),
@@ -103,10 +111,10 @@ export class Broker {
     const sid = this.season.id;
     const user = this.stmts.selUser.get(userId) as { name: string; kind: AccountKind };
     let row = this.stmts.selAcc.get(userId, sid) as
-      { cash: number; reset_at: number | null; cleared_tick: number | null } | undefined;
+      { cash: number; reset_at: number | null; cleared_tick: number | null; grad_tick: number | null } | undefined;
     if (!row) {
       this.stmts.insAcc.run(userId, sid, startCash(user.kind));
-      row = { cash: startCash(user.kind), reset_at: null, cleared_tick: null };
+      row = { cash: startCash(user.kind), reset_at: null, cleared_tick: null, grad_tick: null };
     }
     const positions = new Map<string, Position>();
     for (const p of this.stmts.selPos.all(userId, sid) as { sym: string; qty: number; avg: number }[])
@@ -114,7 +122,7 @@ export class Broker {
     const futures = new Map<number, Future>();
     for (const f of this.stmts.selFut.all(userId, sid) as unknown as Future[])
       futures.set(f.id, { ...f, tp: f.tp ?? null, closing: false });
-    const acc: Account = { userId, name: user.name, kind: user.kind, cash: row.cash, positions, futures, clearedTick: row.cleared_tick, resetAt: row.reset_at };
+    const acc: Account = { userId, name: user.name, kind: user.kind, cash: row.cash, positions, futures, clearedTick: row.cleared_tick, gradTick: row.grad_tick, resetAt: row.reset_at };
     this.accounts.set(userId, acc);
     this.rankCache = null;
     return acc;
@@ -124,7 +132,7 @@ export class Broker {
     for (const r of this.stmts.selSeasonUsers.all(this.season.id) as { user_id: number }[]) this.account(r.user_id);
   }
   /** 랭킹에 나오는 참가자 수 (사람 + 봇, 세력 제외) */
-  get players() { let n = 0; for (const a of this.accounts.values()) if (a.kind !== "mm") n++; return n; }
+  get players() { let n = 0; for (const a of this.accounts.values()) if ((a.kind === "user" || a.kind === "bot") && !a.resting) n++; return n; }
 
   /** 종목별 사람·봇의 쏠림 (세력 전략용). 계좌 수 × 포지션 수만큼 돌므로 매 tick이 아니라 가끔 부른다 */
   exposure(): Map<string, Exposure> {
@@ -159,8 +167,8 @@ export class Broker {
     const equity = this.equity(acc);
     this.ensureRankCache();
     return {
-      name: acc.name, cash: acc.cash, equity, returnPct: (equity / startCash(acc.kind) - 1) * 100, goal: GOAL,
-      clearedTick: acc.clearedTick, resetAt: acc.resetAt, tick: this.market.tick,
+      name: acc.name, cash: acc.cash, equity, returnPct: (equity / startCash(acc.kind) - 1) * 100, goal: GOAL, grad: GRAD,
+      clearedTick: acc.clearedTick, gradTick: acc.gradTick, resetAt: acc.resetAt, tick: this.market.tick,
       positions: [...acc.positions].map(([sym, p]) => ({ sym, qty: p.qty, avg: p.avg })),
       futures: [...acc.futures.values()].map(f => ({ id: f.id, sym: f.sym, side: f.side, lev: f.lev, qty: f.qty, entry: f.entry, margin: f.margin, stop: f.stop, tp: f.tp, liq: liqPrice(f) })),
       fills, rank: this.rankCache?.rankByUser.get(acc.name) ?? null,
@@ -553,34 +561,55 @@ export class Broker {
   // ---------- 랭킹 ----------
   private ensureRankCache() {
     if (this.rankCache && this.rankCache.tick === this.market.tick) return this.rankCache;
-    const raw = [...this.accounts.values()].map(acc => {
+    const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
+    const raw = [...this.accounts.values()].filter(acc => !acc.resting).map(acc => {
       const equity = this.equity(acc);
-      // 100배 졸업은 봇도 기록한다 (졸업률 확인용). 전광판 알림은 사람만
-      if (acc.kind !== "mm" && equity >= GOAL && acc.clearedTick == null) {
-        acc.clearedTick = this.market.tick;
-        this.stmts.updCleared.run(acc.clearedTick, acc.userId, this.season.id);
-        if (acc.kind === "user") this.broadcasts.push(`[100배졸업] 🏆 ${acc.name}님이 총자산 $${Math.round(equity).toLocaleString()} 달성으로 100배 졸업에 성공했습니다!`);
+      // 20배 졸업·100배 전설은 사람과 봇만 (봇은 졸업률 확인용으로 기록만, 전광판 알림은 사람만)
+      if (acc.kind === "user" || acc.kind === "bot") {
+        const tick = this.market.tick, loud = acc.kind === "user";
+        if (equity >= GRAD && acc.gradTick == null) {
+          acc.gradTick = tick;
+          this.stmts.updGrad.run(tick, acc.userId, this.season.id);
+          if (loud) this.broadcasts.push(`[졸업] 🎓 ${acc.name}님이 총자산 ${money(equity)} 달성으로 20배 졸업!`);
+        }
+        if (equity >= GOAL && acc.clearedTick == null) {
+          acc.clearedTick = tick;
+          this.stmts.updCleared.run(tick, acc.userId, this.season.id);
+          if (loud) this.broadcasts.push(`[전설] 🏆 ${acc.name}님이 총자산 ${money(equity)} 달성으로 100배 전설이 되었습니다!`);
+        }
       }
-      return { name: acc.name, kind: acc.kind, equity, returnPct: (equity / startCash(acc.kind) - 1) * 100, clearedTick: acc.clearedTick };
+      return { name: acc.name, kind: acc.kind, equity, returnPct: (equity / startCash(acc.kind) - 1) * 100, clearedTick: acc.clearedTick, gradTick: acc.gradTick };
     });
     const order = (a: { equity: number; clearedTick: number | null }, b: { equity: number; clearedTick: number | null }) =>
       b.equity - a.equity || (a.clearedTick ?? Infinity) - (b.clearedTick ?? Infinity);
-    // 세력은 자금 규모가 달라 같은 줄에 세우지 않는다. 수익률 순으로 따로
-    const rows = raw.filter(r => r.kind !== "mm").sort(order).map((r, i) => ({ rank: i + 1, ...r }));
-    const mm = raw.filter(r => r.kind === "mm").sort((a, b) => b.returnPct - a.returnPct).map((r, i) => ({ rank: i + 1, ...r }));
+    const byReturn = (a: { returnPct: number }, b: { returnPct: number }) => b.returnPct - a.returnPct;
+    // 세력·고래는 자금 규모가 달라 같은 줄에 세우지 않는다. 각자 탭에서 수익률 순
+    const ranked = (rs: typeof raw) => rs.map((r, i) => ({ rank: i + 1, ...r }));
+    const rows = ranked(raw.filter(r => r.kind === "user" || r.kind === "bot").sort(order));
+    const mm = ranked(raw.filter(r => r.kind === "mm").sort(byReturn));
+    const whales = ranked(raw.filter(r => r.kind === "whale").sort(byReturn));
     const rankByUser = new Map<string, number>();
     for (const r of rows) rankByUser.set(r.name, r.rank);
-    this.rankCache = { tick: this.market.tick, rows, mm, rankByUser };
+    this.rankCache = { tick: this.market.tick, rows, mm, whales, rankByUser };
     return this.rankCache;
   }
 
-  /** 총자산 순(사람 + 🤖 봇). 같으면 100배를 먼저 달성한 사람이 위. 100배 달성 시점도 여기서 기록한다 */
+  /** 총자산 순(사람 + 🤖 봇, 쉬는 봇 제외). 같으면 100배를 먼저 달성한 사람이 위. 졸업·전설 시점도 여기서 기록한다 */
   ranking(limit = 50): RankRow[] {
     return this.ensureRankCache().rows.slice(0, limit);
   }
   /** 🏦 세력 계정 (수익률 순) */
   mmRanking(): RankRow[] {
     return this.ensureRankCache().mm;
+  }
+  /** 🐋 고래 (수익률 순, 별도 탭) */
+  whaleRanking(): RankRow[] {
+    return this.ensureRankCache().whales;
+  }
+  /** 🤖 봇 교대: 쉬게 하거나 깨운다. 쉬는 봇은 랭킹에서 숨는다 */
+  setResting(userId: number, resting: boolean) {
+    this.account(userId).resting = resting;
+    this.rankCache = null;
   }
 
   /** 이번 tick에 발생한 전광판 알림(100배 졸업·강제청산)을 꺼낸다 */

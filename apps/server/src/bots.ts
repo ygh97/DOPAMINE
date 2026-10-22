@@ -52,16 +52,26 @@ abstract class Agent {
 
   /** 다 잃은 뒤 다시 시작하기까지 기다리는 tick */
   protected resetDelay = 600;
+  /** 🤖 봇 교대: retiring = 포지션 정리 중, resting = 쉬는 중 (매매 안 함, 랭킹에서 숨음) */
+  retiring = false; resting = false;
 
   run(c: Ctx) {
+    if (this.resting) return;
     const acc = c.broker.account(this.userId);
     // 청산·스탑 등으로 사라진 포지션의 메모를 지운다 (주문은 다음 tick에 체결되므로 직전 주문은 이미 반영돼 있다)
     for (const sym of [...this.meta.keys()]) if (!this.fut(c, sym) && !acc.positions.has(sym)) this.meta.delete(sym);
-    // 거의 다 잃으면 다시 시작 (사람처럼). 세력은 시작 자금의 25% 아래에서
-    const eq = c.broker.equity(acc), floor = this.kind === "mm" ? 500_000 : 2_000;
+    if (this.retiring) { // 남은 포지션을 정리하고, 다 비면 쉰다
+      if (!acc.futures.size && !acc.positions.size) { this.retiring = false; this.resting = true; this.meta.clear(); c.broker.setResting(this.userId, true); return; }
+      for (const f of acc.futures.values()) if (!f.closing) { try { c.broker.closeFuture(this.userId, f.id, 100).catch(() => {}); } catch { /* 다음 tick */ } }
+      for (const sym of acc.positions.keys()) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
+      return;
+    }
+    // 거의 다 잃으면 다시 시작 (사람처럼). 세력·고래는 시작 자금의 25% 아래에서
+    const eq = c.broker.equity(acc), floor = this.kind === "mm" || this.kind === "whale" ? 500_000 : 2_000;
     if (eq < floor && c.tick > this.resetCooldown) { c.broker.reset(this.userId); this.meta.clear(); this.resetCooldown = c.tick + this.resetDelay; return; }
     this.act(c);
   }
+  wake(c: Ctx) { this.resting = false; this.retiring = false; c.broker.setResting(this.userId, false); }
 
   protected fut(c: Ctx, sym: string) { for (const f of c.broker.account(this.userId).futures.values()) if (f.sym === sym && !f.closing) return f; return undefined; }
   protected lev(c: Ctx, sym: string, want: number) {
@@ -213,8 +223,8 @@ const PAIRS: [string, string][] = [["BTC", "ETH"], ["NVDA", "AMD"], ["AAPL", "MS
 class MarketMaker extends Agent {
   private style: MmStyle; private k: number;
   private ventures = new Set<string>();
-  constructor(userId: number, name: string, seed: number, style: MmStyle, strength = 1) {
-    super(userId, name, "mm", seed); this.style = style; this.k = strength;
+  constructor(userId: number, name: string, seed: number, style: MmStyle, strength = 1, kind: AccountKind = "mm") {
+    super(userId, name, kind, seed); this.style = style; this.k = strength;
   }
   get label() { return this.style; }
   /** 명목 금액 → 예수금 대비 비중(%) */
@@ -318,36 +328,55 @@ const BOT_NAMES = ["개미", "불개미", "존버", "단타", "코인", "신흥"
 /** 봇·세력 계정을 만들고(없으면) tick마다 매매시킨다 */
 export class BotRunner {
   private agents: Agent[] = [];
+  private bots: Agent[] = [];
   private hist = new History();
   private getBroker: () => Broker; private getMarket: () => Market;
+  private activeHumans: () => number;
 
-  constructor(db: Db, getBroker: () => Broker, getMarket: () => Market, opts: { bots: number; marketMakers: boolean; seed: number; tuning?: MmTuning }) {
-    this.getBroker = getBroker; this.getMarket = getMarket;
+  /**
+   * activeHumans: 최근 10분 안에 활동한 사람 수. 사람 + 활동 중인 봇 = bots(기본 100)이 되도록 봇을 한 tick에 1명씩 교대한다.
+   * 세력·고래는 교대하지 않는다
+   */
+  constructor(db: Db, getBroker: () => Broker, getMarket: () => Market,
+    opts: { bots: number; marketMakers: boolean; seed: number; tuning?: MmTuning; activeHumans?: () => number }) {
+    this.getBroker = getBroker; this.getMarket = getMarket; this.activeHumans = opts.activeHumans ?? (() => 0);
     const ensure = (name: string, kind: AccountKind): number | null => {
       db.prepare("INSERT OR IGNORE INTO users (name, pass, created_at, kind) VALUES (?, '-', ?, ?)").run(name, Date.now(), kind);
       const row = db.prepare("SELECT id, kind FROM users WHERE name = ?").get(name) as { id: number; kind: string };
-      return row.kind === kind ? row.id : null; // 사람이 먼저 쓴 이름이면 건너뛴다
+      if (row.kind === "user") return null; // 사람이 먼저 쓴 이름이면 건너뛴다
+      if (row.kind !== kind) db.prepare("UPDATE users SET kind = ? WHERE id = ?").run(kind, row.id); // 예: 세력이던 고래 → 고래
+      return row.id;
     };
     const styles = BOT_MIX.flatMap(([s, w]) => Array.from({ length: w }, () => s));
     for (let i = 0; i < opts.bots; i++) {
       const style = styles[i % styles.length];
       const id = ensure(`${BOT_NAMES[i % BOT_NAMES.length]}봇${String(i + 1).padStart(2, "0")}`, "bot");
-      if (id != null) this.agents.push(new Bot(id, `봇${i + 1}`, opts.seed, style));
+      if (id != null) { const b = new Bot(id, `봇${i + 1}`, opts.seed, style); this.agents.push(b); this.bots.push(b); }
     }
     if (opts.marketMakers) for (const style of Object.keys(MM_NAMES) as MmStyle[]) {
-      const id = ensure(MM_NAMES[style], "mm");
-      if (id != null) this.agents.push(new MarketMaker(id, MM_NAMES[style], opts.seed, style, opts.tuning?.strength[style] ?? 1));
+      const kind: AccountKind = style === "whale" ? "whale" : "mm"; // 🐋 고래는 세력이 아니라 거래자 (별도 탭)
+      const id = ensure(MM_NAMES[style], kind);
+      if (id != null) this.agents.push(new MarketMaker(id, MM_NAMES[style], opts.seed, style, opts.tuning?.strength[style] ?? 1, kind));
     }
   }
   get size() { return this.agents.length; }
   /** 계좌 id → 성향 (시뮬레이션 통계용) */
   describe() { return this.agents.map(a => ({ userId: a.userId, kind: a.kind, label: a.label })); }
 
+  /** 사람이 늘면 봇 하나를 쉬게 하고, 줄면 하나를 깨운다 (한 tick에 1명) */
+  private rotate(c: Ctx) {
+    const target = Math.max(0, this.bots.length - this.activeHumans());
+    const active = this.bots.filter(b => !b.resting && !b.retiring);
+    if (active.length > target) active[active.length - 1].retiring = true;
+    else if (active.length < target) { const b = this.bots.find(x => x.resting || x.retiring); if (b) b.wake(c); }
+  }
+
   /** market.step()·checkTriggers() 뒤 tick마다 부른다. 주문은 다음 settle()에서 체결된다 */
   tick(news: NewsItem[]) {
     const market = this.getMarket(), broker = this.getBroker();
     this.hist.push(market);
     const c: Ctx = { market, broker, news, hist: this.hist, tick: market.tick };
+    this.rotate(c);
     for (const a of this.agents) a.run(c);
   }
 }

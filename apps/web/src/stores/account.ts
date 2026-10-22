@@ -13,8 +13,9 @@ export interface FuturePos {
   qty: number; entry: number; margin: number; stop: number | null; tp: number | null; liq: number;
 }
 export interface Me {
-  name: string; cash: number; equity: number; returnPct: number; goal: number;
-  clearedTick: number | null; resetAt: number | null; tick: number;
+  /** grad: 20배 졸업 금액, goal: 100배 전설 금액 */
+  name: string; cash: number; equity: number; returnPct: number; goal: number; grad: number;
+  clearedTick: number | null; gradTick: number | null; resetAt: number | null; tick: number;
   positions: { sym: string; qty: number; avg: number }[];
   futures: FuturePos[];
   fills: Fill[]; rank: number | null;
