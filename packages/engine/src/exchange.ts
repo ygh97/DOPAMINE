@@ -26,8 +26,7 @@ export interface Level { price: number; qty: number }
 export interface BookView { sym: string; bids: Level[]; asks: Level[]; tickSize: number; trades: { price: number; qty: number; side: Side; at: number }[] }
 
 export interface ExchangeOptions {
-  levels: number;              // 호가 봇이 한쪽에 까는 단계 수
-  levelWidthDay: number;       // 단계 간격 = σ일 × 이 값
+  levels: number;              // 호가 봇이 한쪽에 까는 단계 수 (중심부터 안전 물량 직전까지 제곱 간격)
   spreadSigma: number;         // 반 스프레드 = σ틱 × 이 값 (최소 호가 단위 1칸)
   skewPerL: number;            // 재고가 유동성 L만큼이면 중심가를 σ일 × 이 값만큼 기울인다
   inventoryCapL: number;       // 재고가 L × 이 값을 넘으면 쌓이는 쪽 물량을 줄인다
@@ -36,11 +35,12 @@ export interface ExchangeOptions {
   backstopL: number;           // 안전 물량 = L × 이 값
   tickBp: number;              // 호가 단위 ≈ 가격 × 이 값 (1·2·5 단계로 반올림)
   recentTrades: number;        // 최근 체결 보관 개수
+  hedgeRate: number;           // tick마다 재고의 이 비율을 기준가로 정리 (1/60 = 약 1분에 63%)
 }
 
 export const EXCHANGE_DEFAULTS: ExchangeOptions = {
-  levels: 20, levelWidthDay: 0.15, spreadSigma: 0.5, skewPerL: 0.5, inventoryCapL: 3, inventoryCut: 0.3,
-  backstop: { stock: 0.1, coin: 0.15, venture: 0.4 }, backstopL: 5, tickBp: 0.0002, recentTrades: 30,
+  levels: 30, spreadSigma: 0.5, skewPerL: 0.5, inventoryCapL: 3, inventoryCut: 0.3,
+  backstop: { stock: 0.1, coin: 0.15, venture: 0.4 }, backstopL: 5, tickBp: 0.0002, recentTrades: 30, hedgeRate: 1 / 60,
 };
 
 /** 호가 단위: 가격의 약 tickBp를 1·2·5 단계로. 예) $219 → 0.05, $94,880 → 20, $0.31 → 0.0001 */
@@ -107,24 +107,27 @@ export class Exchange {
     const sigmaDay = sigma * Math.sqrt(this.market.options.ticksPerDay), o = this.opts, tick = tickSize(ref, o.tickBp);
     const invL = (st.inv * ref) / L; // 재고 (L 단위, 롱 +)
     const center = ref * Math.exp(-o.skewPerL * sigmaDay * invL);
-    const half = Math.max(tick / ref, sigma * o.spreadSigma), width = sigmaDay * o.levelWidthDay;
-    const density = L / (2 * sigmaDay * sigmaDay); // 누적 물량 N(x) = L (x / 2σ일)²
+    const half = Math.max(tick / ref, sigma * o.spreadSigma), backstop = o.backstop[q.market], span = backstop * 0.95;
+    // 누적 물량 N(x) = L (x / Kσ일)², K = 엔진 impactK (기본 2). 그래서 금액 N을 먹으면 Kσ일·√(N/L)만큼 밀린다 (예전 충격 공식과 같은 크기)
+    // 단계는 중심 근처는 촘촘하게, 멀수록 넓게(제곱 간격) 안전 물량 직전까지 깐다. 그 사이에 빈 구간이 없다
+    const K = this.market.options.impactK, N = (x: number) => (L * x * x) / (K * K * sigmaDay * sigmaDay);
     for (const side of ["buy", "sell"] as Side[]) {
       const dir = side === "buy" ? -1 : 1;
       // 재고가 한도를 넘으면 더 쌓이는 쪽(롱 재고면 매수 호가)을 줄인다
       const piling = (side === "buy" && invL > o.inventoryCapL) || (side === "sell" && invL < -o.inventoryCapL);
       const cut = piling ? o.inventoryCut : 1;
-      let prevPrice = NaN;
+      let prevX = 0, pending = 0, prevPrice = NaN;
       for (let i = 0; i < o.levels; i++) {
-        const x = half + i * width;
+        const x = Math.min(span, half + (span - half) * (i / Math.max(1, o.levels - 1)) ** 2);
+        pending += (N(x) - N(prevX)) * cut; prevX = x;
         const price = Math.max(tick, roundTo(center * (1 + dir * x), tick));
-        if (price === prevPrice) continue;
+        if (price === prevPrice) continue; // 호가 단위 때문에 같은 가격이면 다음 단계에 합친다
         prevPrice = price;
-        const notional = density * x * width * cut;
-        this.rest(MAKER, sym, side, price, notional / price);
+        this.rest(MAKER, sym, side, price, pending / price);
+        pending = 0;
       }
-      const far = Math.max(tick, roundTo(ref * (1 + dir * o.backstop[q.market]), tick));
-      this.rest(MAKER, sym, side, far, (L * o.backstopL) / far); // 안전 물량
+      const far = Math.max(tick, roundTo(ref * (1 + dir * backstop), tick));
+      this.rest(MAKER, sym, side, far, (L * o.backstopL + pending) / far); // 안전 물량
     }
   }
   /** 호가 봇 재고·손익 (운영자·시뮬레이션용) */
@@ -174,6 +177,32 @@ export class Exchange {
     return "qty" in by ? this.take(owner, id, sym, side, by.qty) : this.take(owner, id, sym, side, Infinity, undefined, by.notional);
   }
 
+  /** 지금 호가창에서 금액 notional로 살 수(팔 수) 있는 수량. 체결하지 않고 계산만 한다 */
+  qtyFor(owner: number, sym: string, side: Side, notional: number): number {
+    const st = this.st(sym);
+    if (!st) return 0;
+    let qty = 0, money = notional;
+    for (const o of st.book.side(side === "buy" ? "sell" : "buy")) {
+      if (o.owner === owner && owner !== MAKER) continue;
+      const q = Math.min(o.qty, money / o.price);
+      qty += q; money -= q * o.price;
+      if (money <= 1e-9) break;
+    }
+    return qty;
+  }
+
+  /** 재시작 때 DB에 남은 지정가를 다시 건다 (id·가격·순서 그대로) */
+  restoreOrder(o: BookOrder) {
+    const st = this.st(o.sym);
+    if (!st) return false;
+    st.book.insert({ ...o });
+    this.nextId = Math.max(this.nextId, o.id + 1);
+    this.seq = Math.max(this.seq, o.seq + 1);
+    return true;
+  }
+  /** 사람·봇 주문을 모두 뺀다 (재시작 때 DB 기준으로 다시 걸기 전에) */
+  clearPeopleOrders() { for (const st of this.s.values()) st.book.remove(o => o.owner !== MAKER); }
+
   /** 지정가: 맞는 호가가 있으면 바로 체결하고, 남은 수량은 호가창에 건다 */
   limitOrder(owner: number, sym: string, side: Side, price: number, qty: number): { order: BookOrder | null; trades: Trade[] } {
     if (!this.st(sym) || !(qty > 0) || !(price > 0)) return { order: null, trades: [] };
@@ -210,6 +239,8 @@ export class Exchange {
   }
   quotes(): Quote[] { return this.market.quotes().map(q => this.quote(q.sym)!); }
   bars(sym: string): readonly Bar[] { return this.st(sym)?.bars ?? []; }
+  get tick() { return this.market.tick; }
+  liquidity(sym: string) { return this.market.liquidity(sym); }
 
   book(sym: string, depth = 10): BookView | null {
     const st = this.st(sym);
@@ -228,7 +259,12 @@ export class Exchange {
     const r = this.market.step(), cancelled: BookOrder[] = [];
     for (const a of r.actions) cancelled.push(...this.applyAction(a));
     for (const q of this.market.quotes()) if (!this.st(q.sym)) this.list(q.sym);
-    for (const sym of this.s.keys()) this.requote(sym); // 새 기준가로 먼저 깔아야 가격이 한 tick 늦지 않는다
+    for (const [sym, st] of this.s) {
+      // 재고 헤지: 쌓인 재고를 tick마다 조금씩 바깥(기준가)에서 정리한다. 그래서 밀린 가격이 천천히 기준가로 돌아간다
+      const hedge = st.inv * this.opts.hedgeRate, ref = this.reference(sym);
+      st.inv -= hedge; st.cash += hedge * ref;
+      this.requote(sym); // 새 기준가로 먼저 깔아야 가격이 한 tick 늦지 않는다
+    }
     for (const q of this.market.quotes()) {
       const st = this.st(q.sym)!, eng = this.market.bars(q.sym), eb = eng[eng.length - 1];
       // 거래가 없던 종목은 가격이 기준가 근처(호가 중간값)를 따라간다

@@ -1,7 +1,11 @@
 // 🤖 봇과 🏦 세력 계정. 사람과 같은 Broker 주문 경로(충격·수수료·속도 제한·강제 청산)로 매매한다.
 // 서버는 BOTS·MARKET_MAKERS 환경 변수로 켜고, tools/sim-bots.ts는 같은 코드로 졸업률을 잰다.
 // 결정은 계좌별 seed 난수로만 한다 (Math.random 금지) → 같은 seed면 같은 결과.
-import { ASSETS, LEVERAGE, type Market, type NewsItem } from "@dopamine/engine";
+import { ASSETS, LEVERAGE, type NewsItem, type Quote } from "@dopamine/engine";
+
+/** 봇이 보는 시장: 호가창(Exchange)의 체결가·유동성 */
+export interface MarketView { readonly tick: number; quotes(): Quote[]; quote(sym: string): Quote | null; liquidity(sym: string): number | null }
+type Market = MarketView;
 import type { AccountKind, Broker } from "./broker.ts";
 import type { Db } from "./db.ts";
 

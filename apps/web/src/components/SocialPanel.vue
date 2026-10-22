@@ -111,7 +111,8 @@ async function shareSummary() {
 }
 
 /** 아직 아무도 반응하지 않은 강제청산 알림이면 true (버튼 표시) */
-const canReact = (c: ChatMsg) => c.name === "⚡전광판" && c.text.startsWith("[강제청산]") && !c.reacted;
+/** 아직 아무도 반응하지 않은 남의 강제청산 알림이면 true (내 청산에는 버튼을 안 보인다) */
+const canReact = (c: ChatMsg) => c.name === "⚡전광판" && c.text.startsWith("[강제청산]") && !c.reacted && !c.text.includes(`💥 ${a.me?.name}님 `);
 
 async function teabag(c: ChatMsg, mode: "mock" | "rip") {
   if (!a.me || !canReact(c)) return;

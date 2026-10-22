@@ -11,7 +11,8 @@ const STORE = "dc-drawings-v1";
   const log = {};
   let errors = [];
   try {
-    startServer({ TICK_MS: "40", ENGINE_OPTIONS: JSON.stringify({ splitPrice: 1000, warmupBars: 120 }) });
+    // 게임 하루(80 tick) = 8초: 선을 긋기 전에 첫 병합 심사가 오지 않게 여유를 둔다
+    startServer({ TICK_MS: "100", ENGINE_OPTIONS: JSON.stringify({ splitPrice: 1000, warmupBars: 120 }) });
     startWeb();
     await waitServer();
     await waitWeb();

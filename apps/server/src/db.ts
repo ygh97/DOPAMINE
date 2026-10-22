@@ -118,6 +118,24 @@ export function openDb(file: string): Db {
       user_id INTEGER NOT NULL REFERENCES users(id),
       at INTEGER NOT NULL
     );
+    -- 호가창에 걸어 둔 지정가 (M8). 재시작하면 이 표를 기준으로 거래소에 다시 건다
+    CREATE TABLE IF NOT EXISTS open_orders (
+      id INTEGER PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      season_id INTEGER NOT NULL REFERENCES seasons(id),
+      sym TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      side TEXT NOT NULL,
+      lev INTEGER NOT NULL,
+      price REAL NOT NULL,
+      qty REAL NOT NULL,
+      cash REAL NOT NULL,
+      held REAL NOT NULL,
+      avg REAL NOT NULL,
+      pos_id INTEGER,
+      seq INTEGER NOT NULL,
+      filled REAL NOT NULL DEFAULT 0
+    );
     CREATE TABLE IF NOT EXISTS hall_of_fame (
       season_id INTEGER NOT NULL,
       rank INTEGER NOT NULL,
@@ -139,6 +157,7 @@ export function openDb(file: string): Db {
     // user: 사람, bot: 🤖 봇, mm: 🏦 세력 계정 (봇·세력은 명예의 전당·졸업에서 빠진다)
     "ALTER TABLE users ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'",
     "ALTER TABLE accounts ADD COLUMN grad_tick INTEGER", // 20배 졸업 시점 (cleared_tick은 100배 전설)
+    "ALTER TABLE snapshots ADD COLUMN exchange TEXT", // 호가창 상태 (M8): 캔들·호가 봇 재고. 사람 주문은 open_orders
   ]) {
     try { db.exec(sql); } catch { /* 이미 있음 */ }
   }

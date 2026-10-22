@@ -23,6 +23,8 @@ const BACKUP_DIR = process.env.BACKUP_DIR ?? join(dirname(DB_FILE), "backups");
 const WEB_DIST = process.env.WEB_DIST ?? fileURLToPath(new URL("../../web/dist", import.meta.url));
 // ENGINE_OPTIONS: 테스트용 엔진 설정 덮어쓰기 (JSON). 예: {"splitPrice":1000,"warmupBars":120}
 const ENGINE_OPTIONS = JSON.parse(process.env.ENGINE_OPTIONS ?? "{}");
+// EXCHANGE_OPTIONS: 테스트용 호가창 설정 덮어쓰기 (JSON). 예: {"backstop":{"stock":0.5,"coin":0.5,"venture":0.6}}
+const EXCHANGE_OPTIONS = JSON.parse(process.env.EXCHANGE_OPTIONS ?? "{}");
 
 const db = openDb(DB_FILE);
 // 운영자 키. 없거나 짧으면 운영자 기능을 끈다 (기본값을 두면 공개 주소에서 누구나 밴·백업을 할 수 있다)
@@ -32,10 +34,11 @@ const chat = new Chat(db);
 // 시즌이 바뀌면 아래 넷을 통째로 갈아 끼운다
 const bootStart = performance.now();
 let season = currentSeason(db, SEED, TICK_MS, SEASON_MS);
-let { market, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS);
-let broker = new Broker(db, season, market);
+let { market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS, Date.now(), EXCHANGE_OPTIONS);
+let broker = new Broker(db, season, exchange);
 broker.loadAll();
-saveSnapshot(db, season, market); // 다음 재시작은 여기서부터
+broker.restoreOrders(); // 걸어 둔 지정가를 호가창에 다시 건다
+saveSnapshot(db, season, exchange); // 다음 재시작은 여기서부터
 const bootMs = Math.round(performance.now() - bootStart);
 // 켤 때마다 백업 (시즌이 8시간이라 하루 1회 백업만으로는 부족하다)
 backupDb(db, BACKUP_DIR, "boot").catch(e => console.error("백업 실패", e));
@@ -53,7 +56,7 @@ function activeHumans() {
 // 🤖 봇·🏦 세력: BOTS=100, MARKET_MAKERS=1로 켠다 (테스트 서버용. 기본은 꺼짐)
 const BOTS = Number(process.env.BOTS ?? 0), MARKET_MAKERS = process.env.MARKET_MAKERS === "1";
 const bots = BOTS > 0 || MARKET_MAKERS
-  ? new BotRunner(db, () => broker, () => market, { bots: BOTS, marketMakers: MARKET_MAKERS, seed: SEED, activeHumans, tuning: JSON.parse(process.env.MM_TUNING ?? '{"strength":{}}') })
+  ? new BotRunner(db, () => broker, () => exchange, { bots: BOTS, marketMakers: MARKET_MAKERS, seed: SEED, activeHumans, tuning: JSON.parse(process.env.MM_TUNING ?? '{"strength":{}}') })
   : null;
 
 /** 시즌 종료: 백업 → 통계 로그 → 명예의 전당 기록 → 새 시즌 시작 → 모두에게 알림 */
@@ -62,10 +65,10 @@ function rollover() {
   backupDb(db, BACKUP_DIR, `season${prev}-end`).catch(e => app.log.error(e)); // 명예의 전당 기록 전 상태
   app.log.info({ season: prev, ...seasonStats(broker.ranking(Infinity)) }, "시즌 통계");
   season = finishSeason(db, season, broker.ranking(Infinity));
-  ({ market, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS));
-  broker = new Broker(db, season, market);
+  ({ market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS, Date.now(), EXCHANGE_OPTIONS));
+  broker = new Broker(db, season, exchange);
   cachedTick = -1;
-  saveSnapshot(db, season, market);
+  saveSnapshot(db, season, exchange);
   app.log.info(`시즌 ${prev} 종료 → 시즌 ${season.id} 시작 (seed ${season.seed})`);
   send("season", seasonInfo());
 }
@@ -86,9 +89,9 @@ let cachedQuotes: Quote[] = [];
 function ensureTickCache() {
   if (cachedTick === market.tick) return;
   const bars: Record<string, number[]> = {};
-  const quotes = market.quotes().map(packQuote);
+  const quotes = exchange.quotes().map(packQuote); // 화면 가격·캔들은 호가창 체결값
   for (const q of quotes) {
-    const b = market.bars(q.sym).at(-1);
+    const b = exchange.bars(q.sym).at(-1);
     if (b) bars[q.sym] = [...packBar(b), q.prev];
   }
   cachedQuotes = quotes;
@@ -123,17 +126,21 @@ const loop = setInterval(() => {
   const news: NewsItem[] = [], reload: string[] = [], settled: { type: string; sym: string }[] = [];
   let assetsChanged = false;
   while (market.tick < target) {
-    settled.push(...broker.settle());
-    const result = market.step();
+    broker.endTick(); // 지난 tick 동안 체결된 순매수를 기준가에 남기고 기록 (재생과 같은 순서)
+    const result = exchange.step();
+    broker.refundCancelled(result.cancelled); // 병합·폐지로 취소된 지정가 환불
     if (broker.applyActions(result.actions).length)
       for (const a of result.actions) if (a.type === "split" || a.type === "delist") settled.push({ type: a.type, sym: a.sym });
-    broker.checkTriggers();
+    broker.runTriggers();
     bots?.tick(result.news);
     news.push(...[...result.news].reverse());
     for (const a of result.actions) if (a.type === "split") reload.push(a.sym);
     assetsChanged ||= result.assetsChanged;
-    if (market.tick % SNAPSHOT_EVERY === 0) saveSnapshot(db, season, market);
+    if (market.tick % SNAPSHOT_EVERY === 0) saveSnapshot(db, season, exchange);
   }
+  // 이번 interval에 자동 종료된 포지션(강제 청산·스탑·익절)과 체결된 지정가 종목: 해당 화면이 계좌를 다시 받는다
+  const auto = broker.drainAuto();
+  settled.push(...auto.closed, ...auto.makers.map(sym => ({ type: "order", sym })));
   ensureTickCache();
   for (const n of news.slice(-50)) send("news", n);
   // 상장 변화: 목록 갱신. 주식병합된 종목은 과거 차트가 바뀌었으니 다시 받으라고 알린다
@@ -225,9 +232,9 @@ app.get<{ Querystring: { name?: string } }>("/api/portfolio", async req => {
 
 app.get<{ Querystring: { sym?: string; limit?: string } }>("/api/bars", async (req, reply) => {
   const sym = req.query.sym ?? "";
-  if (!market.quote(sym)) return reply.code(404).send({ error: "종목을 찾을 수 없습니다." });
+  if (!exchange.quote(sym)) return reply.code(404).send({ error: "종목을 찾을 수 없습니다." });
   const limit = Math.min(1500, Math.max(1, Number(req.query.limit) || 1500));
-  return { sym, bars: market.bars(sym).slice(-limit).map(packBar) };
+  return { sym, bars: exchange.bars(sym).slice(-limit).map(packBar) };
 });
 
 app.get<{ Querystring: { before?: string; limit?: string } }>("/api/news", async req => {
@@ -412,13 +419,13 @@ app.post<{ Body: { id: number; hidden: boolean } }>("/api/admin/hide", {
 
 app.post("/api/admin/backup", async (req, reply) => {
   if (!adminOk(req, reply)) return;
-  saveSnapshot(db, season, market);
+  saveSnapshot(db, season, exchange);
   return { ok: true, file: await backupDb(db, BACKUP_DIR) };
 });
 
 // 하루 1회 자동 SQLite 백업 (SPEC 10장)
 const backupTimer = setInterval(() => {
-  try { saveSnapshot(db, season, market); backupDb(db, BACKUP_DIR).catch(e => app.log.error(e)); }
+  try { saveSnapshot(db, season, exchange); backupDb(db, BACKUP_DIR).catch(e => app.log.error(e)); }
   catch (e) { app.log.error(e); }
 }, 24 * 3600 * 1000);
 backupTimer.unref();
@@ -476,7 +483,7 @@ if (existsSync(join(WEB_DIST, "index.html"))) {
   });
 }
 
-const shutdown = async () => { clearInterval(loop); saveSnapshot(db, season, market); await app.close(); db.close(); process.exit(0); };
+const shutdown = async () => { clearInterval(loop); saveSnapshot(db, season, exchange); await app.close(); db.close(); process.exit(0); };
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 

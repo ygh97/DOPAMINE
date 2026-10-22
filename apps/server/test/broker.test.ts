@@ -16,16 +16,16 @@ const FAST = { ticksPerBar: 10, warmupBars: 200 };
 function setup(seed = 1) {
   const db = openDb(":memory:");
   const season = currentSeason(db, seed, 1000, 7 * 86_400_000, T0);
-  const { market } = bootMarket(db, season, FAST, T0);
-  const broker = new Broker(db, season, market);
+  const { market, exchange } = bootMarket(db, season, FAST, T0);
+  const broker = new Broker(db, season, exchange);
   const auth = new Auth(db);
-  /** 한 tick: 정산 → 엔진 → 상장 변화 정산 */
-  const tick = () => { broker.settle(); const r = market.step(); broker.applyActions(r.actions); broker.checkTriggers(); return r; };
+  /** 한 tick (서버 루프와 같은 순서): 순매수 기록 → 엔진·호가창 → 취소 환불 → 상장 변화 정산 → 청산·스탑 */
+  const tick = () => { broker.endTick(); const r = exchange.step(); broker.refundCancelled(r.cancelled); broker.applyActions(r.actions); broker.runTriggers(); return r; };
   // 서버처럼 참가하면 계좌가 생긴다
   const user = (name: string) => { const id = auth.join(name, "secret1").userId; broker.me(id); return id; };
-  return { db, season, market, broker, auth, tick, user };
+  return { db, season, market, exchange, broker, auth, tick, user };
 }
-/** 주문을 넣고 다음 tick에 체결 */
+/** 주문 (호가창에서 바로 체결) 뒤 한 tick */
 async function order(s: ReturnType<typeof setup>, userId: number, sym: string, side: string, pct: number) {
   const p = s.broker.place(userId, sym, side, pct);
   s.tick();
@@ -56,13 +56,14 @@ test("참가: 새 이름은 가입, 같은 이름은 비밀번호 확인 (대소
   assert.equal(auth.userOf("Bearer nope"), null);
 });
 
-test("매수: 예수금 비중, 정수 주, 수수료 포함 평단, 자기 충격 + 슬리피지", async () => {
+test("매수: 예수금 비중, 정수 주, 수수료 포함 평단, 호가를 먹으며 바로 체결", async () => {
   const s = setup();
   const u = s.user("buyer");
-  const pre = s.market.quote("NVDA")!.price;
-  const fill = await order(s, u, "NVDA", "buy", 50);
+  const ask = s.exchange.best("NVDA").ask!;
+  const fill = await s.broker.place(u, "NVDA", "buy", 50);
   assert.ok(Number.isInteger(fill.qty) && fill.qty > 0);
-  assert.ok(fill.price > pre * 1.0005 - 1e-9, "체결가 ≥ 이전가 × (1 + 슬리피지)");
+  assert.ok(fill.price >= ask - 1e-9, "평균 체결가 ≥ 최우선 매도호가");
+  assert.ok(s.exchange.price("NVDA") >= ask, "체결가가 화면 가격");
   assert.ok(fill.qty * fill.price + fill.fee <= START_CASH * 0.5 + 1e-6, "예산 안");
   assert.ok(Math.abs(fill.fee - fill.qty * fill.price * 0.0005) < 1e-9);
   const me = s.broker.me(u);
@@ -92,14 +93,50 @@ test("코인은 소수 수량으로 살 수 있다", async () => {
   assert.ok(fill.qty > 0 && fill.qty < 1, `BTC ${fill.qty}`);
 });
 
-test("같은 tick 주문은 같은 기준가로 체결된다 (방향별 슬리피지만 다름)", async () => {
+test("같은 1초 안에서도 먼저 산 사람이 싸게 산다, 사고 바로 팔면 스프레드만큼 손해", async () => {
   const s = setup();
   const a = s.user("alpha"), b = s.user("bravo");
-  await order(s, b, "MSFT", "buy", 30);
-  const pa = s.broker.place(a, "MSFT", "buy", 20), pb = s.broker.place(b, "MSFT", "sell", 50);
-  s.tick();
-  const [fa, fb] = await Promise.all([pa, pb]);
-  assert.ok(Math.abs(fa.price / 1.0005 - fb.price / 0.9995) < 1e-9, "기준가 동일");
+  // 호가가 얇은 신흥주: $3만이면 여러 단계를 먹는다
+  const fa = await s.broker.place(a, "LMQ", "buy", 30), fb = await s.broker.place(b, "LMQ", "buy", 30);
+  assert.ok(fb.price > fa.price, "뒤에 산 사람이 더 비싸게");
+  const sell = await s.broker.place(a, "LMQ", "sell", 100);
+  assert.ok(sell.price < fb.price, "파는 쪽은 매수호가");
+});
+
+test("지정가: 걸어 두면 돈이 묶이고, 다른 사람의 시장가에 체결되면 수수료 없이 보유가 생긴다, 취소하면 풀린다", async () => {
+  const s = setup();
+  const maker = s.user("maker"), taker = s.user("taker");
+  const bid = s.exchange.best("AAPL").bid!, tick = s.exchange.tickOf("AAPL");
+  const res = s.broker.limitOrder(maker, { sym: "AAPL", kind: "spot", side: "buy", price: bid + tick, pct: 10 });
+  assert.ok(res.order && !res.fills.length, "최우선 매수호가보다 한 칸 위에 걸림");
+  const locked = START_CASH - s.broker.me(maker).cash;
+  assert.ok(locked > 9_000 && locked <= 10_000 + 1e-6, "예수금 10% 묶임");
+  assert.ok(Math.abs(s.broker.me(maker).equity - START_CASH) < 1e-6, "묶인 돈도 총자산에 포함");
+  await order(s, taker, "AAPL", "buy", 20);
+  await order(s, taker, "AAPL", "sell", 100); // 최우선 매수호가 = maker 주문 → maker 체결
+  const me = s.broker.me(maker);
+  assert.ok(me.positions[0]?.qty > 0, "지정가 체결로 보유");
+  assert.equal(me.fills.find(f => f.side === "buy")!.fee, 0, "지정가 체결 수수료 0");
+  if (me.orders.length) {
+    s.broker.cancelOrder(maker, me.orders[0].id);
+    assert.equal(s.broker.me(maker).orders.length, 0);
+  }
+  const after = s.broker.me(maker);
+  assert.ok(Math.abs(after.cash + after.positions[0].qty * after.positions[0].avg - START_CASH) < 1e-6, "남은 묶음은 돌려받음");
+  assert.equal(s.db.prepare("SELECT COUNT(*) AS c FROM open_orders").get()!.c, 0);
+});
+
+test("지정가는 재시작해도 호가창에 다시 걸린다", () => {
+  const s = setup(4);
+  const u = s.user("resting");
+  const bid = s.exchange.best("NVDA").bid!;
+  const { order: o } = s.broker.limitOrder(u, { sym: "NVDA", kind: "fut", side: "buy", lev: 3, price: bid * 0.98, pct: 20 });
+  const { exchange } = bootMarket(s.db, s.season, FAST, T0);
+  const b2 = new Broker(s.db, s.season, exchange);
+  b2.restoreOrders();
+  assert.deepEqual(exchange.openOrders(u).map(x => x.id), [o!.id]);
+  assert.equal(b2.me(u).orders.length, 1);
+  assert.ok(Math.abs(b2.me(u).equity - START_CASH) < 1e-6);
 });
 
 test("잘못된 주문과 너무 빠른 주문은 거절된다", () => {
@@ -131,7 +168,7 @@ test("주식병합 정산: 수량 ÷ratio, 평단 ×ratio, 단주는 현금", as
   await order(s, u, "LMQ", "buy", 5);
   const before = s.broker.me(u).positions[0];
   const cash = s.broker.me(u).cash;
-  const price = s.market.quote("LMQ")!.price;
+  const price = s.exchange.price("LMQ");
   s.broker.applyActions([{ type: "split", sym: "LMQ", ratio: 10 }]);
   const after = s.broker.me(u);
   const pos = after.positions.find(p => p.sym === "LMQ");
@@ -188,7 +225,7 @@ test("스냅샷 + 이후 주문 흐름으로 복원해도 같은 시세", async 
   const u = s.user("snapper");
   await order(s, u, "NVDA", "buy", 30);
   for (let i = 0; i < 100; i++) s.tick();
-  saveSnapshot(s.db, s.season, s.market);
+  saveSnapshot(s.db, s.season, s.exchange);
   await order(s, u, "LMQ", "buy", 20);
   for (let i = 0; i < 100; i++) s.tick();
   const elapsed = s.market.tick - 2000;
@@ -218,8 +255,8 @@ test("졸업(20배)·전설(100배) 알림, 시즌 종료: 명예의 전당은 �
   const hall = hallOfFame(s.db) as { season: number; rank: number; name: string }[];
   assert.deepEqual(hall.map(h => h.name), ["legend"], "명예의 전당은 100배 전설만 (1위 자동 등재 없음)");
   assert.equal(currentSeason(s.db, 1, 1000, 1, T0).id, next.id, "진행 중 시즌 = 새 시즌");
-  const { market } = bootMarket(s.db, next, FAST, next.startedAt);
-  const broker = new Broker(s.db, next, market);
+  const { exchange } = bootMarket(s.db, next, FAST, next.startedAt);
+  const broker = new Broker(s.db, next, exchange);
   assert.equal(broker.me(a).equity, START_CASH);
   assert.equal(broker.me(a).positions.length, 0);
 });
@@ -269,14 +306,14 @@ test("선물 레버리지 한도 및 다시 시작 후 10분간 5배 초과 금�
   assert.equal(s.broker.me(u).futures.length, 2);
 });
 
-test("강제 청산: 증거금 90% 손실 시 다음 tick에 시장가 강제 청산", async () => {
+test("강제 청산: 증거금 90% 손실 가격이 되면 바로 시장가 강제 청산", async () => {
   const s = setup();
   const u = s.user("degen");
   await openFut(s, u, "LMQ", "long", 5, 50); // 청산가 = 진입가 × (1 - 0.9/5) = 0.82
   const f = s.broker.me(u).futures[0];
   while (s.market.quote("LMQ")!.price > f.liq * 0.98) s.market.applyFlow("LMQ", -1e9);
-  s.broker.checkTriggers(); // 트리거 감지 → 다음 tick 정산 대기열에 등록
-  const auto = s.broker.settle();
+  s.tick(); // 호가 봇이 밀린 기준가로 다시 깔면 체결가가 청산가를 넘고, 바로 시장가 강제 청산
+  const auto = s.broker.drainAuto().closed;
   assert.deepEqual(auto, [{ type: "liquidation", sym: "LMQ" }]);
   const me = s.broker.me(u);
   assert.equal(me.futures.length, 0);
@@ -293,8 +330,8 @@ test("스탑로스: 설정 검증 및 목표가 도달 시 자동 종료", async
   assert.throws(() => s.broker.setStop(u, f.id, now * 0.95), OrderError, "숏 스탑로스는 현재가 위여야 함");
   s.broker.setStop(u, f.id, now * 1.002);
   while (s.market.quote("NVDA")!.price <= now * 1.003) s.market.applyFlow("NVDA", 1e11);
-  s.broker.checkTriggers();
-  const auto = s.broker.settle();
+  s.tick();
+  const auto = s.broker.drainAuto().closed;
   assert.deepEqual(auto, [{ type: "stop", sym: "NVDA" }]);
   const me = s.broker.me(u);
   assert.equal(me.futures.length, 0);
@@ -440,8 +477,8 @@ test("익절(TP): 설정 검증 및 목표가 도달 시 자동 익절 체결", 
   assert.throws(() => s.broker.setTp(u, f.id, now * 0.95), OrderError, "롱 익절가는 현재가 위여야 함");
   s.broker.setTp(u, f.id, now * 1.002);
   while (s.market.quote("NVDA")!.price <= now * 1.003) s.market.applyFlow("NVDA", 1e11);
-  s.broker.checkTriggers();
-  const auto = s.broker.settle();
+  s.tick();
+  const auto = s.broker.drainAuto().closed;
   assert.deepEqual(auto, [{ type: "tp", sym: "NVDA" }]);
   const me = s.broker.me(u);
   assert.equal(me.futures.length, 0);

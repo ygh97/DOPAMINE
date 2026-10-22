@@ -118,6 +118,11 @@ export interface Market {
    * step() 전에 종목마다 한 번 부른다. 같은 tick 주문은 모두 이 가격에 체결된다.
    */
   applyFlow(sym: string, notional: number): { price: number; impact: number } | null;
+  /**
+   * 호가창(Exchange)에서 실제 체결된 순매수 금액을 기준가에 남긴다. 충격 중 영구 몫(30%)만 기준가와 적정가를 옮긴다.
+   * 사라지는 몫은 호가 봇 재고 헤지가 맡는다. tick이 끝날 때(다음 step() 전) 종목마다 한 번 부른다.
+   */
+  absorbFlow(sym: string, notional: number): void;
   /** 엔진 전체 상태를 JSON으로 (난수 상태 포함). createMarket({ snapshot })으로 이어서 돌릴 수 있다 */
   snapshot(): string;
 }
@@ -677,6 +682,16 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     if (last) { last.high = Math.max(last.high, a.price); last.low = Math.min(last.low, a.price); last.close = a.price; }
     return { price: pre * Math.exp((sign * impact) / 2), impact };
   }
+  // 호가창 체결의 영구 몫만 기준가·적정가에 남긴다 (사라지는 몫은 호가 봇 재고 헤지가 맡는다)
+  function absorbFlow(sym: string, notional: number) {
+    const a = state[sym];
+    if (!a || !notional) return;
+    const sigmaDay = a.sigma * Math.sqrt(cfg.ticksPerDay);
+    const impact = Math.min(cfg.impactK * sigmaDay * Math.sqrt(Math.abs(notional) / liquidity(a)), cfg.impactCap[a.market]);
+    const permanent = Math.sign(notional) * impact * (1 - cfg.impactTempShare);
+    a.price *= Math.exp(permanent);
+    if (a.eps && a.baseEps) a.eps *= Math.exp(permanent); else a.anchor *= Math.exp(permanent);
+  }
 
   const toQuote = (a: AssetState): Quote => ({
     sym: a.sym, name: a.name, market: a.market, sector: a.sector, price: a.price, prev: a.prev,
@@ -697,5 +712,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     sigma: sym => state[sym]?.sigma ?? null,
     snapshot: takeSnapshot,
     applyFlow,
+    absorbFlow,
   };
 }

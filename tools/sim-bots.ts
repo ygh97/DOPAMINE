@@ -33,18 +33,19 @@ function run(seed: number) {
   const t0 = performance.now(), T0 = 1.79e12, SEASON_MS = 28_800_000;
   const db = openDb(":memory:");
   const season = currentSeason(db, seed, 1000, SEASON_MS, T0);
-  const { market } = bootMarket(db, season, JSON.parse(OPT), T0);
-  const broker = new Broker(db, season, market);
-  const bots = new BotRunner(db, () => broker, () => market, { bots: BOTS, marketMakers: MM, seed });
-  const start = Object.fromEntries(market.quotes().map(q => [q.sym, q.price]));
+  const { market, exchange } = bootMarket(db, season, JSON.parse(OPT), T0);
+  const broker = new Broker(db, season, exchange);
+  const bots = new BotRunner(db, () => broker, () => exchange, { bots: BOTS, marketMakers: MM, seed });
+  const start = Object.fromEntries(exchange.quotes().map(q => [q.sym, q.price]));
   let grads = 0, liqs = 0;
   const botIds = bots.describe().filter(d => d.kind === "bot").map(d => d.userId);
   const peak = new Map<number, number>(); // 봇별 시즌 중 최고 배수 (졸업 목표를 바꿔 볼 때 쓴다)
   for (let i = 0; i < SEASON_MS / 1000; i++) {
-    broker.settle();
-    const r = market.step();
+    broker.endTick();
+    const r = exchange.step();
+    broker.refundCancelled(r.cancelled);
     broker.applyActions(r.actions);
-    broker.checkTriggers();
+    broker.runTriggers();
     bots.tick(r.news);
     for (const a of r.actions) if (a.type === "graduate") grads++;
     for (const t of broker.drainBroadcasts()) if (t.startsWith("[강제청산]")) liqs++;
@@ -52,7 +53,7 @@ function run(seed: number) {
     if (i % 10 === 0) for (const id of botIds) peak.set(id, Math.max(peak.get(id) ?? 0, broker.equity(broker.account(id)) / 100_000));
   }
   const reached = (x: number) => [...peak.values()].filter(v => v >= x).length;
-  broker.settle();
+  broker.endTick();
   const who = new Map(bots.describe().map(d => [broker.account(d.userId).name, d]));
   const rows = broker.ranking(Infinity), mm = broker.mmRanking();
   const cleared = rows.filter(r => r.clearedTick != null), graduated = rows.filter(r => r.gradTick != null);
@@ -63,8 +64,8 @@ function run(seed: number) {
     byStyle.set(s, e);
   }
   const mult = rows.map(r => r.equity / 100_000).sort((a, b) => a - b);
-  const stockMult = market.quotes().filter(q => q.market === "stock" && start[q.sym]).map(q => q.price / start[q.sym]).sort((a, b) => a - b);
-  const ventMax = Math.max(...market.quotes().filter(q => q.market === "venture" && start[q.sym]).map(q => q.price / (start[q.sym] * (q.splitFactor ?? 1)))); // 병합하면 가격이 ×ratio 되므로 나눠서 비교
+  const stockMult = exchange.quotes().filter(q => q.market === "stock" && start[q.sym]).map(q => q.price / start[q.sym]).sort((a, b) => a - b);
+  const ventMax = Math.max(...exchange.quotes().filter(q => q.market === "venture" && start[q.sym]).map(q => q.price / (start[q.sym] * (q.splitFactor ?? 1)))); // 병합하면 가격이 ×ratio 되므로 나눠서 비교
   console.log(`seed ${seed} (${((performance.now() - t0) / 1000).toFixed(0)}초): 졸업 ${graduated.length} · 전설 ${cleared.length} / ${rows.length}명 · 최종 중앙 ${mult[Math.floor(mult.length / 2)].toFixed(2)}배 · 1위 ${(mult.at(-1)! ).toFixed(1)}배 · 강제청산 ${liqs}회 · 승격 ${grads} · 주식 중앙 ${stockMult[Math.floor(stockMult.length / 2)].toFixed(2)}배 · 신흥주 최고 ${ventMax.toFixed(1)}배`);
   console.log(`  도달 [10배 ${reached(10)} · 20배 ${reached(20)} · 30배 ${reached(30)} · 50배 ${reached(50)} · 100배 ${reached(100)}]`);
   console.log("  성향별 졸업: " + [...byStyle].map(([s, e]) => `${s} ${e.cleared}/${e.n}(최고 ${e.best.toFixed(1)}배)`).join(", "));
