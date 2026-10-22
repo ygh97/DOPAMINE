@@ -125,10 +125,12 @@ dialog#newsDlg::backdrop { background: rgba(10, 15, 25, .45); }
 .sym b { display: block; }
 .sym small { color: var(--muted); font-size: 11px; }
 .stage { white-space: nowrap; font-size: 10px; padding: 0 4px; border-radius: 3px; background: var(--warn-soft); color: var(--warn); margin-left: 4px; }
-.flash-up { animation: fu .6s; }
-.flash-down { animation: fd .6s; }
-@keyframes fu { from { background: var(--up-soft); } }
-@keyframes fd { from { background: var(--down-soft); } }
+/* 가격이 바뀔 때 깜빡임: 연하고 짧게 (눈이 아프지 않게) */
+.flash-up { animation: fu .45s ease-out; }
+.flash-down { animation: fd .45s ease-out; }
+@keyframes fu { from { background: color-mix(in srgb, var(--up-soft) 45%, transparent); } }
+@keyframes fd { from { background: color-mix(in srgb, var(--down-soft) 45%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .flash-up, .flash-down { animation: none; } }
 
 /* center */
 .center { display: grid; grid-template-rows: auto minmax(280px, 1fr) minmax(220px, 38%); gap: var(--gap); min-height: 0; }
@@ -1105,3 +1107,15 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 
 /* 차트 설정: 포지션 선 종류별 */
 .cs-sub-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 10px; padding: 2px 0 4px 22px; font-size: 12px; }
+
+/* 랭킹·세력·고래·전당·애널리스트: 탭은 한 줄(넘치면 가로 스크롤), 이름은 왼쪽, 숫자는 오른쪽 */
+.social-head { gap: 6px; }
+.social-tabs { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.social-tabs::-webkit-scrollbar { display: none; }
+.social-tabs button { flex: none; white-space: nowrap; padding: 4px 9px; }
+.rank-table td { padding: 6px 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rank-table td:first-child { width: 26px; color: var(--muted); text-align: center; }
+.rank-table td.rk-name { text-align: left; width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.rank-table td.rk-name .stage { margin-left: 4px; }
+.rank-table td.analyst-recent { white-space: normal; }
+.rank-row:hover .rk-name b { text-decoration: underline; text-underline-offset: 2px; }

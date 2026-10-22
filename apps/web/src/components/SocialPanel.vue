@@ -210,34 +210,32 @@ async function toggleBan(name: string, banned: boolean) {
 
 <template>
   <div class="panel" aria-label="채팅과 랭킹">
-    <div class="panel-head">
-      <div class="tabs" role="tablist">
+    <div class="panel-head social-head">
+      <div class="tabs social-tabs" role="tablist">
         <button role="tab" data-c="rank" :aria-selected="m.socialTab === 'rank'" @click="m.socialTab = 'rank'">랭킹</button>
         <button v-if="m.mmRanking.length" role="tab" data-c="mm" :aria-selected="m.socialTab === 'mm'" @click="m.socialTab = 'mm'">🏦 세력</button>
         <button v-if="m.whaleRanking.length" role="tab" data-c="whale" :aria-selected="m.socialTab === 'whale'" @click="m.socialTab = 'whale'">🐋 고래</button>
-        <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">명예의 전당</button>
+        <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">🏆 전당</button>
         <button role="tab" data-c="analyst" :aria-selected="m.socialTab === 'analyst'" @click="m.socialTab = 'analyst'">애널리스트</button>
         <button role="tab" data-c="chat" :aria-selected="m.socialTab === 'chat'" @click="m.socialTab = 'chat'; chatFolded = false">
           채팅
           <span v-if="m.unreadWhispers > 0" class="whisper-tab-badge">🔒{{ m.unreadWhispers }}</span>
         </button>
       </div>
-      <span class="muted" style="margin-left: auto">참가 {{ m.players }}명</span>
       <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="chat-sys" :aria-pressed="showSys" title="강제청산·졸업·전설·티배깅 알림을 채팅에서 보이거나 숨깁니다 (내 화면만)" @click="toggleSys">{{ showSys ? "🔔 알림 켬" : "🔕 알림 끔" }}</button>
       <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>
     </div>
     <div v-if="m.socialTab === 'rank'" class="table-scroll">
-      <div class="rank-hint muted">💡 유저를 클릭하면 보유 종목·레버리지·<b>청산가</b>를 훔쳐보고 저격할 수 있습니다.</div>
-      <table v-if="m.ranking.length" id="ranking" class="grid">
+      <div class="rank-hint muted">참가 <b>{{ m.players }}명</b> · 이름을 누르면 보유 종목·레버리지·<b>청산가</b>를 볼 수 있습니다 🔍</div>
+      <table v-if="m.ranking.length" id="ranking" class="grid rank-table">
         <tbody>
           <tr v-for="r in m.ranking" :key="r.name" class="rank-row clickable" :class="{ mine: r.name === a.me?.name }" @click="m.spyTarget = r.name">
             <td>{{ r.rank }}</td>
-            <td>
+            <td class="rk-name">
               <span v-if="kindBadge(r.kind)" class="kind-badge" :title="r.kind === 'bot' ? '봇' : '세력'">{{ kindBadge(r.kind) }}</span>
               <b>{{ r.name }}</b>
               <span v-if="r.clearedTick" class="stage legend">전설</span>
               <span v-else-if="r.gradTick" class="stage grad">졸업</span>
-              <span class="spy-chip">🔍포지션</span>
             </td>
             <td>{{ money(r.equity) }}</td>
             <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
@@ -248,11 +246,11 @@ async function toggleBan(name: string, banned: boolean) {
     </div>
     <div v-else-if="m.socialTab === 'mm'" class="table-scroll">
       <div class="rank-hint muted">🏦 세력: 시장을 움직이고 거래를 채우는 큰손 계정 (봇, $200만으로 시작). 자금 규모가 달라 수익률 순이고 순위·졸업·명예의 전당에서 빠진다</div>
-      <table id="mmRanking" class="grid">
+      <table id="mmRanking" class="grid rank-table">
         <tbody>
           <tr v-for="(r, i) in m.mmRanking" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">
             <td>{{ i + 1 }}</td>
-            <td><span class="kind-badge">🏦</span> <b>{{ r.name }}</b> <span class="spy-chip">🔍포지션</span></td>
+            <td class="rk-name"><span class="kind-badge">🏦</span> <b>{{ r.name }}</b></td>
             <td>{{ money(r.equity) }}</td>
             <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
           </tr>
@@ -261,11 +259,11 @@ async function toggleBan(name: string, banned: boolean) {
     </div>
     <div v-else-if="m.socialTab === 'whale'" class="table-scroll">
       <div class="rank-hint muted">🐋 고래: 큰 자금($200만)으로 가끔 시장을 크게 흔드는 거래자 (봇). 졸업·명예의 전당 제외</div>
-      <table id="whaleRanking" class="grid">
+      <table id="whaleRanking" class="grid rank-table">
         <tbody>
           <tr v-for="r in m.whaleRanking" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">
             <td><span class="kind-badge">🐋</span></td>
-            <td><b>{{ r.name }}</b> <span class="spy-chip">🔍포지션</span></td>
+            <td class="rk-name"><b>{{ r.name }}</b></td>
             <td>{{ money(r.equity) }}</td>
             <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
           </tr>
@@ -274,11 +272,11 @@ async function toggleBan(name: string, banned: boolean) {
     </div>
     <div v-else-if="m.socialTab === 'analyst'" class="table-scroll">
       <div class="rank-hint muted">💡 누구 말이 맞는지는 적중률로 판단하세요. 리포트는 13분 뒤 채점됩니다 (매수: 올랐나 · 매도: 내렸나 · 중립: ±4% 안).</div>
-      <table v-if="analystRows.length" id="analysts" class="grid">
+      <table v-if="analystRows.length" id="analysts" class="grid rank-table">
         <tbody>
           <tr v-for="(x, i) in analystRows" :key="x.id">
             <td>{{ i + 1 }}</td>
-            <td><b>{{ x.name }}</b><br><small class="muted">{{ x.firm }}</small></td>
+            <td class="rk-name"><b>{{ x.name }}</b><br><small class="muted">{{ x.firm }}</small></td>
             <td><b>{{ x.total ? `${Math.round((x.hits / x.total) * 100)}%` : "—" }}</b><br><small class="muted">{{ x.hits }}/{{ x.total }}</small></td>
             <td class="analyst-recent">
               <button v-for="r in x.recent.slice(0, 3)" :key="r.id" type="button" class="sym-tag news-sym-tag" :title="`목표가 ${money(r.target)} · 당시 ${money(r.price)}`" @click="m.select(r.sym)">
@@ -293,11 +291,11 @@ async function toggleBan(name: string, banned: boolean) {
     </div>
     <div v-else-if="m.socialTab === 'hall'" class="hall-wrap">
       <div class="table-scroll">
-        <table v-if="hallRows.length" id="hall" class="grid">
+        <table v-if="hallRows.length" id="hall" class="grid rank-table">
           <tbody>
             <tr v-for="h in hallRows" :key="`${h.season}-${h.name}`" :class="{ mine: h.name === a.me?.name }">
               <td>{{ h.rank <= 3 ? ["🥇", "🥈", "🥉"][h.rank - 1] : `${h.rank}위` }}</td>
-              <td><b>{{ h.name }}</b><span v-if="h.clearedTick" class="stage legend">전설</span></td>
+              <td class="rk-name"><b>{{ h.name }}</b><span v-if="h.clearedTick" class="stage legend">전설</span></td>
               <td :class="h.returnPct >= 0 ? 'up' : 'down'">{{ pct(h.returnPct) }}</td>
             </tr>
           </tbody>

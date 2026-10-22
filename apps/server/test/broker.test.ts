@@ -358,8 +358,8 @@ test("같은 종목·방향·배율 선물은 하나로 합친다 (물타기): �
 test("선물 레버리지 한도 및 다시 시작 후 10분간 5배 초과 금지", async () => {
   const s = setup();
   const u = s.user("lev_tester");
-  assert.throws(() => s.broker.openFuture(u, "BTC", "long", 10, 10), OrderError, "코인은 최대 5배");
-  assert.throws(() => s.broker.openFuture(u, "LMQ", "short", 10, 10), OrderError, "신흥주는 최대 5배");
+  assert.throws(() => s.broker.openFuture(u, "BTC", "long", 20, 10), OrderError, "코인은 최대 10배");
+  assert.throws(() => s.broker.openFuture(u, "LMQ", "short", 4, 10), OrderError, "선택지(2·3·5·10)에 없는 배율");
   await openFut(s, u, "NVDA", "short", 10, 10);
   s.broker.reset(u);
   assert.equal(s.broker.me(u).futures.length, 0);

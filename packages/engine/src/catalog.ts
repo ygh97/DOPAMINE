@@ -82,6 +82,6 @@ export const SPARES: SpareDef[] = [
 /** 선물 최대 레버리지와 선택지 (SPEC 3장) */
 export const LEVERAGE: Record<string, number[]> = {
   stock: [2, 3, 5, 10],
-  coin: [2, 3, 5],
-  venture: [2, 3, 5],
+  coin: [2, 3, 5, 10],
+  venture: [2, 3, 5, 10],
 };
