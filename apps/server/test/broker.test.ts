@@ -513,3 +513,14 @@ test("🤖 봇 교대: 활동 중인 사람만큼 봇이 쉬고, 사람이 빠�
   for (let i = 0; i < 50; i++) { const r = s.tick(); bots.tick(r.news); }
   assert.equal(s.broker.players, 9, "사람이 줄면 봇이 깨어난다");
 });
+
+test("이미 불러온 계좌의 종류가 바뀌어도 랭킹에 맞게 나온다 (예전 DB의 세력 고래 → 🐋 고래)", () => {
+  const s = setup();
+  s.db.prepare("INSERT INTO users (name, pass, created_at, kind) VALUES ('고래', '-', 0, 'mm')").run();
+  s.broker.loadAll();
+  const id = (s.db.prepare("SELECT id FROM users WHERE name = '고래'").get() as { id: number }).id;
+  s.broker.account(id); // 서버가 켜질 때처럼 세력으로 먼저 올라가 있다
+  new BotRunner(s.db, () => s.broker, () => s.market, { bots: 0, marketMakers: true, seed: 1 });
+  assert.ok(s.broker.whaleRanking().some(r => r.name === "고래"), "고래 탭");
+  assert.ok(!s.broker.mmRanking().some(r => r.name === "고래"), "세력 현황에는 없음");
+});

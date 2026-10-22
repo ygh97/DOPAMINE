@@ -606,6 +606,11 @@ export class Broker {
   whaleRanking(): RankRow[] {
     return this.ensureRankCache().whales;
   }
+  /** 계정 종류가 바뀌었을 때 (예: 세력이던 고래 → 고래). 이미 메모리에 올라간 계좌도 맞춘다 */
+  setKind(userId: number, kind: AccountKind) {
+    this.account(userId).kind = kind;
+    this.rankCache = null;
+  }
   /** 🤖 봇 교대: 쉬게 하거나 깨운다. 쉬는 봇은 랭킹에서 숨는다 */
   setResting(userId: number, resting: boolean) {
     this.account(userId).resting = resting;

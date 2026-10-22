@@ -344,7 +344,10 @@ export class BotRunner {
       db.prepare("INSERT OR IGNORE INTO users (name, pass, created_at, kind) VALUES (?, '-', ?, ?)").run(name, Date.now(), kind);
       const row = db.prepare("SELECT id, kind FROM users WHERE name = ?").get(name) as { id: number; kind: string };
       if (row.kind === "user") return null; // 사람이 먼저 쓴 이름이면 건너뛴다
-      if (row.kind !== kind) db.prepare("UPDATE users SET kind = ? WHERE id = ?").run(kind, row.id); // 예: 세력이던 고래 → 고래
+      if (row.kind !== kind) { // 예: 세력이던 고래 → 고래. 서버가 이미 불러온 계좌도 바꿔야 랭킹에 맞게 나온다
+        db.prepare("UPDATE users SET kind = ? WHERE id = ?").run(kind, row.id);
+        getBroker().setKind(row.id, kind);
+      }
       return row.id;
     };
     const styles = BOT_MIX.flatMap(([s, w]) => Array.from({ length: w }, () => s));
