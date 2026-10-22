@@ -34,7 +34,8 @@
 ### 한 번에: `tools\deploy.ps1`
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\deploy.ps1            # 배포 (새 시즌이 필요한지는 알아서 판단)
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1            # 배포 (엔진을 바꿔도 시즌은 그대로 이어진다)
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -NewSeason # 배포 + 지금 시즌을 끝내고 새 시즌 (원할 때만)
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel    # 터널이 꺼져 있으면 켜고 새 주소 출력
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -FreshStart  # 계정·명예의 전당만 남기고 전부 지운 뒤 새 시즌 (아래 "새로 시작")
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만 끄기 (끄기 전 스냅샷·백업)
@@ -49,13 +50,14 @@ powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만
 4. `npm run build` (화면을 `apps/web/dist`로 빌드. 서버가 이 폴더를 같이 서빙한다)
 5. 서버를 창 없이 켠다 (이 창을 닫아도 안 꺼진다). 로그는 `data\server.log`. 끌 때는 `-Stop`
 6. `/api/health`가 응답할 때까지 기다린다 (재생 때문에 몇 초 걸릴 수 있다)
-7. 엔진 코드(`packages/engine/src`)가 지난 배포와 다르면 지금 시즌을 끝내고 새 시즌을 연다. 지난 배포의 지문은 `data\engine.hash`
+7. `-NewSeason`을 붙였을 때만 지금 시즌을 끝내고 새 시즌을 연다
 8. 터널 상태와 주소를 알려 준다. 터널은 서버만 다시 켜면 그대로라 주소도 안 바뀐다. `-Tunnel`로 켠 터널도 창 없이 돌고, 주소·로그는 `data\tunnel.log`. 터널만 끄려면 `Stop-Process -Name cloudflared`
 
-### 새 시즌은 언제 열리나
-- 엔진(`packages/engine/src`: 시세 엔진·호가창·종목·뉴스 문구)이 바뀐 배포면 스크립트가 알아서 새 시즌을 연다. 시즌 중간에 규칙이 바뀌면 재시작 재생이 어긋나기 때문이다.
-- 화면·서버·채팅만 바뀐 배포는 시즌이 그대로 이어진다.
-- 엔진이 같아도 시즌을 새로 시작하고 싶으면 `-NewSeason`을 붙인다.
+### 배포해도 시즌은 이어진다
+- 엔진(시세·호가창·뉴스)을 바꾼 배포도 시즌·계좌·차트가 그대로 이어지고, 바뀐 규칙은 그 순간부터 적용된다.
+- 이유: 스크립트가 서버를 끄기 직전에 엔진 상태를 저장한다. 다시 켜면 거기서 이어서 꺼져 있던 몇 초만 재생한다.
+- 엔진 상태 형식이 크게 바뀌어 저장본을 못 읽으면, 서버가 시즌 처음부터 기록된 주문 흐름으로 다시 만들어 이어 간다. 계좌는 그대로고, 지난 차트 모양만 조금 달라진다.
+- 시즌을 새로 시작하고 싶을 때만 `-NewSeason`을 붙인다.
 
 ### 새로 시작 (계정·명예의 전당만 남기기): `-FreshStart`
 - 남는 것: 계정(닉네임·비밀번호·로그인 상태·채팅 정지), 명예의 전당, 명예의 전당 기록이 있는 시즌 번호.

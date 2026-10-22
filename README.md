@@ -20,7 +20,7 @@ $100,000로 시작해 20배면 **졸업**, 100배면 **전설**. 시즌은 8시�
 ## 배포 (이 PC + Cloudflare 터널)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\deploy.ps1          # 코드 받기 → 빌드 → 서버 재시작 (엔진이 바뀌었으면 새 시즌)
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1          # 코드 받기 → 빌드 → 서버 재시작 (시즌은 그대로 이어짐)
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel  # 터널이 꺼져 있으면 켜고 접속 주소 출력
 ```
 

@@ -1,15 +1,13 @@
 ﻿# 도파민 센터: 이 PC에서 서버 업데이트·재시작 (Cloudflare Quick Tunnel 운영용). 사용법은 DEPLOY.md.
 #
-#   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1         # 최신 코드 받기 → 설치 → 화면 빌드 → 서버 재시작
-#                                                                      # 엔진(packages/engine/src)이 지난 배포와 다르면 새 시즌도 알아서 연다
+#   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1         # 최신 코드 받기 → 설치 → 화면 빌드 → 서버 재시작 (시즌은 그대로 이어진다)
 #   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop   # 서버만 끈다
-#   -SkipPull: git pull 안 함 / -Tunnel: 터널이 꺼져 있으면 새로 켜고 주소를 보여 준다 / -NewSeason: 엔진이 같아도 새 시즌
+#   -SkipPull: git pull 안 함 / -Tunnel: 터널이 꺼져 있으면 새로 켜고 주소를 보여 준다 / -NewSeason: 지금 시즌을 끝내고 새 시즌
 #   -FreshStart: 계정·명예의 전당만 남기고 전부 지운 뒤 새 시즌 (tools/fresh-start.ts, 지우기 전 백업)
 param([switch]$NewSeason, [switch]$FreshStart, [switch]$Stop, [switch]$SkipPull, [switch]$Tunnel, [int]$Port = 4810)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$EngineHashFile = Join-Path $Root "data\engine.hash" # 지난 배포의 엔진 코드 지문
 Set-Location $Root
 $Api = "http://127.0.0.1:$Port"
 New-Item -ItemType Directory -Force (Join-Path $Root "data") | Out-Null
@@ -33,12 +31,6 @@ function TunnelUrl($log) {
   if ($m) { return $m.Matches[0].Value }
   return $null
 }
-# 엔진 코드 지문: packages/engine/src 파일 전부의 SHA256. 엔진·호가창 규칙이 바뀌면 시즌 중간 재생이 어긋나서 새 시즌이 필요하다
-function EngineHash {
-  $parts = Get-ChildItem (Join-Path $Root "packages\engine\src") -Recurse -File | Sort-Object FullName | ForEach-Object { $_.Name + ":" + (Get-FileHash $_.FullName -Algorithm SHA256).Hash }
-  $bytes = [System.Text.Encoding]::UTF8.GetBytes(($parts -join "`n"))
-  return [System.BitConverter]::ToString([System.Security.Cryptography.SHA256]::Create().ComputeHash($bytes)).Replace("-", "")
-}
 function ServerPid {
   $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
   if ($c) { return $c.OwningProcess }
@@ -49,7 +41,7 @@ function StopServer {
   if (-not $id) { Write-Host "켜져 있는 서버 없음 (포트 $Port)"; return }
   $key = AdminKey
   if ($key) {
-    # 끄기 전에 엔진 스냅샷 + DB 백업 (다시 켤 때 재생이 짧아진다)
+    # 끄기 전에 엔진 스냅샷 + DB 백업. 다시 켤 때 재생이 꺼져 있던 몇 초뿐이라, 엔진 코드가 바뀌어도 시즌이 자연스럽게 이어진다
     try { Invoke-RestMethod -Method Post -Uri "$Api/api/admin/backup" -Headers @{ "x-admin-key" = $key } -ContentType "application/json" -Body "{}" -TimeoutSec 30 | Out-Null; Write-Host "스냅샷·백업 저장" }
     catch { Write-Host "백업 요청 실패 (계속 진행): $($_.Exception.Message)" -ForegroundColor Yellow }
   }
@@ -94,10 +86,6 @@ for ($i = 0; $i -lt 120 -and -not $health; $i++) {
 if (-not $health) { throw "서버가 2분 안에 뜨지 않았습니다. data\server.log 끝부분을 보세요." }
 Write-Host "서버 켜짐: 시즌 $($health.season), tick $($health.tick), 재생 $($health.replayed) tick, 부팅 $($health.bootMs)ms"
 
-$engine = EngineHash
-$before = if (Test-Path $EngineHashFile) { (Get-Content $EngineHashFile -Raw).Trim() } else { $null }
-if (-not $before) { Write-Host "엔진 지문을 처음 기록합니다 (이번 배포는 시즌 유지)" }
-elseif ($before -ne $engine -and -not $FreshStart) { Write-Host "엔진 코드가 지난 배포와 다릅니다 → 새 시즌" -ForegroundColor Yellow; $NewSeason = $true }
 if ($FreshStart) { $NewSeason = $false } # 이미 새 시즌으로 열렸다
 if ($NewSeason) {
   Step "새 시즌 시작"
@@ -106,7 +94,6 @@ if ($NewSeason) {
   $r = Invoke-RestMethod -Method Post -Uri "$Api/api/admin/new-season" -Headers @{ "x-admin-key" = $key } -ContentType "application/json" -Body "{}" -TimeoutSec 60
   Write-Host "시즌 $($r.ended) 종료 → 시즌 $($r.season) 시작"
 }
-Set-Content -Path $EngineHashFile -Value $engine -Encoding ASCII
 
 Step "터널 (cloudflared)"
 $cf = Get-Process cloudflared -ErrorAction SilentlyContinue

@@ -79,7 +79,7 @@ export const useMarket = defineStore("market", () => {
   const guideOpen = ref(false);
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
-  const socialTab = ref<"chat" | "rank" | "whale" | "hall" | "analyst">("rank");
+  const socialTab = ref<"chat" | "rank" | "mm" | "whale" | "hall" | "analyst">("rank");
   const research = ref<Research | null>(null);
   const calendarOpen = ref(false);
   async function loadResearch() {

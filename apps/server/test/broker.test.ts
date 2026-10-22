@@ -262,6 +262,18 @@ test("스냅샷 + 이후 주문 흐름으로 복원해도 같은 시세", async 
   assert.deepEqual(boot.market.quotes(), s.market.quotes());
 });
 
+test("엔진이 바뀌어 스냅샷을 못 읽어도 시즌은 이어진다: 처음부터 재생해 지금 tick까지", () => {
+  const s = setup(10);
+  for (let i = 0; i < 50; i++) s.tick();
+  saveSnapshot(s.db, s.season, s.exchange);
+  s.db.prepare("UPDATE snapshots SET data = ? WHERE season_id = ?").run('{"v":999}', s.season.id); // 읽을 수 없는 스냅샷
+  const elapsed = s.market.tick - 2000;
+  const boot = bootMarket(s.db, s.season, FAST, T0 + elapsed * 1000);
+  assert.equal(boot.fromSnapshot, false);
+  assert.equal(boot.market.tick, s.market.tick, "지금 시각까지 재생");
+  assert.equal(currentSeason(s.db, 1, 1000, 7 * 86_400_000, T0).id, s.season.id, "시즌 그대로");
+});
+
 test("졸업(20배)·전설(100배) 알림, 시즌 종료: 명예의 전당은 전설만, 새 시즌은 새 seed와 $100,000 계좌", async () => {
   const s = setup(10);
   const a = s.user("winner"), b = s.user("legend"), c = s.user("grad"), d = s.user("fourth");

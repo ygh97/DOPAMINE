@@ -31,19 +31,25 @@ export function currentSeason(db: Db, seed: number, tickMs: number, lengthMs: nu
 export function bootMarket(db: Db, season: Season, options: Partial<MarketOptions>, now = Date.now(), exchangeOptions: Partial<ExchangeOptions> = {}) {
   const snap = db.prepare("SELECT tick, data, exchange FROM snapshots WHERE season_id = ?").get(season.id) as { tick: number; data: string; exchange: string | null } | undefined;
   const seasonTicks = Math.max(1, Math.floor(season.lengthMs / season.tickMs)); // 시즌 성장(drift)을 시즌 길이에 맞춘다
-  const market = createMarket({ assets: ASSETS, sectors: SECTORS, spares: SPARES, seed: season.seed, now: season.startedAt, options: { seasonTicks, ...options }, snapshot: snap?.data });
+  const make = (snapshot?: string) => createMarket({ assets: ASSETS, sectors: SECTORS, spares: SPARES, seed: season.seed, now: season.startedAt, options: { seasonTicks, ...options }, snapshot });
+  // 엔진 코드가 바뀌어 스냅샷을 못 읽으면 시즌을 버리지 않고 seed + 기록된 순매수로 처음부터 다시 재생한다 (지난 차트 모양은 조금 달라진다)
+  let market, useSnap = !!snap;
+  try { market = make(snap?.data); }
+  catch (e) { console.error("스냅샷을 읽지 못해 시즌 처음부터 재생합니다", e); market = make(); useSnap = false; }
   const warmTicks = market.options.warmupBars * market.options.ticksPerBar;
   const target = Math.min(targetTick(season, warmTicks, now), endTick(season, warmTicks));
   const flows = db.prepare("SELECT tick, sym, notional FROM flows WHERE season_id = ? AND tick >= ? ORDER BY tick").all(season.id, market.tick) as
     { tick: number; sym: string; notional: number }[];
   const exchange = new Exchange(market, exchangeOptions);
-  if (snap?.exchange) exchange.restore(snap.exchange);
+  if (useSnap && snap?.exchange) {
+    try { exchange.restore(snap.exchange); } catch (e) { console.error("호가창 스냅샷을 읽지 못해 새로 깝니다", e); }
+  }
   const from = market.tick;
   let i = 0;
   const absorb = () => { for (; i < flows.length && flows[i].tick <= market.tick; i++) if (flows[i].tick === market.tick) market.absorbFlow(flows[i].sym, flows[i].notional); };
   absorb(); // 스냅샷을 저장한 tick 동안 체결된 몫
   while (market.tick < target) { exchange.step(); absorb(); }
-  return { market, exchange, warmTicks, replayed: market.tick - from, fromSnapshot: !!snap };
+  return { market, exchange, warmTicks, replayed: market.tick - from, fromSnapshot: useSnap };
 }
 
 export function saveSnapshot(db: Db, season: Season, exchange: Exchange) {

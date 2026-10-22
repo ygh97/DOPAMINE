@@ -205,6 +205,7 @@ async function toggleBan(name: string, banned: boolean) {
     <div class="panel-head">
       <div class="tabs" role="tablist">
         <button role="tab" data-c="rank" :aria-selected="m.socialTab === 'rank'" @click="m.socialTab = 'rank'">랭킹</button>
+        <button v-if="m.mmRanking.length" role="tab" data-c="mm" :aria-selected="m.socialTab === 'mm'" @click="m.socialTab = 'mm'">🏦 세력</button>
         <button v-if="m.whaleRanking.length" role="tab" data-c="whale" :aria-selected="m.socialTab === 'whale'" @click="m.socialTab = 'whale'">🐋 고래</button>
         <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">명예의 전당</button>
         <button role="tab" data-c="analyst" :aria-selected="m.socialTab === 'analyst'" @click="m.socialTab = 'analyst'">애널리스트</button>
@@ -235,19 +236,19 @@ async function toggleBan(name: string, banned: boolean) {
         </tbody>
       </table>
       <p v-else class="empty">아직 참가자가 없습니다. 첫 번째로 참가해 보세요.</p>
-      <template v-if="m.mmRanking.length">
-        <div class="rank-hint muted">🏦 세력 현황 (자금 규모가 달라 수익률 순, 순위·졸업 제외)</div>
-        <table id="mmRanking" class="grid">
-          <tbody>
-            <tr v-for="r in m.mmRanking" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">
-              <td><span class="kind-badge">🏦</span></td>
-              <td><b>{{ r.name }}</b> <span class="spy-chip">🔍포지션</span></td>
-              <td>{{ money(r.equity) }}</td>
-              <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </template>
+    </div>
+    <div v-else-if="m.socialTab === 'mm'" class="table-scroll">
+      <div class="rank-hint muted">🏦 세력: 시장을 움직이고 거래를 채우는 큰손 계정 (봇, $200만으로 시작). 자금 규모가 달라 수익률 순이고 순위·졸업·명예의 전당에서 빠진다</div>
+      <table id="mmRanking" class="grid">
+        <tbody>
+          <tr v-for="(r, i) in m.mmRanking" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">
+            <td>{{ i + 1 }}</td>
+            <td><span class="kind-badge">🏦</span> <b>{{ r.name }}</b> <span class="spy-chip">🔍포지션</span></td>
+            <td>{{ money(r.equity) }}</td>
+            <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
     <div v-else-if="m.socialTab === 'whale'" class="table-scroll">
       <div class="rank-hint muted">🐋 고래: 큰 자금($200만)으로 가끔 시장을 크게 흔드는 거래자 (봇). 졸업·명예의 전당 제외</div>
