@@ -431,7 +431,10 @@ async function toggleBan(name: string, banned: boolean) {
             :data-msg-id="c.id"
           >
             <div class="chat-card-head">
-              <span v-if="c.to" class="whisper-badge">🔒 귓속말 {{ c.name }} → {{ c.to }}</span>
+              <span v-if="c.to" class="whisper-badge">🔒 귓속말
+                <button type="button" class="whisper-name-btn" title="클릭: 포트폴리오 훔쳐보기" @click="m.spyTarget = c.name">{{ c.name }}</button> →
+                <button type="button" class="whisper-name-btn" title="클릭: 포트폴리오 훔쳐보기" @click="m.spyTarget = c.to">{{ c.to }}</button>
+              </span>
               <button
                 v-else
                 type="button"

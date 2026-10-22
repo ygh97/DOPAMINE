@@ -132,7 +132,7 @@ onMounted(() => {
   </div>
   <div v-if="m.whisperAlert" id="whisperAlertBanner" class="whisper-alert" role="alert">
     <span class="whisper-alert-badge">🔒 귓속말 도착</span>
-    <b>@{{ m.whisperAlert.from }}</b>
+    <button type="button" class="whisper-name-btn" title="클릭: 포트폴리오 훔쳐보기" @click="m.spyTarget = m.whisperAlert.from">@{{ m.whisperAlert.from }}</button>
     <span class="whisper-alert-text">{{ m.whisperAlert.text }}</span>
     <div class="whisper-alert-actions">
       <button type="button" class="whisper-reply-btn" @click="replyWhisper(m.whisperAlert.from)">답장하기</button>
