@@ -427,7 +427,7 @@ async function toggleBan(name: string, banned: boolean) {
           v-model="text"
           :disabled="!a.me"
           maxlength="200"
-          :placeholder="!a.me ? '참가 후 채팅할 수 있습니다' : whisperTo ? `${whisperTo}님에게 귓속말 입력...` : '메시지 입력 ($NVDA 태그, /w 닉네임 귓속말, 1초 쿨타임)'"
+          :placeholder="!a.me ? '참가 후 채팅할 수 있습니다' : whisperTo ? `${whisperTo}님에게 귓속말 입력...` : '메시지 입력 ($NVDA 태그, /w 닉네임 귓속말, /r 답장, 1초 쿨타임)'"
           aria-label="채팅 메시지"
         >
         <button type="submit" :disabled="!a.me || !text.trim()">전송</button>

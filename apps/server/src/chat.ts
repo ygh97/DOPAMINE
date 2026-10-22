@@ -29,6 +29,8 @@ export class Chat {
       insMsg: db.prepare("INSERT INTO chat_messages (user_id, name, text, at, to_name) VALUES (?, ?, ?, ?, ?)"),
       selUser: db.prepare("SELECT name, banned FROM users WHERE id = ?"),
       selTarget: db.prepare("SELECT name FROM users WHERE name = ? COLLATE NOCASE"),
+      // /r: 나에게 마지막으로 귓속말을 보낸 사람
+      selLastWhisperer: db.prepare("SELECT name FROM chat_messages WHERE to_name = ? COLLATE NOCASE AND user_id != 0 ORDER BY id DESC LIMIT 1"),
       // 공개 메시지만 캐시한다 (귓속말이 많아도 공개 메시지 수가 줄지 않게). reacted = 강제청산 알림에 누가 이미 반응했는지
       selRecent: db.prepare('SELECT m.id, m.name, m.text, m.at, NULL AS "to", r.msg_id IS NOT NULL AS reacted FROM chat_messages m LEFT JOIN chat_reacts r ON r.msg_id = m.id WHERE m.hidden = 0 AND m.to_name IS NULL ORDER BY m.id DESC LIMIT ?'),
       selWhispers: db.prepare('SELECT id, name, text, at, to_name AS "to" FROM chat_messages WHERE hidden = 0 AND to_name IS NOT NULL AND (name = ?1 COLLATE NOCASE OR to_name = ?1 COLLATE NOCASE) ORDER BY id DESC LIMIT ?2'),
@@ -67,6 +69,13 @@ export class Chat {
     if (now - prev < COOLDOWN_MS) throw new ChatError("메시지가 너무 빠릅니다. 1초 뒤에 다시 보내세요.");
 
     let toName: string | null = null;
+    // /r 내용: 나에게 마지막으로 귓속말한 사람에게 답장 (= /w 그사람 내용)
+    const rMatch = /^\/(?:r|ㄱ)\s+(.+)$/i.exec(text);
+    if (rMatch) {
+      const last = this.stmts.selLastWhisperer.get(user.name) as { name: string } | undefined;
+      if (!last) throw new ChatError("답장할 귓속말이 없습니다.");
+      text = `/w ${last.name} ${rMatch[1]}`;
+    }
     const wMatch = /^\/(?:w|ㅈ|귓)\s+(\S+)\s+(.+)$/i.exec(text);
     if (wMatch) {
       const targetRaw = wMatch[1];

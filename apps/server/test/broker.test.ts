@@ -438,7 +438,7 @@ test("그리기 서버 저장·조회·삭제 및 시즌 분리", () => {
 });
 
 
-test("실시간 채팅: 전송·1초 쿨타임·귓속말(/w)·200자·금칙어·3회 신고 자동 숨김·운영자 차단", () => {
+test("실시간 채팅: 전송·1초 쿨타임·귓속말(/w·/r)·200자·금칙어·3회 신고 자동 숨김·운영자 차단", () => {
   const s = setup();
   const chat = new Chat(s.db);
   const u1 = s.user("alice");
@@ -461,6 +461,13 @@ test("실시간 채팅: 전송·1초 쿨타임·귓속말(/w)·200자·금칙어
   assert.equal(chat.recent(50, "carol").length, 2, "제3자에게는 귓속말 숨김");
   assert.equal(chat.recent(50, "alice").length, 3, "발신자에게는 귓속말 노출");
   assert.equal(chat.recent(50, "bob").length, 3, "수신자에게는 귓속말 노출");
+  // /r: 나에게 마지막으로 귓속말한 사람에게 답장
+  const mr = chat.post(u2, "/r 콜 바로 간다", 14_000);
+  assert.equal(mr.to, "alice");
+  assert.equal(mr.text, "콜 바로 간다");
+  assert.throws(() => chat.post(u3, "/r 누구?", 14_000), /답장할 귓속말이 없습니다/);
+  chat.post(u1, "/w carol 너도 와", 15_000);
+  assert.equal(chat.post(u3, "/r 오케이", 15_000).to, "alice");
 
   assert.throws(() => chat.post(u2, "a".repeat(201), 15_000), ChatError, "200자 제한");
   assert.throws(() => chat.post(u2, "시발 폭락하네", 15_000), ChatError, "금칙어 차단");
