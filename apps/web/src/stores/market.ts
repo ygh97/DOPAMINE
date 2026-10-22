@@ -3,6 +3,7 @@
 import type { AnalystView, Consensus, GameDate, MarketKind, NewsItem, Quote, Upcoming } from "@dopamine/engine";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
+import { playWhisperDing } from "../sound";
 
 /** user: 사람, bot: 🤖 봇, mm: 🏦 세력, whale: 🐋 고래 */
 export type AccountKind = "user" | "bot" | "mm" | "whale";
@@ -60,6 +61,7 @@ export const useMarket = defineStore("market", () => {
         lastWhisperId = msg.id;
         whisperAlert.value = { id: msg.id, from: msg.name, text: msg.text };
         if (socialTab.value !== "chat") unreadWhispers.value++;
+        if (Date.now() - msg.at < 15_000) playWhisperDing(); // 접속 때 받는 지난 귓속말에는 울리지 않는다
         setTimeout(() => { if (whisperAlert.value?.id === msg.id) whisperAlert.value = null; }, 8000);
       }
     }
