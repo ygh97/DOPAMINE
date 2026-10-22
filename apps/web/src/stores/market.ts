@@ -1,6 +1,6 @@
 // 시세·뉴스 상태. 접속 시 /api/snapshot 한 번, 이후 /api/stream(SSE)으로 변경분만 받는다.
 // Cloudflare Quick Tunnel(*.trycloudflare.com)처럼 무한 SSE 스트림을 버퍼링하는 프록시에서는 자동으로 /api/poll(1초 폴링)로 전환한다.
-import type { GameDate, MarketKind, NewsItem, Quote } from "@dopamine/engine";
+import type { AnalystView, Consensus, GameDate, MarketKind, NewsItem, Quote, Upcoming } from "@dopamine/engine";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 
@@ -14,6 +14,8 @@ export const kindBadge = (k?: AccountKind) => (k === "bot" ? "🤖" : k === "mm"
 export interface OrderPreset { mode: "spot" | "fut"; side: "buy" | "sell"; lev?: number; seq: number }
 /** 서버가 보내는 압축 봉: [timestamp, open, high, low, close, volume] */
 export type PackedBar = [number, number, number, number, number, number];
+/** 일정·애널리스트·보고 있는 종목의 의견 분포 (/api/research) */
+export interface Research { tick: number; upcoming: Upcoming[]; analysts: AnalystView[]; consensus: Consensus | null }
 interface TickEvent { tick: number; date: GameDate; bars: Record<string, [...PackedBar, number]> }
 
 export const useMarket = defineStore("market", () => {
@@ -77,9 +79,19 @@ export const useMarket = defineStore("market", () => {
   const guideOpen = ref(false);
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
-  const socialTab = ref<"chat" | "rank" | "whale" | "hall">("rank");
+  const socialTab = ref<"chat" | "rank" | "whale" | "hall" | "analyst">("rank");
+  const research = ref<Research | null>(null);
+  const calendarOpen = ref(false);
+  async function loadResearch() {
+    try {
+      const r = await fetch(`/api/research?sym=${encodeURIComponent(selected.value)}`);
+      if (r.ok) research.value = await r.json();
+    } catch { /* 다음에 다시 */ }
+  }
   /** 호가창에서 누른 가격 → 주문 패널이 지정가로 받는다 */
   const bookPick = ref<{ price: number; seq: number } | null>(null);
+  /** 종목을 누를 때마다 올린다. 이미 보고 있는 종목을 다시 눌러도 차트가 최신 봉으로 간다 */
+  const chartJump = ref(0);
   /** 내 주문 직후 올린다. 호가창이 다음 1초를 기다리지 않고 다시 받는다 */
   const bookEpoch = ref(0);
 
@@ -193,6 +205,9 @@ export const useMarket = defineStore("market", () => {
     }, 1000);
   }
 
+  // 일정·애널리스트는 천천히 바뀐다: 10초마다
+  if (typeof window !== "undefined") window.setInterval(() => { if (document.visibilityState === "visible") void loadResearch(); }, 10_000);
+
   function connect() {
     if (typeof location !== "undefined" && location.hostname.endsWith(".trycloudflare.com")) {
       startPolling();
@@ -201,7 +216,7 @@ export const useMarket = defineStore("market", () => {
     source?.close();
     source = new EventSource("/api/stream");
     lastMessageAt = Date.now();
-    source.onopen = () => { connected.value = true; void loadSnapshot(); }; // 재연결 시 놓친 상태 회복
+    source.onopen = () => { connected.value = true; void loadSnapshot(); void loadResearch(); }; // 재연결 시 놓친 상태 회복
     source.onerror = () => { connected.value = false; };
     // 프록시가 끊긴 연결을 닫아 주지 않는 경우가 있어, tick이 5초 넘게 없으면 직접 다시 연결
     clearInterval(watchdog);
@@ -268,7 +283,8 @@ export const useMarket = defineStore("market", () => {
     const q = quotes.value[sym];
     if (!q) return;
     tab.value = q.market;
-    selected.value = sym;
+    if (selected.value !== sym) { selected.value = sym; void loadResearch(); }
+    chartJump.value++;
   }
 
   function snipe(sym: string, mode: "spot" | "fut", side: "buy" | "sell", lev?: number) {
@@ -276,6 +292,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

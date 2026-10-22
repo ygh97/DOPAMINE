@@ -6,7 +6,7 @@
 
 | 경로 | 내용 |
 |---|---|
-| `packages/engine` | 순수 TS. 카탈로그 `catalog.ts`, 뉴스 문구 `news-templates.ts`, 시세 엔진 `market.ts`(화면에 안 나오는 기준가), 호가창 `exchange.ts`(호가 봇·즉시 체결·지정가·캔들). 테스트 `test/market.test.ts`, `test/exchange.test.ts` |
+| `packages/engine` | 순수 TS. 카탈로그 `catalog.ts`, 뉴스 문구·관련주·애널리스트 `news-templates.ts`, 시세 엔진 `market.ts`(화면에 안 나오는 기준가), 호가창 `exchange.ts`(호가 봇·즉시 체결·지정가·캔들). 테스트 `test/market.test.ts`, `test/exchange.test.ts` |
 | `apps/server` | Fastify. `index.ts` 라우트·GameLoop·SSE, `broker.ts` 계좌·주문(호가창 체결)·지정가 묶음·청산·정산·랭킹, `bots.ts` 🤖 봇·🏦 세력·🐋 고래, `auth.ts` 참가·세션(scrypt), `season.ts` 시즌·엔진 재생, `chat.ts`, `db.ts` node:sqlite. 테스트 `test/broker.test.ts` |
 | `apps/web` | Vue 3 + Vite + Pinia + KLineChart 9.8.12. 스토어 `stores/market.ts`·`account.ts`, 차트 `components/PriceChart.vue`, 호가창 `components/OrderBook.vue`, 주문 `OrderPanel.vue`, 보유·미체결 `HoldingsPanel.vue` |
 | `tools/` | `sim-bots.ts` 졸업률 보정(봇 100 + 세력), `sim-week.ts` 엔진만 시즌 시뮬레이션, `e2e-*.cjs` 실제 브라우저 종단 테스트(공통 `e2e-lib.cjs`), `deploy.ps1` 이 PC 배포, `fresh-start.ts` 계정·명예의 전당만 남기고 새로 시작, `deploy-oracle.sh` Docker 배포, `dev-test.mjs` 테스트 서버, `load-test.ts` 부하 점검(`npm run loadtest`) |
@@ -17,7 +17,7 @@
 npm install
 npm run dev:server        # http://127.0.0.1:4810  (8787은 다른 프로그램이 쓰고 있음)
 npm run dev:web           # http://127.0.0.1:5173  (/api는 4810으로 프록시)
-npm run dev:test          # 테스트 서버: 봇 100 + 세력 8 + 고래, http://127.0.0.1:5183 (서버 4820, data/test.db)
+npm run dev:test          # 테스트 서버: 봇 100 + 세력 13 + 고래, http://127.0.0.1:5183 (서버 4820, data/test.db)
 npm test                  # 엔진 23개 + 서버 32개 테스트 (node --test, 약 10초)
 npm run typecheck         # engine·server는 tsc, web은 vue-tsc
 npm run check             # 전체 확인: 테스트 + 타입체크 + 1일 시뮬레이션 + E2E 전부 (약 1분 40초). E2E는 4910·5273 포트라 dev 서버를 켜 둔 채 돌려도 된다

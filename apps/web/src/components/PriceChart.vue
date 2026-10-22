@@ -315,7 +315,8 @@ watch(() => m.lastBars, bars => {
   latestBar.value = aggBar;
   chart.updateData(aggBar);
 });
-watch(() => m.selected, sym => void show(sym));
+watch(() => m.selected, sym => void show(sym)); // 새 종목은 show() → redraw()가 최신 봉으로 옮긴다
+watch(() => m.chartJump, () => { if (m.selected === shown) resetToLatest(); }); // 보고 있던 종목을 다시 눌러도 최신 봉으로
 watch(() => m.barsEpoch[m.selected], () => void show(m.selected));
 watch(() => m.seasonEpoch, () => { drawings?.clearAll(); shown = ""; void show(m.selected); });
 watch(period, redraw);

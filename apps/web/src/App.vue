@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
+import CalendarDialog from "./components/CalendarDialog.vue";
 import FloatingNews from "./components/FloatingNews.vue";
 import HoldingsPanel from "./components/HoldingsPanel.vue";
 import NewsDialog from "./components/NewsDialog.vue";
@@ -141,6 +142,7 @@ onMounted(() => {
   <NewsLine />
   <FloatingNews />
   <NewsDialog />
+  <CalendarDialog />
   <ToastMessage />
   <main class="layout" :data-mview="mView">
     <Watchlist class="sec-watch" />

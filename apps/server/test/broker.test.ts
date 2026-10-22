@@ -541,13 +541,13 @@ test("수익인증 공유 문구는 서버가 실제 계좌로 만든다", async
 test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭킹 밖 자기 탭, 명예의 전당은 사람 전설만", () => {
   const s = setup();
   const human = s.user("사람1");
-  const bots = new BotRunner(s.db, () => s.broker, () => s.market, { bots: 12, marketMakers: true, seed: 3 });
-  assert.equal(bots.size, 12 + 9);
+  const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 12, marketMakers: true, seed: 3 });
+  assert.equal(bots.size, 12 + 14);
   for (let i = 0; i < 1500; i++) { const r = s.tick(); bots.tick(r.news); }
   const rows = s.broker.ranking(Infinity), mm = s.broker.mmRanking(), whales = s.broker.whaleRanking();
   assert.equal(rows.length, 13, "사람 1 + 봇 12");
   assert.ok(rows.every(r => r.kind === "user" || r.kind === "bot"));
-  assert.ok(mm.length === 8 && mm.every(r => r.kind === "mm"), "세력 8");
+  assert.ok(mm.length === 13 && mm.every(r => r.kind === "mm"), "세력 13");
   assert.ok(whales.length === 1 && whales[0].kind === "whale", "🐋 고래는 별도");
   assert.equal(s.broker.players, 13);
   const fills = s.db.prepare("SELECT COUNT(*) AS c FROM fills f JOIN users u ON u.id = f.user_id WHERE u.kind != 'user'").get() as { c: number };
@@ -568,7 +568,7 @@ test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭
 test("🤖 봇 교대: 활동 중인 사람만큼 봇이 쉬고, 사람이 빠지면 다시 깨어난다", () => {
   const s = setup();
   let humans = 0;
-  const bots = new BotRunner(s.db, () => s.broker, () => s.market, { bots: 10, marketMakers: false, seed: 5, activeHumans: () => humans });
+  const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 10, marketMakers: false, seed: 5, activeHumans: () => humans });
   for (let i = 0; i < 200; i++) { const r = s.tick(); bots.tick(r.news); }
   assert.equal(s.broker.players, 10);
   humans = 4;
@@ -586,7 +586,7 @@ test("이미 불러온 계좌의 종류가 바뀌어도 랭킹에 맞게 나온�
   s.broker.loadAll();
   const id = (s.db.prepare("SELECT id FROM users WHERE name = '고래'").get() as { id: number }).id;
   s.broker.account(id); // 서버가 켜질 때처럼 세력으로 먼저 올라가 있다
-  new BotRunner(s.db, () => s.broker, () => s.market, { bots: 0, marketMakers: true, seed: 1 });
+  new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 0, marketMakers: true, seed: 1 });
   assert.ok(s.broker.whaleRanking().some(r => r.name === "고래"), "고래 탭");
   assert.ok(!s.broker.mmRanking().some(r => r.name === "고래"), "세력 현황에는 없음");
 });

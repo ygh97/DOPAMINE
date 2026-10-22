@@ -6,6 +6,8 @@ import { useMarket } from "../stores/market";
 const m = useMarket();
 const q = computed(() => m.current);
 const diff = computed(() => (q.value ? change(q.value.price, q.value.prev) : 0));
+// 애널리스트 의견 분포 (최근 한 분기 안, 애널리스트마다 마지막 리포트)
+const cons = computed(() => { const c = m.research?.consensus; return c && c.buy + c.hold + c.sell ? c : null; });
 const symNewsCount = computed(() => (q.value ? m.news.filter(n => n.symbols.includes(q.value!.sym)).length : 0));
 </script>
 
@@ -17,6 +19,10 @@ const symNewsCount = computed(() => (q.value ? m.news.filter(n => n.symbols.incl
       <b :class="diff >= 0 ? 'up' : 'down'">{{ diff >= 0 ? "▲" : "▼" }} {{ money(Math.abs(q.price - q.prev)) }} ({{ pct(diff) }})</b>
       <button id="symNewsBtn" type="button" class="icon-btn sym-news-btn" @click="m.newsDialog = { mode: 'list', sym: q.sym }">
         📰 {{ q.sym }} 뉴스 <span class="tab-cnt">{{ symNewsCount }}</span>
+      </button>
+      <button v-if="cons" id="consensusBtn" type="button" class="icon-btn consensus-btn" title="애널리스트 의견 · 눌러서 적중률 보기" @click="m.socialTab = 'analyst'">
+        🧑‍💼 <b class="up">매수 {{ cons.buy }}</b> · 중립 {{ cons.hold }} · <b class="down">매도 {{ cons.sell }}</b>
+        <span v-if="cons.target" class="muted"> · 목표 {{ money(cons.target) }}</span>
       </button>
       <div class="stats">
         <div class="kv"><span>주간 기준가</span><b>{{ money(q.prev) }}</b></div>

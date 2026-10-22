@@ -61,7 +61,19 @@ export interface NewsItem {
   sector?: string;
   event?: NewsEvent;
   delisted?: boolean;
+  /** 애널리스트 리포트 */
+  report?: { analyst: string; firm: string; opinion: Opinion; target: number };
 }
+
+export type Opinion = "매수" | "중립" | "매도";
+/** 리포트 하나. hit: 13분 뒤 채점 결과 (아직이면 null) */
+export interface AnalystReport { id: string; sym: string; opinion: Opinion; target: number; price: number; tick: number; hit: boolean | null }
+export interface AnalystStat { hits: number; total: number; recent: AnalystReport[] }
+/** 화면에 보내는 애널리스트 (성향은 숨김) */
+export interface AnalystView extends AnalystStat { id: string; name: string; firm: string }
+export interface Consensus { buy: number; hold: number; sell: number; target: number | null }
+/** 예고된 일정. at = 발표 tick */
+export interface Upcoming { at: number; title: string; symbols: string[] }
 
 /** 클라이언트에 보여줄 시세. 엔진 내부 상태(앵커, 국면, 대기 충격)는 없다. */
 export interface Quote {

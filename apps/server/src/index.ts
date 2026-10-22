@@ -311,6 +311,13 @@ app.post<{ Body: { id?: number; all?: boolean } }>("/api/cancel", {
   return { count, me: broker.me(id) };
 });
 
+// 일정(예고된 발표)·애널리스트 적중률·보고 있는 종목의 의견 분포. 화면은 10초마다
+app.get<{ Querystring: { sym?: string } }>("/api/research", async req => {
+  const sym = req.query.sym ?? "";
+  const analysts = market.analysts().map(x => ({ ...x, recent: x.recent.map(r => ({ ...r, target: r7(r.target), price: r7(r.price) })) }));
+  return { tick: market.tick, upcoming: market.upcoming().slice(0, 40), analysts, consensus: market.quote(sym) ? market.consensus(sym) : null };
+});
+
 // 호가창: 보고 있는 종목만 1초마다 받는다. 매도·매수 각 10단계 + 최근 체결
 app.get<{ Querystring: { sym?: string } }>("/api/book", async (req, reply) => {
   const b = exchange.book(req.query.sym ?? "", 10);

@@ -17,6 +17,9 @@ const loadHall = async () => {
   if (hallSeason.value == null || !d.seasons.includes(hallSeason.value)) hallSeason.value = d.seasons.at(-1) ?? null;
 };
 
+// 애널리스트: 적중률 순 (채점된 리포트가 3건 미만이면 아래로)
+const analystRows = computed(() => [...(m.research?.analysts ?? [])].sort((x, y) =>
+  Number(y.total >= 3) - Number(x.total >= 3) || y.hits / Math.max(1, y.total) - x.hits / Math.max(1, x.total)));
 const text = ref("");
 const whisperTo = ref<string | null>(null);
 const chatInputEl = ref<HTMLInputElement | null>(null);
@@ -63,6 +66,7 @@ const lastMsgId = computed(() => visibleChat.value[visibleChat.value.length - 1]
 
 watch(() => m.socialTab, t => {
   if (t === "hall") void loadHall();
+  if (t === "analyst") void m.loadResearch();
   if (t === "chat") {
     m.unreadWhispers = 0;
     scrollToBottom();
@@ -203,6 +207,7 @@ async function toggleBan(name: string, banned: boolean) {
         <button role="tab" data-c="rank" :aria-selected="m.socialTab === 'rank'" @click="m.socialTab = 'rank'">랭킹</button>
         <button v-if="m.whaleRanking.length" role="tab" data-c="whale" :aria-selected="m.socialTab === 'whale'" @click="m.socialTab = 'whale'">🐋 고래</button>
         <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">명예의 전당</button>
+        <button role="tab" data-c="analyst" :aria-selected="m.socialTab === 'analyst'" @click="m.socialTab = 'analyst'">애널리스트</button>
         <button role="tab" data-c="chat" :aria-selected="m.socialTab === 'chat'" @click="m.socialTab = 'chat'; chatFolded = false">
           채팅
           <span v-if="m.unreadWhispers > 0" class="whisper-tab-badge">🔒{{ m.unreadWhispers }}</span>
@@ -256,6 +261,25 @@ async function toggleBan(name: string, banned: boolean) {
           </tr>
         </tbody>
       </table>
+    </div>
+    <div v-else-if="m.socialTab === 'analyst'" class="table-scroll">
+      <div class="rank-hint muted">💡 누구 말이 맞는지는 적중률로 판단하세요. 리포트는 13분 뒤 채점됩니다 (매수: 올랐나 · 매도: 내렸나 · 중립: ±4% 안).</div>
+      <table v-if="analystRows.length" id="analysts" class="grid">
+        <tbody>
+          <tr v-for="(x, i) in analystRows" :key="x.id">
+            <td>{{ i + 1 }}</td>
+            <td><b>{{ x.name }}</b><br><small class="muted">{{ x.firm }}</small></td>
+            <td><b>{{ x.total ? `${Math.round((x.hits / x.total) * 100)}%` : "—" }}</b><br><small class="muted">{{ x.hits }}/{{ x.total }}</small></td>
+            <td class="analyst-recent">
+              <button v-for="r in x.recent.slice(0, 3)" :key="r.id" type="button" class="sym-tag news-sym-tag" :title="`목표가 ${money(r.target)} · 당시 ${money(r.price)}`" @click="m.select(r.sym)">
+                {{ r.sym }} <b :class="r.opinion === '매수' ? 'up' : r.opinion === '매도' ? 'down' : 'muted'">{{ r.opinion }}</b>
+                {{ r.hit == null ? "⏳" : r.hit ? "✅" : "❌" }}
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="empty">리포트를 불러오는 중입니다.</p>
     </div>
     <div v-else-if="m.socialTab === 'hall'" class="hall-wrap">
       <div class="table-scroll">

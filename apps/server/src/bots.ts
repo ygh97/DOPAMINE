@@ -6,7 +6,7 @@
 import { ASSETS, LEVERAGE, type NewsItem, type Quote } from "@dopamine/engine";
 
 /** 봇이 보는 시장: 호가창(Exchange)의 체결가·유동성 */
-export interface MarketView { readonly tick: number; quotes(): Quote[]; quote(sym: string): Quote | null; liquidity(sym: string): number | null }
+export interface MarketView { readonly tick: number; quotes(): Quote[]; quote(sym: string): Quote | null; liquidity(sym: string): number | null; best(sym: string): { bid: number | null; ask: number | null } }
 type Market = MarketView;
 import type { AccountKind, Broker } from "./broker.ts";
 import type { Db } from "./db.ts";
@@ -197,7 +197,7 @@ class Bot extends Agent {
       }
       case "ventureBettor": {
         for (const n of c.news) {
-          if (!n.event) continue;
+          if (!n.event || n.kind !== "신흥주") continue; // 신흥주 검증만 (지표·루머·행사 예고도 event가 있다)
           const sym = n.symbols[0];
           if (n.event.index === 0) this.watch.push({ sym, at: c.tick + this.p.delay, price: 0, kind: "venture" });
           if (n.event.index === 2 && this.meta.has(sym)) this.meta.get(sym)!.until = c.tick + Math.round(uni(r, 0, 3));
@@ -243,11 +243,16 @@ class Bot extends Agent {
 }
 
 // ---------- 🏦 세력 ----------
-export type MmStyle = "liquidity" | "liqHunter" | "crowdFade" | "momentum" | "meanRevert" | "overvalued" | "undervalued" | "pairArb" | "whale";
+export type MmStyle = "liquidity" | "liqHunter" | "crowdFade" | "momentum" | "meanRevert" | "overvalued" | "undervalued" | "pairArb" | "whale"
+  | "rotation" | "quoter" | "trend" | "coinDesk" | "ventureDesk";
 export const MM_NAMES: Record<MmStyle, string> = {
   liquidity: "유동성세력", liqHunter: "청산사냥꾼", crowdFade: "역이용세력", momentum: "모멘텀세력",
   meanRevert: "역추세세력", overvalued: "공매도세력", undervalued: "가치투자세력", pairArb: "차익거래단", whale: "고래",
+  // 거래량 세력: 작은 주문을 자주 내서 체결·호가·캔들 거래량을 채운다. 가격 방향은 거의 안 건드린다
+  rotation: "회전매매단", quoter: "호가조성단", trend: "추세매매단", coinDesk: "코인데스크", ventureDesk: "신흥주데스크",
 };
+/** 회전매매 세력이 도는 시장 */
+const DESK: Partial<Record<MmStyle, string[]>> = { rotation: ["stock"], coinDesk: ["coin"], ventureDesk: ["venture"] };
 /** 유동성 세력이 지정가를 거는 거리 (현재가 대비) */
 const LIQ_GAP: Record<string, number> = { stock: 0.004, coin: 0.008, venture: 0.03 };
 /** 세력 세기 (테스트 서버에서 조절). 1 = 기본 */
@@ -304,7 +309,7 @@ class MarketMaker extends Agent {
       }
       case "crowdFade": { // 신흥주 검증에 사람이 몰리면 추가 확인 단계에서 판다
         for (const n of c.news) {
-          if (!n.event) continue;
+          if (!n.event || n.kind !== "신흥주") continue;
           const sym = n.symbols[0];
           if (n.event.index === 0) this.ventures.add(sym);
           if (n.event.index === 1 && this.ventures.has(sym)) {
@@ -361,6 +366,39 @@ class MarketMaker extends Agent {
           const open = this.meta.has(x) || this.meta.has(y);
           if (!open && Math.abs(dev) > 0.02) { this.open(c, dev > 0 ? x : y, "short", 2, 4, 1800); this.open(c, dev > 0 ? y : x, "long", 2, 4, 1800); }
           else if (open && Math.abs(dev) < 0.005) { this.close(c, x); this.close(c, y); }
+        }
+        this.expire(c);
+        break;
+      }
+      case "rotation": case "coinDesk": case "ventureDesk": { // 회전매매: 매 tick 한 종목을 조금 사고, 10~60틱 뒤 판다 (최대 6종목)
+        this.expire(c);
+        if (this.meta.size < 6) { const sym = pick(r, liveSyms(c, DESK[this.style])); if (!this.meta.has(sym)) this.buy(c, sym, 1.5 * this.k, Math.round(uni(r, 10, 60))); }
+        break;
+      }
+      case "quoter": { // 호가 조성: 10틱마다 8종목의 최우선 매수·매도 호가에 선물 지정가를 건다. 체결된 포지션은 60틱 안에 정리
+        for (const f of c.broker.account(this.userId).futures.values()) {
+          if (!this.posAt.has(f.id)) this.posAt.set(f.id, c.tick);
+          if (!f.closing && c.tick - this.posAt.get(f.id)! > 60) { try { c.broker.closeFuture(this.userId, f.id, 100).then(() => this.posAt.delete(f.id), () => {}); } catch { /* 다음 tick */ } }
+        }
+        if (c.tick % 10) break;
+        this.cancelAll(c);
+        const syms = liveSyms(c, ["stock", "coin"]);
+        for (let i = 0; i < 8; i++) {
+          const sym = pick(r, syms), b = c.market.best(sym);
+          if (b.bid == null || b.ask == null) continue;
+          this.limit(c, sym, "fut", "buy", b.bid, this.k, this.lev(c, sym, 2));
+          this.limit(c, sym, "fut", "sell", b.ask, this.k, this.lev(c, sym, 2));
+        }
+        break;
+      }
+      case "trend": { // 추세 매매: 5틱마다 4종목을 보고 30틱 동안 0.3% 넘게 움직인 쪽으로 작게 탄다 (30~90틱)
+        if (c.tick % 5 === 0) for (let i = 0; i < 4; i++) {
+          const sym = pick(r, liveSyms(c, ["stock", "coin"]));
+          if (this.meta.has(sym)) continue;
+          const q = c.market.quote(sym)!, then = c.hist.ago(sym, 30);
+          if (!then) continue;
+          const ret = q.price / then - 1;
+          if (Math.abs(ret) > 0.003) this.open(c, sym, ret > 0 ? "long" : "short", 2, 2 * this.k, Math.round(uni(r, 30, 90)));
         }
         this.expire(c);
         break;

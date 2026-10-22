@@ -33,7 +33,7 @@ test("밖으로 나가는 시세·뉴스에 숨은 상태가 없다", () => {
   run(m, 2000);
   const quoteKeys = ["cap", "market", "name", "parValue", "per", "prev", "price", "sector", "splitFactor", "stage", "sym"];
   for (const q of m.quotes()) assert.deepEqual(Object.keys(q).sort(), quoteKeys);
-  const allowed = new Set(["id", "tick", "at", "date", "kind", "headline", "body", "symbols", "priceAt", "sector", "event", "delisted"]);
+  const allowed = new Set(["id", "tick", "at", "date", "kind", "headline", "body", "symbols", "priceAt", "sector", "event", "delisted", "report"]);
   for (const n of m.news) for (const k of Object.keys(n)) assert.ok(allowed.has(k), `뉴스 필드 ${k}`);
 });
 
@@ -88,7 +88,7 @@ test("시총 미달이면 관리종목을 거쳐서만 폐지되고, 새 신흥�
 test("관리종목 중 회생 이벤트가 나오고, 회복하면 해제된다", () => {
   const m = make(8, { delistCap: 2e8, watchTicks: 400, rescueOdds: [1, 0] }); // 회생 = 항상 인수 제안
   let acquire = 0, release = 0;
-  for (let i = 0; i < 6000; i++) for (const n of m.step().news) {
+  for (let i = 0; i < 12000; i++) for (const n of m.step().news) {
     if (n.headline.includes("인수 제안")) acquire++;
     if (n.headline.includes("관리종목 해제")) release++;
   }
