@@ -554,13 +554,13 @@ test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭
   const s = setup();
   const human = s.user("사람1");
   const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 12, marketMakers: true, seed: 3 });
-  assert.equal(bots.size, 12 + 14);
+  assert.equal(bots.size, 12 + 20 + 10);
   for (let i = 0; i < 1500; i++) { const r = s.tick(); bots.tick(r.news); }
   const rows = s.broker.ranking(Infinity), mm = s.broker.mmRanking(), whales = s.broker.whaleRanking();
   assert.equal(rows.length, 13, "사람 1 + 봇 12");
   assert.ok(rows.every(r => r.kind === "user" || r.kind === "bot"));
-  assert.ok(mm.length === 13 && mm.every(r => r.kind === "mm"), "세력 13");
-  assert.ok(whales.length === 1 && whales[0].kind === "whale", "🐋 고래는 별도");
+  assert.ok(mm.length === 20 && mm.every(r => r.kind === "mm"), "세력 20");
+  assert.ok(whales.length === 10 && whales.every(r => r.kind === "whale"), "🐋 고래 10마리는 별도");
   assert.equal(s.broker.players, 13);
   const fills = s.db.prepare("SELECT COUNT(*) AS c FROM fills f JOIN users u ON u.id = f.user_id WHERE u.kind != 'user'").get() as { c: number };
   assert.ok(fills.c > 20, `봇·세력이 실제로 체결 (${fills.c}건)`);
