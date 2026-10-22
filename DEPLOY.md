@@ -34,8 +34,7 @@
 ### 한 번에: `tools\deploy.ps1`
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File tools\deploy.ps1            # 업데이트 배포 (시즌 유지)
-powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -NewSeason # 업데이트 + 새 시즌 (엔진·호가창 규칙이 바뀐 배포)
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1            # 배포 (새 시즌이 필요한지는 알아서 판단)
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel    # 터널이 꺼져 있으면 켜고 새 주소 출력
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만 끄기 (끄기 전 스냅샷·백업)
 ```
@@ -47,12 +46,13 @@ powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만
 4. `npm run build` (화면을 `apps/web/dist`로 빌드. 서버가 이 폴더를 같이 서빙한다)
 5. 서버를 창 없이 켠다 (이 창을 닫아도 안 꺼진다). 로그는 `data\server.log`. 끌 때는 `-Stop`
 6. `/api/health`가 응답할 때까지 기다린다 (재생 때문에 몇 초 걸릴 수 있다)
-7. `-NewSeason`이면 지금 시즌을 끝내고 새 시즌을 연다
+7. 엔진 코드(`packages/engine/src`)가 지난 배포와 다르면 지금 시즌을 끝내고 새 시즌을 연다. 지난 배포의 지문은 `data\engine.hash`
 8. 터널 상태와 주소를 알려 준다. 터널은 서버만 다시 켜면 그대로라 주소도 안 바뀐다. `-Tunnel`로 켠 터널도 창 없이 돌고, 주소·로그는 `data\tunnel.log`. 터널만 끄려면 `Stop-Process -Name cloudflared`
 
-### 새 시즌이 필요한 배포
-- 엔진(`packages/engine`) 수치나 호가창 규칙을 바꾼 배포는 `-NewSeason`을 붙인다. 시즌 중간에 규칙이 바뀌면 재시작 재생이 어긋난다.
-- 화면·채팅·문구만 바꾼 배포는 붙이지 않는다. 시즌이 그대로 이어진다.
+### 새 시즌은 언제 열리나
+- 엔진(`packages/engine/src`: 시세 엔진·호가창·종목·뉴스 문구)이 바뀐 배포면 스크립트가 알아서 새 시즌을 연다. 시즌 중간에 규칙이 바뀌면 재시작 재생이 어긋나기 때문이다.
+- 화면·서버·채팅만 바뀐 배포는 시즌이 그대로 이어진다.
+- 엔진이 같아도 시즌을 새로 시작하고 싶으면 `-NewSeason`을 붙인다.
 - 새 시즌을 열면: 백업 → 100배 전설만 명예의 전당 기록 → 모든 계좌 $100,000로 새로 시작. 접속 중인 화면은 알아서 새 시즌으로 바뀐다.
 
 ### 직접 하는 방법 (스크립트 없이)
@@ -131,7 +131,7 @@ curl -X POST -H "x-admin-key: 키" http://127.0.0.1:4810/api/admin/new-season
 | 서버가 안 켜짐 | `data\server.log` 끝부분 (`Get-Content data\server.log -Tail 30 -Encoding UTF8`). 포트를 다른 프로그램이 쓰면 `Get-NetTCPConnection -LocalPort 4810`으로 누가 쓰는지 본다 |
 | 시세가 멈춤 | `/api/health`의 `tick`이 1초마다 오르는지 본다. 안 오르면 서버를 다시 켠다 |
 | `npm install`·빌드 실패 | Node 버전(24 이상) 확인. 이 PC는 한글 사용자 경로라 Node의 `fs.rmSync`가 죽는 문제가 있다: `node_modules`를 지울 때는 탐색기나 `Remove-Item -Recurse -Force`를 쓴다 |
-| 배포 뒤 가격이 이상함 | 엔진을 바꾸고 `-NewSeason` 없이 배포했을 수 있다 → `deploy.ps1 -SkipPull -NewSeason` |
+| 배포 뒤 가격이 이상함 | 스크립트 없이 엔진을 바꿔 배포했을 수 있다 → `deploy.ps1 -SkipPull -NewSeason` |
 
 ---
 

@@ -44,7 +44,7 @@ npm run e2e:m8            # 호가창 10단계·지정가 걸기·취소·전체
 - 엔진·호가창 상태를 바꾸는 필드를 추가하면 `snapshot()`/`restore()`에도 넣는다. 예전 스냅샷에서 기본값으로 이어갈 수 있으면 `restore()`에서 채우고, 안 되면 `SNAPSHOT_VERSION`을 올린다. 예약 작업은 함수가 아니라 `Task` 데이터로 둔다 (스냅샷에 담기게).
 - 주문 경로는 하나다: 사람·봇·세력 모두 `Broker` → `Exchange`. 체결 수량은 주식·신흥주 1주, 코인 0.000001 단위(`qtyUnit`). 호가 봇 물량도 같은 단위라 체결이 늘 단위의 배수다.
 - GameLoop tick 순서: `broker.endTick()` → `exchange.step()` → `refundCancelled` → `settleTrades`(가격이 지나간 지정가를 호가 봇이 받은 체결) → `applyActions` → `runTriggers` → 봇. `tools/sim-bots.ts`와 서버 테스트의 `tick()`도 같은 순서로 맞춘다.
-- DB는 기본 `data/dopamine.db` (git 제외). 테스트는 `DB_FILE`로 임시 파일을 쓴다. 엔진·호가창 규칙을 바꾼 배포는 새 시즌으로 시작한다 (`tools/deploy.ps1 -NewSeason` 또는 `POST /api/admin/new-season`). 시즌 중간에 바꾸면 재생이 어긋난다.
+- DB는 기본 `data/dopamine.db` (git 제외). 테스트는 `DB_FILE`로 임시 파일을 쓴다. 엔진·호가창 규칙을 바꾼 배포는 새 시즌으로 시작한다 (`tools/deploy.ps1`이 엔진 코드 지문을 비교해 알아서 연다. 직접은 `POST /api/admin/new-season`). 시즌 중간에 바꾸면 재생이 어긋난다.
 - 같은 seed면 같은 경로가 나와야 한다. 엔진·호가창에서 `Math.random()`·`Date.now()`를 직접 쓰지 않는다 (now는 입력으로 받는다). 봇은 계좌별 seed 난수만 쓴다.
 - 뉴스 문구: 실존 인물 이름 금지, 실제 회사에 위법 혐의 금지, 원본("단타 아레나") 문구·증권사 이름 재사용 금지.
 - UI 문구와 주석은 한국어. 상승 빨강 / 하락 파랑 (호가창도 매수 빨강 / 매도 파랑).
