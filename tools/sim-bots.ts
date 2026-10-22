@@ -59,7 +59,7 @@ function run(seed: number) {
     bots.tick(r.news);
     for (const a of r.actions) if (a.type === "graduate") grads++;
     for (const t of broker.drainBroadcasts()) if (t.startsWith("[강제청산]")) liqs++;
-    if (i % 5 === 0) { // 서버처럼 5 tick마다 랭킹을 계산해야 졸업·전설 시점이 기록된다. 봇은 $1만 아래면 기록이 지워진 새 봇으로 바뀌니 한 번이라도 달성한 봇(이름별)을 센다
+    if (i % 5 === 0) { // 서버처럼 5 tick마다 랭킹을 계산해야 졸업·전설 시점이 기록된다. 봇은 $3만 아래면 기록이 지워진 새 봇으로 바뀌니 한 번이라도 달성한 봇(이름별)을 센다
       broker.ranking(1);
       for (const id of botIds) { const acc = broker.account(id); if (acc.gradTick != null) everGrad.add(`${id}:${acc.name}`); if (acc.clearedTick != null) everLegend.add(`${id}:${acc.name}`); }
     }

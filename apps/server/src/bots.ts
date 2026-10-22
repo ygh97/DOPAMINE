@@ -114,8 +114,8 @@ abstract class Agent {
       for (const sym of acc.positions.keys()) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
       return;
     }
-    // 파산 기준: 🤖 봇 $1만(새 봇으로 교체), 🐋 고래 $100만(같은 이름으로 다시, 성향 새로), 🏦 세력 $100만(다시 시작)
-    const eq = c.broker.equity(acc), floor = this.kind === "bot" ? 10_000 : 1_000_000;
+    // 파산 기준: 🤖 봇 $3만(새 봇으로 교체), 🐋 고래 $100만(같은 이름으로 다시, 성향 새로), 🏦 세력 $100만(다시 시작)
+    const eq = c.broker.equity(acc), floor = this.kind === "bot" ? 30_000 : 1_000_000;
     if (eq < floor && c.tick > this.resetCooldown) { this.bust(c); this.resetCooldown = c.tick + 60; this.lastOrder = c.tick; return; }
     if (this.lastOrder < 0) this.lastOrder = c.tick;
     this.act(c);
@@ -201,7 +201,7 @@ class Bot extends Agent {
     this.nextSwitch = tick + Math.round(uni(r, ...BOT_PERIOD));
   }
   get label() { return this.style; }
-  /** $1만 아래: 새 봇으로 교체 (번호·이름·성향을 새로, $100,000) */
+  /** $3만 아래: 새 봇으로 교체 (번호·이름·성향을 새로, $100,000) */
   protected bust(c: Ctx) { this.onBust(this, c); }
   /** 1분 동안 아무것도 없이 쉬었다: 지금 성향대로 작게 한 번 */
   protected idle(c: Ctx) {
@@ -656,7 +656,7 @@ export class BotRunner {
     return null;
   }
   /**
-   * 봇이 $1만 아래로 떨어졌다: 새 봇으로 바꾼다. 번호는 지금 비어 있는 번호(직전에 빠진 번호, 처음엔 N+1)를 쓰고,
+   * 봇이 $3만 아래로 떨어졌다: 새 봇으로 바꾼다. 번호는 지금 비어 있는 번호(직전에 빠진 번호, 처음엔 N+1)를 쓰고,
    * 이 봇의 번호가 새로 비게 된다. 계정은 이름만 바꿔 다시 쓰고 $100,000, 졸업·전설 기록도 지운다
    */
   private replace(bot: Bot, c: Ctx) {
