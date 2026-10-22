@@ -270,8 +270,10 @@ export class Broker {
     return `[공유] 총자산 ${money(equity)} (${pct((equity / startCash(acc.kind) - 1) * 100)})${part}`;
   }
 
-  reset(userId: number) {
+  /** fresh: 🤖 봇이 새 봇으로 바뀔 때. 졸업·전설 기록도 지운다 (사람의 다시 시작은 기록을 남긴다) */
+  reset(userId: number, fresh = false) {
     const acc = this.account(userId);
+    if (fresh) { acc.gradTick = null; acc.clearedTick = null; this.stmts.updGrad.run(null, userId, this.season.id); this.stmts.updCleared.run(null, userId, this.season.id); }
     for (const it of [...this.intents.values()]) if (it.userId === userId) { this.x.cancel(userId, it.id); this.release(acc, it); }
     tx(this.db, () => {
       this.stmts.delPosAll.run(userId, this.season.id);

@@ -639,6 +639,29 @@ test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭
   assert.deepEqual(hall.map(h => h.name), ["사람1"], "명예의 전당은 사람 전설만");
 });
 
+test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다음엔 직전에 빠진 번호)를 쓰고 $100,000. 🐋 고래는 $100만 아래면 같은 이름으로 $200만", () => {
+  const s = setup();
+  const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 3, marketMakers: true, seed: 4 });
+  const num = (n: string) => Number(/봇(\d+)$/.exec(n)![1]);
+  const botIds = () => bots.describe().filter(d => d.kind === "bot").map(d => d.userId);
+  const nameOf = (id: number) => (s.db.prepare("SELECT name FROM users WHERE id = ?").get(id) as { name: string }).name;
+  bots.tick(s.tick().news);
+  assert.deepEqual(botIds().map(id => num(nameOf(id))).sort(), [1, 2, 3]);
+  const [b1, b2] = botIds().filter(id => [1, 2].includes(num(nameOf(id)))).sort((x, y) => num(nameOf(x)) - num(nameOf(y)));
+  s.broker.reset(b1); s.broker.account(b1).cash = 5_000;
+  bots.tick(s.tick().news);
+  assert.equal(num(nameOf(b1)), 4, "처음 빈 번호 N+1");
+  assert.ok(Math.abs(s.broker.equity(s.broker.account(b1)) - START_CASH) < 1e-6, "$100,000로 새로");
+  s.broker.reset(b2); s.broker.account(b2).cash = 5_000;
+  bots.tick(s.tick().news);
+  assert.equal(num(nameOf(b2)), 1, "다음은 직전에 빠진 번호");
+  const whale = bots.describe().find(d => d.kind === "whale")!.userId, wname = nameOf(whale);
+  s.broker.reset(whale); s.broker.account(whale).cash = 900_000;
+  bots.tick(s.tick().news);
+  assert.equal(nameOf(whale), wname, "고래 이름 그대로");
+  assert.ok(Math.abs(s.broker.equity(s.broker.account(whale)) - 2_000_000) < 1, "고래는 $200만으로");
+});
+
 test("🤖 봇 교대: 활동 중인 사람만큼 봇이 쉬고, 사람이 빠지면 다시 깨어난다", () => {
   const s = setup();
   let humans = 0;

@@ -46,6 +46,7 @@ function run(seed: number) {
   const botIds = bots.describe().filter(d => d.kind === "bot").map(d => d.userId);
   const peak = new Map<number, number>(); // 봇별 시즌 중 최고 배수 (졸업 목표를 바꿔 볼 때 쓴다)
   const fairPER = new Map(ASSETS.filter(a => a.fairPER).map(a => [a.sym, a.fairPER!]));
+  const everGrad = new Set<string>(), everLegend = new Set<string>();
   let bubbleUp = 0, bubbleDown = 0, offRef = 0, tickSum = 0, tickMax = 0;
   for (let i = 0; i < SEASON_MS / 1000; i++) {
     const t1 = performance.now();
@@ -58,7 +59,10 @@ function run(seed: number) {
     bots.tick(r.news);
     for (const a of r.actions) if (a.type === "graduate") grads++;
     for (const t of broker.drainBroadcasts()) if (t.startsWith("[강제청산]")) liqs++;
-    if (i % 5 === 0) broker.ranking(1); // 서버처럼 5 tick마다 랭킹을 계산해야 100배 졸업 시점이 기록된다
+    if (i % 5 === 0) { // 서버처럼 5 tick마다 랭킹을 계산해야 졸업·전설 시점이 기록된다. 봇은 $1만 아래면 기록이 지워진 새 봇으로 바뀌니 한 번이라도 달성한 봇(이름별)을 센다
+      broker.ranking(1);
+      for (const id of botIds) { const acc = broker.account(id); if (acc.gradTick != null) everGrad.add(`${id}:${acc.name}`); if (acc.clearedTick != null) everLegend.add(`${id}:${acc.name}`); }
+    }
     if (i % 10 === 0) for (const id of botIds) peak.set(id, Math.max(peak.get(id) ?? 0, broker.equity(broker.account(id)) / 100_000));
     const dt = performance.now() - t1; tickSum += dt; tickMax = Math.max(tickMax, dt);
     if (i % 60 === 0) for (const q of exchange.quotes()) {
@@ -73,7 +77,7 @@ function run(seed: number) {
   broker.endTick();
   const who = new Map(bots.describe().map(d => [broker.account(d.userId).name, d]));
   const rows = broker.ranking(Infinity), mm = [...broker.mmRanking(), ...broker.whaleRanking()];
-  const cleared = rows.filter(r => r.clearedTick != null), graduated = rows.filter(r => r.gradTick != null);
+  const graduated = { length: everGrad.size }, cleared = { length: everLegend.size }; // 봇 자리 100개 기준 (교체된 봇 포함)
   const byStyle = new Map<string, { n: number; cleared: number; best: number }>();
   for (const r of rows) {
     const s = who.get(r.name)?.label ?? "?", e = byStyle.get(s) ?? { n: 0, cleared: 0, best: 0 };

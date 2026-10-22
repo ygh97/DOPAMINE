@@ -50,12 +50,28 @@ interface Meta { opened: number; entry: number; peak: number; trough: number; un
 
 /** 봇·세력 공통: 주문 도우미와 포지션 메모. 주문 실패(속도 제한·잔고 부족 등)는 조용히 넘긴다 */
 abstract class Agent {
-  readonly userId: number; readonly name: string; readonly kind: AccountKind;
+  readonly userId: number; name: string; readonly kind: AccountKind;
   protected rand: Rand;
   protected meta = new Map<string, Meta>(); // 종목당 포지션 하나
   private resetCooldown = 0;
-  constructor(userId: number, name: string, kind: AccountKind, seed: number) {
-    this.userId = userId; this.name = name; this.kind = kind; this.rand = mulberry32(seed * 7919 + userId);
+  /** 마지막으로 주문을 낸 tick (1분 활동 감시) */
+  protected lastOrder = -1;
+  /** startTick: 서버를 켤 때의 tick. 난수 시작값에 섞어 재시작마다 같은 판단을 되풀이하지 않게 한다 (안 섞으면 확률 낮은 고래는 재시작 사이에 영영 안 움직였다) */
+  constructor(userId: number, name: string, kind: AccountKind, seed: number, startTick = 0) {
+    this.userId = userId; this.name = name; this.kind = kind; this.rand = mulberry32(seed * 7919 + userId + startTick * 131);
+  }
+  /** 파산 기준 아래로 떨어졌을 때 (기본: 같은 계좌로 다시 시작) */
+  protected bust(c: Ctx) { c.broker.reset(this.userId); this.meta.clear(); }
+  /** 포지션·주문 없이 1분 넘게 주문이 없을 때 */
+  protected idle(_c: Ctx) { /* 기본은 그대로 */ }
+  /** 지정가를 취소하고 포지션을 시장가로 정리한다. 다 비었으면 true */
+  protected flatten(c: Ctx): boolean {
+    const acc = c.broker.account(this.userId);
+    if (c.broker.ordersOf(this.userId).length) { this.cancelAll(c); return false; }
+    if (!acc.futures.size && !acc.positions.size) return true;
+    for (const f of acc.futures.values()) if (!f.closing) { try { c.broker.closeFuture(this.userId, f.id, 100).catch(() => {}); } catch { /* 다음 tick */ } }
+    for (const sym of [...acc.positions.keys()]) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
+    return false;
   }
   abstract act(c: Ctx): void;
   /** 성향 이름 (시뮬레이션 통계용) */
@@ -68,6 +84,7 @@ abstract class Agent {
     try {
       const r = c.broker.limitOrder(this.userId, { sym, kind, side, price, pct: Math.min(100, Math.max(0.5, pct)), lev });
       if (r.order) this.orderAt.set(r.order.id, c.tick);
+      this.lastOrder = c.tick;
       return r;
     } catch { return null; }
   }
@@ -82,8 +99,6 @@ abstract class Agent {
   }
   protected cancelAll(c: Ctx) { try { c.broker.cancelAll(this.userId); } catch { /* 없거나 속도 제한 */ } }
 
-  /** 다 잃은 뒤 다시 시작하기까지 기다리는 tick */
-  protected resetDelay = 600;
   /** 🤖 봇 교대: retiring = 포지션 정리 중, resting = 쉬는 중 (매매 안 함, 랭킹에서 숨음) */
   retiring = false; resting = false;
 
@@ -99,10 +114,13 @@ abstract class Agent {
       for (const sym of acc.positions.keys()) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
       return;
     }
-    // 거의 다 잃으면 다시 시작 (사람처럼). 세력·고래는 시작 자금의 25% 아래에서
-    const eq = c.broker.equity(acc), floor = this.kind === "mm" || this.kind === "whale" ? 500_000 : 2_000;
-    if (eq < floor && c.tick > this.resetCooldown) { c.broker.reset(this.userId); this.meta.clear(); this.resetCooldown = c.tick + this.resetDelay; return; }
+    // 파산 기준: 🤖 봇 $1만(새 봇으로 교체), 🐋 고래 $100만(같은 이름으로 다시, 성향 새로), 🏦 세력 $50만(다시 시작)
+    const eq = c.broker.equity(acc), floor = this.kind === "whale" ? 1_000_000 : this.kind === "mm" ? 500_000 : 10_000;
+    if (eq < floor && c.tick > this.resetCooldown) { this.bust(c); this.resetCooldown = c.tick + 60; this.lastOrder = c.tick; return; }
+    if (this.lastOrder < 0) this.lastOrder = c.tick;
     this.act(c);
+    // 1분 활동 감시: 포지션·주문 없이 60초 넘게 주문이 없으면 깨운다 (들고 있는 건 활동으로 본다)
+    if (c.tick - this.lastOrder > 60 && !acc.futures.size && !acc.positions.size && !c.broker.ordersOf(this.userId).length) { this.idle(c); this.lastOrder = c.tick; }
   }
   wake(c: Ctx) { this.resting = false; this.retiring = false; c.broker.setResting(this.userId, false); }
 
@@ -118,19 +136,20 @@ abstract class Agent {
     const l = this.lev(c, sym, lev); if (!l) return;
     try {
       c.broker.openFuture(this.userId, sym, side, l, Math.min(100, Math.max(0.5, pct))).catch(() => this.meta.delete(sym));
+      this.lastOrder = c.tick;
       const p = c.market.quote(sym)!.price;
       this.meta.set(sym, { opened: c.tick, entry: p, peak: p, trough: p, until: c.tick + hold, note });
     } catch { /* 주문 거절 */ }
   }
   protected close(c: Ctx, sym: string) {
     const f = this.fut(c, sym); if (!f) return;
-    try { c.broker.closeFuture(this.userId, f.id, 100).then(() => this.meta.delete(sym), () => {}); } catch { /* 다음 tick에 다시 */ }
+    try { c.broker.closeFuture(this.userId, f.id, 100).then(() => this.meta.delete(sym), () => {}); this.lastOrder = c.tick; } catch { /* 다음 tick에 다시 */ }
   }
   protected buy(c: Ctx, sym: string, pct: number, hold: number) {
-    try { c.broker.place(this.userId, sym, "buy", pct).catch(() => {}); const p = c.market.quote(sym)!.price; this.meta.set(sym, { opened: c.tick, entry: p, peak: p, trough: p, until: c.tick + hold }); } catch { /* 거절 */ }
+    try { c.broker.place(this.userId, sym, "buy", pct).catch(() => {}); const p = c.market.quote(sym)!.price; this.meta.set(sym, { opened: c.tick, entry: p, peak: p, trough: p, until: c.tick + hold }); this.lastOrder = c.tick; } catch { /* 거절 */ }
   }
   protected sell(c: Ctx, sym: string) {
-    try { c.broker.place(this.userId, sym, "sell", 100).then(() => this.meta.delete(sym), () => {}); } catch { /* 거절 */ }
+    try { c.broker.place(this.userId, sym, "sell", 100).then(() => this.meta.delete(sym), () => {}); this.lastOrder = c.tick; } catch { /* 거절 */ }
   }
   /** 메모된 포지션마다 콜백 (가격 고점·저점 갱신 포함) */
   protected each(c: Ctx, fn: (sym: string, m: Meta, price: number) => void) {
@@ -154,26 +173,48 @@ const companyNews = (c: Ctx) => c.news.filter(n => (n.kind === "기업" || n.kin
 
 // ---------- 🤖 봇 성향 ----------
 export type BotStyle = "holder" | "levHolder" | "newsChaser" | "ventureBettor" | "random" | "dipBuyer" | "gambler";
-/** 100명 기준 섞는 비율. gambler = 올인 고배율, 청산되면 바로 다시 시작하는 도파민형 */
-export const BOT_MIX: [BotStyle, number][] = [["holder", 10], ["levHolder", 15], ["newsChaser", 20], ["ventureBettor", 15], ["random", 15], ["dipBuyer", 10], ["gambler", 15]];
+/** 봇 성향: 고정하지 않고 10~30분마다 이 중에서 무작위로 다시 뽑는다 (수치도 새로). gambler = 올인 고배율 */
+export const BOT_STYLES: BotStyle[] = ["holder", "levHolder", "newsChaser", "ventureBettor", "random", "dipBuyer", "gambler"];
+const BOT_PERIOD: [number, number] = [600, 1800];
 
 class Bot extends Agent {
-  private style: BotStyle;
-  private p: { lev: number; pct: number; hold: number; delay: number; take: number; cut: number };
+  private style!: BotStyle;
+  private p!: { lev: number; pct: number; hold: number; delay: number; take: number; cut: number };
   private watch: { sym: string; at: number; price: number; kind: "news" | "venture" }[] = [];
-  constructor(userId: number, name: string, seed: number, style: BotStyle) {
-    super(userId, name, "bot", seed);
-    this.style = style;
+  private nextSwitch = 0;
+  private onBust: (b: Bot, c: Ctx) => void;
+  constructor(userId: number, name: string, seed: number, startTick: number, onBust: (b: Bot, c: Ctx) => void) {
+    super(userId, name, "bot", seed, startTick);
+    this.onBust = onBust;
+    this.reroll(startTick);
+    this.nextSwitch = startTick + Math.round(uni(this.rand, 0, BOT_PERIOD[1])); // 첫 교대 시각은 봇마다 다르게
+  }
+  /** 성향과 수치를 새로 뽑는다 */
+  reroll(tick: number) {
     const r = this.rand;
+    this.style = pick(r, BOT_STYLES);
     this.p = {
       lev: pick(r, [2, 3, 5, 5, 10, 10]), pct: uni(r, 10, 70), hold: Math.round(uni(r, 30, 900)),
       delay: Math.round(uni(r, 1, 8)), take: uni(r, 0.03, 0.3), cut: uni(r, 0.02, 0.15),
     };
-    if (style === "gambler") this.resetDelay = 30;
+    this.watch = []; this.meta.clear();
+    this.nextSwitch = tick + Math.round(uni(r, ...BOT_PERIOD));
   }
   get label() { return this.style; }
+  /** $1만 아래: 새 봇으로 교체 (번호·이름·성향을 새로, $100,000) */
+  protected bust(c: Ctx) { this.onBust(this, c); }
+  /** 1분 동안 아무것도 없이 쉬었다: 지금 성향대로 작게 한 번 */
+  protected idle(c: Ctx) {
+    const r = this.rand;
+    if (this.style === "holder" || this.style === "dipBuyer") this.buy(c, pick(r, liveSyms(c, ["stock", "coin"])), 10, Math.round(uni(r, 120, 600)));
+    else this.open(c, pick(r, liveSyms(c)), r() < 0.6 ? "long" : "short", this.p.lev, 10, Math.round(uni(r, 120, 600)));
+  }
   act(c: Ctx) {
     const r = this.rand, acc = c.broker.account(this.userId);
+    if (c.tick >= this.nextSwitch) { // 성향 교대: 정리가 끝나면 새로 뽑는다
+      if (this.flatten(c)) this.reroll(c.tick);
+      return;
+    }
     switch (this.style) {
       case "holder": {
         if (!acc.positions.size && acc.cash > 50_000) {
@@ -262,18 +303,19 @@ export const MM_NAMES: Record<MmStyle, string> = {
 };
 /** 🐋 고래 10마리: 노는 시장·레버리지·비중·빈도(틱당 확률)·보유 시간이 다르다. 첫째는 예전부터 있던 "고래" */
 export interface WhaleDef { name: string; kinds: string[]; lev: number; pct: number; chance: number; hold: [number, number] }
-export const WHALES: WhaleDef[] = [
-  { name: "고래", kinds: ["stock", "coin", "venture"], lev: 10, pct: 40, chance: 1 / 1200, hold: [30, 120] },
-  { name: "흰수염고래", kinds: ["stock"], lev: 10, pct: 50, chance: 1 / 1500, hold: [60, 180] },
-  { name: "혹등고래", kinds: ["coin"], lev: 5, pct: 40, chance: 1 / 1000, hold: [30, 120] },
-  { name: "향유고래", kinds: ["venture"], lev: 5, pct: 30, chance: 1 / 900, hold: [20, 90] },
-  { name: "범고래", kinds: ["stock", "coin", "venture"], lev: 5, pct: 25, chance: 1 / 600, hold: [20, 60] },
-  { name: "밍크고래", kinds: ["stock"], lev: 3, pct: 30, chance: 1 / 800, hold: [60, 240] },
-  { name: "참고래", kinds: ["coin"], lev: 3, pct: 50, chance: 1 / 1200, hold: [120, 480] },
-  { name: "귀신고래", kinds: ["stock", "coin"], lev: 10, pct: 20, chance: 1 / 700, hold: [15, 45] },
-  { name: "북극고래", kinds: ["stock"], lev: 2, pct: 60, chance: 1 / 2000, hold: [300, 900] },
-  { name: "보리고래", kinds: ["venture"], lev: 3, pct: 40, chance: 1 / 1100, hold: [30, 150] },
+export const WHALES: WhaleDef[] = [ // chance: 2026-10-22에 2.5배로 올림 (고래가 더 자주)
+  { name: "고래", kinds: ["stock", "coin", "venture"], lev: 10, pct: 40, chance: 1 / 480, hold: [30, 120] },
+  { name: "흰수염고래", kinds: ["stock"], lev: 10, pct: 50, chance: 1 / 600, hold: [60, 180] },
+  { name: "혹등고래", kinds: ["coin"], lev: 5, pct: 40, chance: 1 / 400, hold: [30, 120] },
+  { name: "향유고래", kinds: ["venture"], lev: 5, pct: 30, chance: 1 / 360, hold: [20, 90] },
+  { name: "범고래", kinds: ["stock", "coin", "venture"], lev: 5, pct: 25, chance: 1 / 240, hold: [20, 60] },
+  { name: "밍크고래", kinds: ["stock"], lev: 3, pct: 30, chance: 1 / 320, hold: [60, 240] },
+  { name: "참고래", kinds: ["coin"], lev: 3, pct: 50, chance: 1 / 480, hold: [120, 480] },
+  { name: "귀신고래", kinds: ["stock", "coin"], lev: 10, pct: 20, chance: 1 / 280, hold: [15, 45] },
+  { name: "북극고래", kinds: ["stock"], lev: 2, pct: 60, chance: 1 / 800, hold: [300, 900] },
+  { name: "보리고래", kinds: ["venture"], lev: 3, pct: 40, chance: 1 / 440, hold: [30, 150] },
 ];
+const WHALE_KINDS: string[][] = [["stock"], ["coin"], ["venture"], ["stock", "coin"], ["stock", "coin", "venture"]];
 /** 세력이 돌아가며 쓰는 전략 (고래 제외). 세력 이름은 세력1~세력N이라 화면에서는 무슨 전략인지 모른다 */
 export const MM_STRATEGIES = (Object.keys(MM_NAMES) as MmStyle[]).filter(s => s !== "whale");
 /** 한 전략을 쓰는 시간 (tick): 20~40분. 갈아탈 때 지정가를 취소하고 포지션을 정리한다 */
@@ -298,8 +340,8 @@ class MarketMaker extends Agent {
   private activity = new Map<string, number>(); // 종목별 최근 사람·봇 거래 금액 (감쇠 합)
   private posAt = new Map<number, number>();    // 선물 포지션이 처음 보인 tick
   private whale: WhaleDef | null;
-  constructor(userId: number, name: string, seed: number, styles: MmStyle[], strength: Partial<Record<MmStyle, number>> = {}, kind: AccountKind = "mm", whale: WhaleDef | null = null) {
-    super(userId, name, kind, seed); this.strength = strength; this.whale = whale;
+  constructor(userId: number, name: string, seed: number, styles: MmStyle[], strength: Partial<Record<MmStyle, number>> = {}, kind: AccountKind = "mm", whale: WhaleDef | null = null, startTick = 0) {
+    super(userId, name, kind, seed, startTick); this.strength = strength; this.whale = whale && { ...whale };
     const r = this.rand, cycle = [...styles];
     for (let i = cycle.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [cycle[i], cycle[j]] = [cycle[j], cycle[i]]; }
     this.cycle = cycle;
@@ -309,14 +351,18 @@ class MarketMaker extends Agent {
   private get style(): MmStyle { return this.cycle[this.at]; }
   private get k() { return this.strength[this.style] ?? 1; }
   get label() { return this.whale ? this.whale.name : `${this.name}(${this.style})`; }
-  /** 전략을 바꾸기 전에 지정가를 취소하고 포지션을 시장가로 정리한다. 다 비었으면 true */
-  private flatten(c: Ctx): boolean {
-    const acc = c.broker.account(this.userId);
-    if (c.broker.ordersOf(this.userId).length) { this.cancelAll(c); return false; }
-    if (!acc.futures.size && !acc.positions.size) return true;
-    for (const f of acc.futures.values()) if (!f.closing) { try { c.broker.closeFuture(this.userId, f.id, 100).catch(() => {}); } catch { /* 다음 tick */ } }
-    for (const sym of [...acc.positions.keys()]) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
-    return false;
+  /** 🐋 $100만 아래: 같은 이름으로 $200만에서 다시, 노는 시장·배율·크기·보유 시간을 새로 뽑는다 */
+  protected bust(c: Ctx) {
+    super.bust(c);
+    if (!this.whale) return;
+    const r = this.rand;
+    this.whale = { ...this.whale, kinds: pick(r, WHALE_KINDS), lev: pick(r, [2, 3, 5, 10]), pct: Math.round(uni(r, 20, 60)), hold: pick(r, [[15, 60], [30, 120], [60, 240], [300, 900]] as [number, number][]) };
+  }
+  /** 1분 동안 놀았다: 🐋 고래는 바로 한 번 진입, 🏦 세력은 다음 전략으로 */
+  protected idle(c: Ctx) {
+    const w = this.whale, r = this.rand;
+    if (w) this.open(c, pick(r, liveSyms(c, w.kinds)), r() < 0.55 ? "long" : "short", w.lev, w.pct, Math.round(uni(r, ...w.hold)));
+    else if (this.cycle.length > 1) this.nextSwitch = c.tick;
   }
   /** 명목 금액 → 예수금 대비 비중(%) */
   private pctFor(c: Ctx, notional: number, lev: number) { const cash = c.broker.account(this.userId).cash; return cash > 0 ? (notional / (lev * cash)) * 100 * this.k : 0; }
@@ -534,6 +580,8 @@ class MarketMaker extends Agent {
 
 // ---------- 실행기 ----------
 const BOT_NAMES = ["개미", "불개미", "존버", "단타", "코인", "신흥", "레버", "물타기", "손절", "풀매수"];
+/** 봇 이름의 번호 (예: 레버봇07 → 7). 번호가 없으면 0 */
+const numOf = (name: string) => Number(/봇(\d+)$/.exec(name)?.[1] ?? 0);
 
 /** 봇·세력 계정을 만들고(없으면) tick마다 매매시킨다 */
 export class BotRunner {
@@ -560,11 +608,24 @@ export class BotRunner {
       }
       return row.id;
     };
-    const styles = BOT_MIX.flatMap(([s, w]) => Array.from({ length: w }, () => s));
-    for (let i = 0; i < opts.bots; i++) {
-      const style = styles[i % styles.length];
-      const id = ensure(`${BOT_NAMES[i % BOT_NAMES.length]}봇${String(i + 1).padStart(2, "0")}`, "bot");
-      if (id != null) { const b = new Bot(id, `봇${i + 1}`, opts.seed, style); this.agents.push(b); this.bots.push(b); }
+    // 🤖 봇: 번호 1~N+1 중 N개를 쓰고 하나가 빈다. 이미 있는 봇 계정을 번호대로 이어 쓰고, 모자라면 빈 번호로 만든다
+    const start = getMarket().tick, rand = mulberry32(opts.seed * 31 + start);
+    this.rand = rand; this.db = db;
+    const existing = (db.prepare("SELECT id, name FROM users WHERE kind = 'bot' ORDER BY id").all() as { id: number; name: string }[])
+      .filter(u => { const n = numOf(u.name); return n >= 1 && n <= opts.bots + 1; });
+    const taken = new Set<number>();
+    for (const u of existing) {
+      if (taken.size >= opts.bots || taken.has(numOf(u.name))) continue;
+      taken.add(numOf(u.name));
+      const b = new Bot(u.id, u.name, opts.seed, start, (x, c) => this.replace(x, c)); this.agents.push(b); this.bots.push(b);
+    }
+    for (let n = 1; n <= opts.bots + 1 && this.bots.length < opts.bots; n++) {
+      if (taken.has(n)) continue;
+      const name = this.freshName(n);
+      const id = name ? ensure(name, "bot") : null;
+      if (id == null || !name) continue;
+      taken.add(n);
+      const b = new Bot(id, name, opts.seed, start, (x, c) => this.replace(x, c)); this.agents.push(b); this.bots.push(b);
     }
     if (opts.marketMakers) {
       // 🏦 세력1~세력N: 전략마다 하나씩이던 예전 계정(유동성세력 등)은 이름만 바꿔 이어 쓴다
@@ -576,15 +637,41 @@ export class BotRunner {
           getBroker().setName(old.id, name);
         }
         const id = ensure(name, "mm");
-        if (id != null) this.agents.push(new MarketMaker(id, name, opts.seed, MM_STRATEGIES, opts.tuning?.strength, "mm"));
+        if (id != null) this.agents.push(new MarketMaker(id, name, opts.seed, MM_STRATEGIES, opts.tuning?.strength, "mm", null, start));
       });
       for (const w of WHALES) { // 🐋 고래는 세력이 아니라 거래자 (별도 탭)
         const id = ensure(w.name, "whale");
-        if (id != null) this.agents.push(new MarketMaker(id, w.name, opts.seed, ["whale"], opts.tuning?.strength, "whale", w));
+        if (id != null) this.agents.push(new MarketMaker(id, w.name, opts.seed, ["whale"], opts.tuning?.strength, "whale", w, start));
       }
     }
   }
   get size() { return this.agents.length; }
+  private rand: Rand; private db: Db;
+  /** 번호 n의 새 봇 이름: 앞부분은 무작위 (사람이 이미 쓴 이름이면 다른 앞부분) */
+  private freshName(n: number): string | null {
+    for (let i = 0; i < BOT_NAMES.length * 2; i++) {
+      const name = `${pick(this.rand, BOT_NAMES)}봇${String(n).padStart(2, "0")}`;
+      if (!this.db.prepare("SELECT 1 FROM users WHERE name = ?").get(name)) return name;
+    }
+    return null;
+  }
+  /**
+   * 봇이 $1만 아래로 떨어졌다: 새 봇으로 바꾼다. 번호는 지금 비어 있는 번호(직전에 빠진 번호, 처음엔 N+1)를 쓰고,
+   * 이 봇의 번호가 새로 비게 된다. 계정은 이름만 바꿔 다시 쓰고 $100,000, 졸업·전설 기록도 지운다
+   */
+  private replace(bot: Bot, c: Ctx) {
+    const used = new Set(this.bots.map(b => numOf(b.name)));
+    let free = 1;
+    while (used.has(free)) free++;
+    const name = this.freshName(free);
+    if (name) {
+      this.db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, bot.userId);
+      c.broker.setName(bot.userId, name);
+      bot.name = name;
+    }
+    c.broker.reset(bot.userId, true);
+    bot.reroll(c.tick);
+  }
   /** 계좌 id → 성향 (시뮬레이션 통계용) */
   describe() { return this.agents.map(a => ({ userId: a.userId, kind: a.kind, label: a.label })); }
 

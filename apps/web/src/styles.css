@@ -1089,9 +1089,9 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
   .book-note { display: none; }
 }
 
-/* 명예의 전당: 시즌 탭은 아래 */
+/* 명예의 전당: 시즌 탭 */
 .hall-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.hall-seasons { margin: 6px 8px 8px; overflow-x: auto; flex: none; }
+.hall-seasons { margin: 8px 8px 2px; overflow-x: auto; flex: none; align-self: flex-start; max-width: calc(100% - 16px); } /* 시즌 탭은 위 */
 .hall-seasons button { flex: none; }
 
 /* 일정·애널리스트 */

@@ -348,6 +348,9 @@ async function toggleBan(name: string, banned: boolean) {
       <p v-else class="empty">리포트를 불러오는 중입니다.</p>
     </div>
     <div v-else-if="m.socialTab === 'hall'" class="hall-wrap">
+      <div v-if="hallTabs.length" class="tabs hall-seasons" role="tablist" aria-label="시즌">
+        <button v-for="sid in hallTabs" :key="sid" role="tab" :data-hs="sid" :aria-selected="hallSeason === sid" @click="hallSeason = sid">S{{ sid }}<small v-if="hall && sid === hall.current"> 진행 중</small></button>
+      </div>
       <div class="table-scroll">
         <div class="hall-sec-title">🏅 S{{ hallSeason }} TOP 3 <small v-if="hallLive" class="muted">진행 중 · 지금 순위</small></div>
         <ul v-if="hallTop.length" id="hallTop3" class="hall-top3">
@@ -377,9 +380,6 @@ async function toggleBan(name: string, banned: boolean) {
           </tbody>
         </table>
         <p v-else class="empty">S{{ hallSeason }}에는 전설이 없습니다. 시즌 중 100배(총자산 $1,000만)를 달성하면 전설로 여기에 남고 시즌 엠블럼을 받습니다.</p>
-      </div>
-      <div v-if="hallTabs.length" class="tabs hall-seasons" role="tablist" aria-label="시즌">
-        <button v-for="sid in hallTabs" :key="sid" role="tab" :data-hs="sid" :aria-selected="hallSeason === sid" @click="hallSeason = sid">S{{ sid }}<small v-if="hall && sid === hall.current"> 진행 중</small></button>
       </div>
     </div>
     <div v-else class="chat-wrap" :class="{ 'is-folded': chatFolded }">
