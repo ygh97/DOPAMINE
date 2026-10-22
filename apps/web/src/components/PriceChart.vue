@@ -247,22 +247,29 @@ async function loadFills(sym: string) {
   syncPosLines();
 }
 
-/** 이번 시즌 내 체결을 그 체결이 들어간 봉에 B/S로 찍는다. 같은 봉·같은 방향은 하나로 묶어 평균가에 */
+/** B/S를 찍은 봉 시각. 그 봉이 tick마다 고가·저가를 바꾸면 표시도 따라 옮긴다 */
+let markedTs = new Set<number>();
+
+/** 이번 시즌 내 체결을 그 체결이 들어간 봉에 찍는다: B는 봉 저가 아래, S는 고가 위. 같은 봉·같은 방향은 "B2"처럼 묶는다 */
 function syncFillMarks(lastTs: number) {
   const span = period.value * 60_000, barIdx = (t: number) => Math.floor((t - 1) / 60); // 1분봉 = 60 tick
   for (const f of a.me!.fills) if (f.sym === shown) symFills.set(f.id, f);
-  const groups = new Map<string, { ts: number; side: "B" | "S"; qty: number; notional: number; n: number }>();
+  const bars = new Map(aggregate(base, period.value).map(b => [b.timestamp, b]));
+  const groups = new Map<string, { ts: number; side: "B" | "S"; n: number }>();
   for (const f of symFills.values()) {
     const side = FILL_DIR[f.side];
     if (!side) continue;
     const t1 = lastTs - Math.max(0, barIdx(m.tick) - barIdx(f.tick)) * 60_000;
-    if (t1 < base[0].timestamp) continue;
-    const ts = Math.floor(t1 / span) * span, key = `${ts}${side}`, g = groups.get(key) ?? { ts, side, qty: 0, notional: 0, n: 0 };
-    g.qty += f.qty; g.notional += f.qty * f.price; g.n++;
+    const ts = Math.floor(t1 / span) * span, key = `${ts}${side}`, g = groups.get(key) ?? { ts, side, n: 0 };
+    g.n++;
     groups.set(key, g);
   }
+  markedTs = new Set();
   for (const g of groups.values()) {
-    const id = chart!.createOverlay({ name: "fillMark", groupId: "positions", lock: true, points: [{ timestamp: g.ts, value: g.notional / g.qty }],
+    const bar = bars.get(g.ts);
+    if (!bar) continue; // 차트에 받아 둔 봉보다 오래된 체결
+    markedTs.add(g.ts);
+    const id = chart!.createOverlay({ name: "fillMark", groupId: "positions", lock: true, points: [{ timestamp: g.ts, value: g.side === "B" ? bar.low : bar.high }],
       extendData: { side: g.side, label: g.n > 1 ? `${g.side}${g.n}` : g.side, color: cssVar(g.side === "B" ? "--up" : "--down") } });
     if (typeof id === "string") posIds.push(id);
   }
@@ -347,17 +354,16 @@ watch(() => m.lastBars, bars => {
   if (b.timestamp === last.timestamp) base[base.length - 1] = b;
   else if (b.timestamp > last.timestamp) { base.push(b); if (base.length > 1500) base.shift(); }
   else return;
-  if (period.value === 1) {
-    latestBar.value = b;
-    chart.updateData(b);
-    return;
+  let bar = b;
+  if (period.value > 1) {
+    const span = period.value * 60_000, t0 = Math.floor(b.timestamp / span) * span;
+    let i = base.length - 1;
+    while (i > 0 && base[i - 1].timestamp >= t0) i--;
+    bar = aggregate(base.slice(i), period.value)[0];
   }
-  const span = period.value * 60_000, t0 = Math.floor(b.timestamp / span) * span;
-  let i = base.length - 1;
-  while (i > 0 && base[i - 1].timestamp >= t0) i--;
-  const aggBar = aggregate(base.slice(i), period.value)[0];
-  latestBar.value = aggBar;
-  chart.updateData(aggBar);
+  latestBar.value = bar;
+  chart.updateData(bar);
+  if (markedTs.has(bar.timestamp)) syncPosLines(); // 체결 표시가 있는 봉의 고가·저가가 바뀌었다
 });
 watch(() => m.selected, sym => void show(sym)); // 새 종목은 show() → redraw()가 최신 봉으로 옮긴다
 watch(() => m.chartJump, () => { if (m.selected === shown) resetToLatest(); }); // 보고 있던 종목을 다시 눌러도 최신 봉으로

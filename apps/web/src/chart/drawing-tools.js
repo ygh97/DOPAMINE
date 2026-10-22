@@ -126,16 +126,17 @@ export function register() {
       ];
     },
   });
-  // 내 체결 표시: 체결가에 점, 매수 B는 아래·매도 S는 위에 글자
+  // 내 체결 표시: 점은 봉 끝(B는 저가, S는 고가), 거기서 B는 아래·S는 위로 삼각형과 글자
   registerOverlay({
     name: "fillMark", totalStep: 2, lock: true,
     needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
     createPointFigures: ({overlay, coordinates: [c]}) => {
       if (!c) return [];
-      const d = overlay.extendData || {}, buy = d.side === "B", color = d.color || css("--accent");
+      const d = overlay.extendData || {}, buy = d.side === "B", color = d.color || css("--accent"), k = buy ? 1 : -1;
+      const tip = c.y + k * 3, foot = c.y + k * 9;
       return [
-        {type: "circle", ignoreEvent: true, attrs: {x: c.x, y: c.y, r: 3}, styles: {style: "fill", color}},
-        {type: "text", ignoreEvent: true, attrs: {x: c.x, y: buy ? c.y + 6 : c.y - 6, text: d.label || d.side, align: "center", baseline: buy ? "top" : "bottom"},
+        {type: "polygon", ignoreEvent: true, attrs: {coordinates: [{x: c.x, y: tip}, {x: c.x - 5, y: foot}, {x: c.x + 5, y: foot}]}, styles: {style: "fill", color}},
+        {type: "text", ignoreEvent: true, attrs: {x: c.x, y: foot + k, text: d.label || d.side, align: "center", baseline: buy ? "top" : "bottom"},
           styles: {color: "#fff", size: 10, weight: "bold", backgroundColor: color, borderColor: color, borderRadius: 3, paddingLeft: 3, paddingRight: 3, paddingTop: 1, paddingBottom: 1}},
       ];
     },
