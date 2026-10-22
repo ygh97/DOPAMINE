@@ -59,11 +59,11 @@ export const endTick = (season: Season, warmTicks: number) => warmTicks + Math.f
 
 /**
  * 시즌을 닫고 다음 시즌을 연다. 명예의 전당: 100배 전설을 달성한 사람 전원.
- * 다음 시즌은 이전 시즌이 끝난 시각에 이어서 시작한다 (서버가 오래 꺼져 있었으면 지금부터).
+ * 다음 시즌은 이전 시즌이 끝난 시각에 이어서 시작한다 (서버가 오래 꺼져 있었거나 운영자가 일찍 끝냈으면 지금부터).
  */
 export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = Date.now()): Season {
   const end = season.startedAt + season.lengthMs;
-  const start = now - end < season.lengthMs ? end : now;
+  const start = now >= end && now - end < season.lengthMs ? end : now; // 일찍 끝냈으면(운영자 새 시즌) 지금부터
   const seed = randomInt(1, 2 ** 31);
   return tx(db, () => {
     const add = db.prepare("INSERT OR IGNORE INTO hall_of_fame (season_id, rank, name, equity, return_pct, cleared_tick) VALUES (?, ?, ?, ?, ?, ?)");

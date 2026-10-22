@@ -78,6 +78,10 @@ export const useMarket = defineStore("market", () => {
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
   const socialTab = ref<"chat" | "rank" | "whale" | "hall">("rank");
+  /** 호가창에서 누른 가격 → 주문 패널이 지정가로 받는다 */
+  const bookPick = ref<{ price: number; seq: number } | null>(null);
+  /** 내 주문 직후 올린다. 호가창이 다음 1초를 기다리지 않고 다시 받는다 */
+  const bookEpoch = ref(0);
 
   const list = computed(() => Object.values(quotes.value).filter(q => q.market === tab.value));
   const current = computed<Quote | null>(() => quotes.value[selected.value] ?? null);
@@ -272,6 +276,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

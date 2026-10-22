@@ -38,7 +38,7 @@ test("지정가: 가격·시간 우선, 부분 체결, 같은 가격이면 사�
   assert.equal(x.openOrders(2)[0].qty, 5);
   // 매수 지정가를 최우선 매수 가격에 걸면 같은 가격의 호가 봇보다 먼저 체결된다
   x.limitOrder(4, sym, "buy", bid!, 3);
-  x.step(); // 호가 봇이 다시 깔아도 사람 주문은 남는다
+  x.requote(sym); // 호가 봇이 같은 기준가로 다시 깔아도 사람 주문이 먼저다 (기준가가 지나가면 호가 봇이 받는다: 아래 테스트)
   const sells = x.marketOrder(5, sym, "sell", { qty: 2 });
   assert.equal(sells[0].maker, 4, "사람 주문 먼저");
 });
@@ -102,4 +102,21 @@ test("스냅샷에서 복원하면 사람 주문·재고·캔들이 이어진다
   assert.equal(y.makerBook("META")!.inv, x.makerBook("META")!.inv);
   assert.deepEqual(y.bars("META").at(-1), x.bars("META").at(-1));
   assert.ok(y.openOrders().every(r => r.owner !== MAKER));
+});
+
+test("기준가가 사람 지정가를 지나가면 호가 봇이 그 가격에 받는다 (호가창이 엇갈리지 않음)", () => {
+  const x = make(6);
+  const sym = "AAPL";
+  // 기준가보다 3% 싼 매도 지정가: 시장가가 와야 체결되는 게 아니라 다음 재호가 때 호가 봇이 그 가격에 산다
+  const ref = x.reference(sym), t = x.tickOf(sym);
+  x.limitOrder(7, sym, "sell", ref * 1.002, 5); // 최우선 매도 근처 (안 엇갈림)
+  const deep = Math.round((ref * 0.97) / t) * t;
+  x.restoreOrder({ id: 999_999, owner: 8, sym, side: "sell", price: deep, qty: 4, seq: 0 }); // 엇갈린 주문 (재시작 등)
+  const r = x.step();
+  const got = r.trades.filter(tr => tr.maker === 8);
+  assert.equal(got.reduce((s, tr) => s + tr.qty, 0), 4, "엇갈린 지정가 전량 체결");
+  assert.ok(got.every(tr => tr.taker === MAKER && tr.price === deep), "호가 봇이 그 지정가 가격에 받음");
+  assert.equal(x.openOrders(8).length, 0);
+  const b = x.book(sym)!;
+  assert.ok(b.bids[0].price < b.asks[0].price, "교차 없음");
 });

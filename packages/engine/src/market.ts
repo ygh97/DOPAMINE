@@ -11,7 +11,8 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   ticksPerBar: 60,        // 1분봉 = 60틱(1초 tick)
   ticksPerDay: 80,        // 게임 하루
   prevResetDays: 1,       // 등락률 기준가(prev) 초기화 주기 = 게임 하루(80틱)
-  whaleChance: 0.08,      // 숨은 세력 움직임(개미털기·설거지·숏스퀴즈) 발동 비율 (뉴스 없이 차트 수급으로만 작동)
+  whaleChance: 0,         // 숨은 세력 움직임(개미털기·설거지·숏스퀴즈) 발동 비율. M8부터 0: 🏦 세력·🐋 고래 계좌가 실제 주문으로 대신한다 (A13)
+  breakChance: 0,         // 전고점·전저점 돌파 때 엔진이 추세(65%)·가짜 돌파(35%)를 만드는 확률. M8부터 0 (모멘텀·청산사냥 세력이 대신)
   seasonGrowth: [1.5, 3], // 우상향은 여기서만 만든다: 시즌 동안 적정가가 1.5~3배 (시즌마다 하나를 뽑음)
   seasonTicks: 28_800,    // 시즌 = 게임 1년 (360일 × 80틱 = 실제 8시간)
   barMs: 60_000,
@@ -20,7 +21,7 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   newsGap: [6, 14],       // 뉴스 간격(틱)
   marketSigma: 0.0007,
   sectorSigma: 0.0018,    // 같은 업종(섹터·코인)끼리 주가 방향이 강하게 묶이도록 상향
-  kappa: 0.0006,          // 적정가 회귀 강도 (반감기 약 1,150틱)
+  kappa: 0.0004,          // 적정가 회귀 강도 (반감기 약 1,700틱 ≈ 30분, M7까지 0.0006). 안전장치 몫만 남기고 나머지는 가치투자 세력이 당긴다 (A14, sim:bots로 보정)
   rsiPeriod: 14,
   rsiWeight: 0.25,        // RSI 기울기 최대치 = 개별 σ의 25%
   regimeSwitch: 1 / 400,  // 국면 전환 확률(틱당)
@@ -39,7 +40,7 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   rescueOdds: [0.3, 0.3], // 유예 중 회생 이벤트 확률: [인수 제안, 유상증자], 나머지는 소식 없음
   maxNewGrowth: 10,       // 신성장(승격 종목) 최대 개수. 다 차면 더 승격하지 않는다
   ventureCap: 100,        // 신흥주 소프트 상한: 시작가 대비 이 배수에 가까울수록 검증 성공 상승폭이 줄어든다
-  ventureSuccess: 0.6,    // 신흥주 검증 성공 확률 (졸업률 보정용, tools/sim-bots.ts)
+  ventureSuccess: 0.66,   // 신흥주 검증 성공 확률 (졸업률 보정용, tools/sim-bots.ts. M8 보정: 20배 약 11%, 100배 약 3%)
   epsHalfLife: 172_800,   // EPS가 기준값으로 돌아가는 반감기(틱, 2일)
   epsBand: [0.4, 3],      // EPS(= 적정가)는 기준의 0.4~3배 안에서만 움직인다
   // 플레이어 주문 충격: 충격 = impactK × σ_일 × √(명목 금액 / 가상 유동성)
@@ -510,11 +511,13 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   }
   // 전고점 돌파·전저점 이탈: 65%는 진짜 추세 돌파(스퀴즈), 35%는 세력의 스탑헌팅(가짜 돌파 후 반대 방향 급반전휩쏘)
   function checkBreak(a: AssetState, before: number, barIndex: number) {
-    if (a.hi == null || a.lo == null || a.breakBar === barIndex) return;
+    if (!cfg.breakChance || a.hi == null || a.lo == null || a.breakBar === barIndex) return;
     const up = before <= a.hi && a.price > a.hi * (1 + cfg.srBand / 2);
     const down = before >= a.lo && a.price < a.lo * (1 - cfg.srBand / 2);
     if (!up && !down) return;
     const dir = up ? 1 : -1;
+    a.volBoost = 10; a.breakBar = barIndex;
+    if (rand() >= cfg.breakChance) return;
     if (rand() < 0.35) {
       // 세력 스탑헌팅(Fakeout): 돌파 방향으로 살짝 더 찌른 뒤 반대 방향으로 강하게 되돌림
       impulse(a.pending, dir * a.sigma * uni(1.5, 3), 3, 0);
@@ -522,7 +525,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     } else {
       react(a.pending, dir * a.sigma * uni(4, 9));
     }
-    a.volBoost = 10; a.breakBar = barIndex;
   }
 
   const prevResetTicks = Math.max(1, cfg.ticksPerDay * Math.max(1, cfg.prevResetDays));
@@ -557,7 +559,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       const rsiTilt = ((a.rsi - 50) / 50) * cfg.rsiWeight * a.sigma * (a.regime === "range" ? -1 : 0.5);
       const shock = drain(a.pending);
       const noise = gauss() * a.sigma * Math.sqrt(a.variance);
-      let r = a.betaM * m + a.betaS * (sec[a.sector] || 0) + noise + pull + rsiTilt + srTilt(a) + shock;
+      // drift: 적정가와 같은 속도로 가격도 오른다. 당김(kappa)이 약해도 시즌 우상향을 따라가게 (당김은 이탈만 되돌린다)
+      let r = drift + a.betaM * m + a.betaS * (sec[a.sector] || 0) + noise + pull + rsiTilt + srTilt(a) + shock;
       if (a.jump && rand() < a.jump) r += gauss() * a.sigma * 6;
       const open = a.price;
       a.price = Math.max(0.01, a.price * Math.exp(r));

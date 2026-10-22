@@ -103,7 +103,7 @@ dialog#newsDlg::backdrop { background: rgba(10, 15, 25, .45); }
 /* layout */
 .layout {
   display: grid; gap: var(--gap); padding: var(--gap);
-  grid-template-columns: 280px minmax(0, 1fr) 320px;
+  grid-template-columns: 260px minmax(0, 1fr) 520px;
   height: calc(100vh - 92px); min-height: 640px;
 }
 .layout > *, .center > *, .right > * { min-width: 0; }
@@ -1047,3 +1047,42 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 /* 졸업(20배)·전설(100배) 배지 */
 .stage.grad { background: var(--accent-soft); color: var(--accent); }
 .stage.legend { background: linear-gradient(90deg, #f5b700, #ff6b6b); color: #fff; font-weight: 800; }
+
+/* 호가창 (M8): PC는 주문 패널 옆, 모바일은 주문 패널 위 5단계 */
+.trade-box { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: var(--gap); min-height: 0; }
+.trade-box > * { min-width: 0; }
+.book-panel { overflow: hidden; }
+.book-spread { margin-left: auto; font-size: 11px; }
+.book { display: flex; flex-direction: column; font-variant-numeric: tabular-nums; font-size: 12px; }
+.book-side { display: flex; flex-direction: column; }
+.lvl { position: relative; display: flex; justify-content: space-between; gap: 6px; border: 0; background: none; padding: 1px 8px; height: 18px; line-height: 16px; text-align: left; color: var(--text); font: inherit; overflow: hidden; }
+.lvl:not(:disabled):hover { background: var(--panel-2); }
+.lvl:disabled { cursor: default; }
+.lvl-bar { position: absolute; top: 1px; bottom: 1px; right: 0; opacity: .55; pointer-events: none; }
+.lvl.ask .lvl-bar { background: var(--down-soft); }
+.lvl.bid .lvl-bar { background: var(--up-soft); }
+.lvl.ask .lvl-px { color: var(--down); }
+.lvl.bid .lvl-px { color: var(--up); }
+.lvl-px, .lvl-qty { position: relative; white-space: nowrap; }
+.lvl-qty { color: var(--muted); }
+.mine-dot { margin-left: 3px; color: var(--warn); font-size: 9px; }
+.book-mid { display: flex; align-items: baseline; justify-content: space-between; padding: 5px 8px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.book-mid b { font-size: 14px; }
+.book-mid small { font-size: 10px; }
+.book-note { font-size: 10px; margin: 0; padding: 4px 8px; line-height: 1.4; }
+.trades { list-style: none; margin: 0; padding: 4px 0; overflow: auto; flex: 1; font-size: 12px; font-variant-numeric: tabular-nums; }
+.trades li { display: grid; grid-template-columns: 1.3fr 1fr 1fr; padding: 1px 8px; }
+.trades li span:not(:first-child) { text-align: right; }
+.trades-head { font-size: 10px; }
+.limit-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) 32px; gap: 4px; }
+.limit-row .mini-btn { margin: 0; font-size: 15px; padding: 0; }
+.limit-input { border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--text); font: inherit; text-align: center; padding: 6px; min-width: 0; font-variant-numeric: tabular-nums; }
+@media (max-width: 1180px) {
+  .layout { grid-template-columns: 240px minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .trade-box { grid-template-columns: minmax(0, 1fr); }
+  .book-asks .lvl:nth-child(-n+5), .book-bids .lvl:nth-child(n+6) { display: none; }
+  .book-note { display: none; }
+}

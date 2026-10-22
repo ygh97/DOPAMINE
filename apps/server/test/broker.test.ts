@@ -20,7 +20,7 @@ function setup(seed = 1) {
   const broker = new Broker(db, season, exchange);
   const auth = new Auth(db);
   /** 한 tick (서버 루프와 같은 순서): 순매수 기록 → 엔진·호가창 → 취소 환불 → 상장 변화 정산 → 청산·스탑 */
-  const tick = () => { broker.endTick(); const r = exchange.step(); broker.refundCancelled(r.cancelled); broker.applyActions(r.actions); broker.runTriggers(); return r; };
+  const tick = () => { broker.endTick(); const r = exchange.step(); broker.refundCancelled(r.cancelled); broker.settleTrades(r.trades); broker.applyActions(r.actions); broker.runTriggers(); return r; };
   // 서버처럼 참가하면 계좌가 생긴다
   const user = (name: string) => { const id = auth.join(name, "secret1").userId; broker.me(id); return id; };
   return { db, season, market, exchange, broker, auth, tick, user };
@@ -124,6 +124,33 @@ test("지정가: 걸어 두면 돈이 묶이고, 다른 사람의 시장가에 �
   const after = s.broker.me(maker);
   assert.ok(Math.abs(after.cash + after.positions[0].qty * after.positions[0].avg - START_CASH) < 1e-6, "남은 묶음은 돌려받음");
   assert.equal(s.db.prepare("SELECT COUNT(*) AS c FROM open_orders").get()!.c, 0);
+});
+
+test("지정가 전체 취소, 가격이 지나간 지정가는 tick에 호가 봇이 받아 체결된다", async () => {
+  const s = setup(5);
+  const u = s.user("lister");
+  const bid = s.exchange.best("MSFT").bid!;
+  s.broker.limitOrder(u, { sym: "MSFT", kind: "spot", side: "buy", price: bid * 0.95, pct: 10 });
+  s.tick();
+  s.broker.limitOrder(u, { sym: "MSFT", kind: "fut", side: "sell", lev: 2, price: bid * 1.05, pct: 10 });
+  s.tick();
+  assert.equal(s.broker.me(u).orders.length, 2);
+  assert.equal(s.broker.cancelAll(u), 2);
+  assert.equal(s.broker.me(u).orders.length, 0);
+  assert.ok(Math.abs(s.broker.me(u).cash - START_CASH) < 1e-6, "묶인 돈 모두 풀림");
+  assert.throws(() => s.broker.cancelAll(u), OrderError);
+  // 재시작 등으로 기준가보다 훨씬 비싼 매수 지정가가 남아 있으면 다음 tick에 그 가격으로 체결된다
+  s.tick();
+  const { order: o } = s.broker.limitOrder(u, { sym: "MSFT", kind: "spot", side: "buy", price: bid * 0.99, pct: 10 });
+  const [resting] = s.exchange.openOrders(u);
+  assert.ok(o && resting);
+  s.exchange.cancel(u, o!.id);
+  s.exchange.restoreOrder({ ...resting, price: bid * 1.03 }); // 기준가가 지정가를 지나간 상황을 만들려고 호가창의 가격만 올린다
+  s.tick();
+  const me = s.broker.me(u);
+  assert.equal(me.orders.length, 0, "체결돼 미체결에서 사라짐");
+  const f = me.fills.find(x => x.side === "buy")!;
+  assert.ok(Math.abs(f.price - bid * 1.03) / f.price < 0.001 && f.fee === 0, "그 지정가에 수수료 없이");
 });
 
 test("지정가는 재시작해도 호가창에 다시 걸린다", () => {
@@ -271,8 +298,9 @@ test("선물 진입·분할 종료·전량 종료: 격리 증거금, 수수료, 
   assert.equal(me1.futures.length, 1);
   const f = me1.futures[0];
   const expectedMargin = (START_CASH * 0.2) / (1 + 5 * 0.0005);
-  assert.ok(Math.abs(f.margin - expectedMargin) < 1e-6, "예산 안에 진입 수수료 포함");
-  assert.ok(Math.abs(me1.cash - START_CASH * 0.8) < 1e-6);
+  const oneShare = f.entry / 5; // 1주 단위로 내림하므로 1주 증거금만큼 덜 쓸 수 있다
+  assert.ok(Number.isInteger(f.qty) && f.margin <= expectedMargin + 1e-6 && f.margin > expectedMargin - oneShare, "예산 안에 진입 수수료 포함, 1주 단위");
+  assert.ok(Math.abs(me1.cash - (START_CASH - f.margin - f.qty * f.entry * 0.0005)) < 1e-6);
   assert.ok(Math.abs(f.liq - liqPrice(f)) < 1e-9);
 
   // 스탑로스 설정 후 50% 분할 종료해도 스탑로스는 남은 포지션에 유지
@@ -303,7 +331,7 @@ test("선물 레버리지 한도 및 다시 시작 후 10분간 5배 초과 금�
   await openFut(s, u, "NVDA", "long", 5, 10);
   for (let i = 0; i < 600; i++) s.tick();
   await openFut(s, u, "NVDA", "long", 10, 10);
-  assert.equal(s.broker.me(u).futures.length, 2);
+  assert.ok(s.broker.me(u).futures.some(f => f.lev === 10), "10분 뒤에는 10배 가능"); // 앞의 5배 롱은 그사이 악재로 청산될 수도 있다
 });
 
 test("강제 청산: 증거금 90% 손실 가격이 되면 바로 시장가 강제 청산", async () => {
@@ -513,12 +541,12 @@ test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭
   const s = setup();
   const human = s.user("사람1");
   const bots = new BotRunner(s.db, () => s.broker, () => s.market, { bots: 12, marketMakers: true, seed: 3 });
-  assert.equal(bots.size, 12 + 8);
+  assert.equal(bots.size, 12 + 9);
   for (let i = 0; i < 1500; i++) { const r = s.tick(); bots.tick(r.news); }
   const rows = s.broker.ranking(Infinity), mm = s.broker.mmRanking(), whales = s.broker.whaleRanking();
   assert.equal(rows.length, 13, "사람 1 + 봇 12");
   assert.ok(rows.every(r => r.kind === "user" || r.kind === "bot"));
-  assert.ok(mm.length === 7 && mm.every(r => r.kind === "mm"), "세력 7");
+  assert.ok(mm.length === 8 && mm.every(r => r.kind === "mm"), "세력 8");
   assert.ok(whales.length === 1 && whales[0].kind === "whale", "🐋 고래는 별도");
   assert.equal(s.broker.players, 13);
   const fills = s.db.prepare("SELECT COUNT(*) AS c FROM fills f JOIN users u ON u.id = f.user_id WHERE u.kind != 'user'").get() as { c: number };

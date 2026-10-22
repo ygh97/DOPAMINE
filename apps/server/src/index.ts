@@ -129,6 +129,7 @@ const loop = setInterval(() => {
     broker.endTick(); // 지난 tick 동안 체결된 순매수를 기준가에 남기고 기록 (재생과 같은 순서)
     const result = exchange.step();
     broker.refundCancelled(result.cancelled); // 병합·폐지로 취소된 지정가 환불
+    broker.settleTrades(result.trades); // 가격이 지나간 지정가를 호가 봇이 받은 체결
     if (broker.applyActions(result.actions).length)
       for (const a of result.actions) if (a.type === "split" || a.type === "delist") settled.push({ type: a.type, sym: a.sym });
     broker.runTriggers();
@@ -289,6 +290,33 @@ app.post<{ Body: { posId: number; pct: number } }>("/api/futures/close", {
   return { fill, me: broker.me(id) };
 });
 
+// 지정가: 맞는 호가가 있으면 그만큼 바로 체결되고, 남은 수량은 호가창에 걸린다. kind spot = 현물, fut = 선물 진입 (buy 롱, sell 숏)
+app.post<{ Body: { sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; price: number; pct: number; lev?: number } }>("/api/limit", {
+  schema: { body: { type: "object", required: ["sym", "kind", "side", "price", "pct"], properties: { sym: { type: "string", maxLength: 10 }, kind: { type: "string", enum: ["spot", "fut"] }, side: { type: "string", enum: ["buy", "sell"] }, price: { type: "number" }, pct: { type: "number" }, lev: { type: "integer" } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const r = broker.limitOrder(id, req.body);
+  return { ...r, me: broker.me(id) };
+});
+
+app.post<{ Body: { id?: number; all?: boolean } }>("/api/cancel", {
+  schema: { body: { type: "object", properties: { id: { type: "integer" }, all: { type: "boolean" } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const count = req.body.all ? broker.cancelAll(id) : (broker.cancelOrder(id, req.body.id ?? -1), 1);
+  return { count, me: broker.me(id) };
+});
+
+// 호가창: 보고 있는 종목만 1초마다 받는다. 매도·매수 각 10단계 + 최근 체결
+app.get<{ Querystring: { sym?: string } }>("/api/book", async (req, reply) => {
+  const b = exchange.book(req.query.sym ?? "", 10);
+  if (!b) return reply.code(404).send({ error: "종목을 찾을 수 없습니다." });
+  const lv = (l: { price: number; qty: number }) => [r7(l.price), r7(l.qty)];
+  return { sym: b.sym, tick: market.tick, tickSize: b.tickSize, asks: b.asks.map(lv), bids: b.bids.map(lv), trades: b.trades.slice(0, 20).map(t => [r7(t.price), r7(t.qty), t.side === "buy" ? 1 : -1, t.at]) };
+});
+
 app.post<{ Body: { posId: number; price: number | null } }>("/api/stop", {
   schema: { body: { type: "object", required: ["posId"], properties: { posId: { type: "integer" }, price: { type: ["number", "null"] } } } },
 }, async (req, reply) => {
@@ -421,6 +449,14 @@ app.post("/api/admin/backup", async (req, reply) => {
   if (!adminOk(req, reply)) return;
   saveSnapshot(db, season, exchange);
   return { ok: true, file: await backupDb(db, BACKUP_DIR) };
+});
+
+// 지금 시즌을 끝내고 새 시즌을 연다 (명예의 전당 기록·백업 포함). 엔진·호가창 규칙을 바꿔 배포한 직후에 쓴다: 시즌 중간에 규칙이 바뀌면 재생이 어긋난다
+app.post("/api/admin/new-season", async (req, reply) => {
+  if (!adminOk(req, reply)) return;
+  const ended = season.id;
+  rollover();
+  return { ok: true, ended, season: season.id };
 });
 
 // 하루 1회 자동 SQLite 백업 (SPEC 10장)

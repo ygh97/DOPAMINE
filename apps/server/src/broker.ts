@@ -1,14 +1,14 @@
 // 계좌·현물·선물 주문·정산·랭킹. 주문은 호가창(Exchange)에서 즉시 체결된다 (M8).
-// GameLoop는 tick마다 endTick() → exchange.step() → refundCancelled() → applyActions() → runTriggers() 순서로 부른다.
+// GameLoop는 tick마다 endTick() → exchange.step() → refundCancelled() → settleTrades() → applyActions() → runTriggers() 순서로 부른다.
 //
-// 체결 규칙 (SPEC 3장, M8-호가창-설계.md):
+// 체결 규칙 (SPEC 3장, docs/M8-호가창-설계.md):
 // - 시장가는 호가를 먹으며 바로 체결된다. 수수료 0.05%. 슬리피지는 없다(스프레드·호가 두께가 대신한다).
 // - 지정가는 맞는 호가가 있으면 그만큼 바로 체결(시장가 수수료)하고, 남은 수량은 호가창에 건다(체결 때 수수료 0).
 //   걸어 둔 동안 필요한 돈·수량은 묶어 둔다. 1인 최대 20개, 시즌 끝까지 유효.
 // - 현물: 매수는 예수금의 pct%, 매도는 보유 수량의 pct%. 종목당 보유 한도는 가상 유동성 L의 20%.
 // - 선물: 격리 증거금 = 예수금의 pct% (진입 수수료 포함). 명목 = 증거금 × 레버리지.
 //   증거금의 90%를 잃는 가격에서 강제 청산. 강제 청산·스탑·익절은 가격이 움직일 때마다 바로 시장가로 나간다 (연쇄 가능).
-import { LEVERAGE, MAKER, type CorporateAction, type Exchange, type Market, type MarketKind, type Side, type Trade } from "@dopamine/engine";
+import { LEVERAGE, MAKER, qtyUnit, type CorporateAction, type Exchange, type Market, type MarketKind, type Side, type Trade } from "@dopamine/engine";
 import { tx, type Db } from "./db.ts";
 import type { Season } from "./season.ts";
 
@@ -56,8 +56,8 @@ export interface RankRow { rank: number; name: string; kind: AccountKind; equity
 /** 세력 전략이 보는 종목별 쏠림: 사람·봇의 현물 평가액, 선물 롱·숏 명목, 청산가 목록 */
 export interface Exposure { spot: number; long: number; short: number; liqs: { price: number; notional: number; side: "long" | "short" }[] }
 
-/** 주식·신흥주는 1주 단위, 코인은 0.000001 단위 */
-const step = (market: MarketKind) => (market === "coin" ? 1e-6 : 1);
+/** 주식·신흥주는 1주 단위, 코인은 0.000001 단위 (현물·선물·호가 모두). 그래야 체결 수량이 늘 단위의 배수다 */
+const step = qtyUnit;
 const floorTo = (v: number, s: number) => Math.floor(v / s + 1e-9) * s;
 const dirOf = (f: Future) => (f.side === "long" ? 1 : -1);
 /** 강제 청산 가격: 증거금의 90%를 잃는 지점 */
@@ -322,7 +322,7 @@ export class Broker {
   /** 시장가 체결: 호가창을 먹고, 같이 체결된 지정가 주인(maker) 계좌도 반영하고, 순매수를 tick 흐름에 더한다 */
   private takeMarket(acc: Account, sym: string, side: Side, qty: number) {
     const trades = this.x.marketOrder(acc.userId, sym, side, { qty });
-    this.settleMakers(trades);
+    this.settleTrades(trades);
     const v = this.vwap(trades);
     this.addFlow(acc, sym, side === "buy" ? v.notional : -v.notional);
     return v;
@@ -387,7 +387,8 @@ export class Broker {
     const fill = this.atomic([userId], () => {
       const margin0 = (acc.cash * pct) / 100 / (1 + lev * FEE);
       if (margin0 < 1) throw new OrderError("예수금이 부족합니다.");
-      const want = this.x.qtyFor(userId, sym, xs, margin0 * lev);
+      const want = floorTo(this.x.qtyFor(userId, sym, xs, margin0 * lev), step(this.x.quote(sym)!.market));
+      if (want <= 0) throw new OrderError("증거금이 부족해 1주도 진입할 수 없습니다.");
       const v = this.takeMarket(acc, sym, xs, want);
       if (v.qty <= 0) throw new OrderError("호가가 없어 체결되지 않았습니다.");
       const margin = v.notional / lev, fee = v.notional * FEE;
@@ -419,7 +420,9 @@ export class Broker {
   private closeNow(acc: Account, f: Future, pct: number, reason: "user" | "liquidation" | "stop" | "tp"): Fill {
     return this.atomic([acc.userId], () => {
       const share = Math.min(1, pct / 100);
-      const v = this.takeMarket(acc, f.sym, f.side === "long" ? "sell" : "buy", f.qty * share);
+      const qty = share >= 1 ? f.qty : floorTo(f.qty * share, step(this.x.quote(f.sym)?.market ?? "stock"));
+      if (qty <= 0) throw new OrderError("종료할 수량이 1주보다 적습니다. 더 큰 비중으로 종료하세요.");
+      const v = this.takeMarket(acc, f.sym, f.side === "long" ? "sell" : "buy", qty);
       if (v.qty <= 0) throw new OrderError("호가가 없어 체결되지 않았습니다.");
       const part = v.qty / f.qty, margin = f.margin * part, fee = v.notional * FEE;
       const pnl = pnlOf(f, v.price, v.qty);
@@ -474,7 +477,7 @@ export class Broker {
     if (!Number.isFinite(req.price) || req.price <= 0) throw new OrderError("가격이 올바르지 않습니다.");
     this.checkPct(pct);
     if (kind === "fut") this.checkLev(userId, sym, req.lev ?? 0);
-    const acc = this.admit(userId, sym), q = this.x.quote(sym)!, unit = kind === "spot" ? step(q.market) : 0;
+    const acc = this.admit(userId, sym), q = this.x.quote(sym)!, unit = step(q.market);
     if (this.ordersOf(userId).length >= MAX_OPEN_ORDERS) throw new OrderError(`미체결 주문은 최대 ${MAX_OPEN_ORDERS}개입니다.`);
     const tickSz = this.x.tickOf(sym), price = Math.max(tickSz, Math.round(req.price / tickSz) * tickSz);
     const out = this.atomic([userId], () => {
@@ -492,17 +495,17 @@ export class Broker {
         if (it.qty <= 0) throw new OrderError("팔 수량이 없습니다.");
         it.held = it.qty; it.avg = pos.avg; pos.qty -= it.qty; this.savePosition(acc, sym, pos); // 파는 수량을 보유에서 떼어 둔다
       } else {
-        const margin = (acc.cash * pct) / 100 / (1 + it.lev * FEE);
-        if (margin < 1) throw new OrderError("예수금이 부족합니다.");
-        it.qty = (margin * it.lev) / price;
-        it.cash = margin * (1 + it.lev * FEE); acc.cash -= it.cash;
+        const budget = (acc.cash * pct) / 100 / (1 + it.lev * FEE);
+        it.qty = floorTo((budget * it.lev) / price, step(q.market));
+        if (it.qty <= 0) throw new OrderError("증거금이 부족해 1주도 진입할 수 없습니다.");
+        it.cash = ((it.qty * price) / it.lev) * (1 + it.lev * FEE); acc.cash -= it.cash; // 증거금 + 바로 체결될 몫의 수수료
       }
       this.stmts.updCash.run(acc.cash, acc.userId, this.season.id);
       const res = this.x.limitOrder(userId, sym, side, price, it.qty);
       // 바로 체결된 몫: 시장가처럼 수수료를 내고 계좌에 반영
       const fills: Fill[] = [];
       if (res.trades.length) {
-        this.settleMakers(res.trades);
+        this.settleTrades(res.trades);
         const v = this.vwap(res.trades);
         this.addFlow(acc, sym, side === "buy" ? v.notional : -v.notional);
         fills.push(this.fillIntent(acc, it, v.qty, v.price, true));
@@ -528,13 +531,27 @@ export class Broker {
     this.x.cancel(userId, orderId);
     this.atomic([userId], () => this.release(this.account(userId), it));
   }
+  /** 내 미체결 지정가 전체 취소 (한 번의 주문으로 센다). 취소한 개수를 돌려준다 */
+  cancelAll(userId: number) {
+    const mine = [...this.intents.values()].filter(it => it.userId === userId);
+    if (!mine.length) throw new OrderError("취소할 미체결 주문이 없습니다.");
+    const r = this.recent.get(userId), count = r && r.tick === this.market.tick ? r.count : 0;
+    if (count >= ORDERS_PER_TICK && this.account(userId).kind !== "mm") throw new OrderError("주문이 너무 빠릅니다. 잠시 후 다시 시도하세요.");
+    this.recent.set(userId, { tick: this.market.tick, count: count + 1 });
+    const acc = this.account(userId);
+    this.atomic([userId], () => { for (const it of mine) { this.x.cancel(userId, it.id); this.release(acc, it); } });
+    return mine.length;
+  }
   ordersOf(userId: number) { return [...this.intents.values()].filter(it => it.userId === userId).map(it => this.orderView(it)); }
   private orderView(it: Intent) {
     return { id: it.id, sym: it.sym, kind: it.kind, side: it.side, lev: it.lev, price: it.price, qty: it.qty, filled: it.filled ?? 0 };
   }
 
-  /** 거래소가 돌려준 체결 중 걸어 둔 지정가(maker)가 사람·봇 것이면 그 계좌에 반영한다 (수수료 0) */
-  private settleMakers(trades: Trade[]) {
+  /**
+   * 거래소가 돌려준 체결 중 걸어 둔 지정가(maker)가 사람·봇 것이면 그 계좌에 반영한다 (수수료 0).
+   * GameLoop도 exchange.step()이 돌려준 체결(가격이 지나간 지정가를 호가 봇이 받은 것)을 여기로 넘긴다
+   */
+  settleTrades(trades: Trade[]) {
     for (const t of trades) {
       if (t.maker === MAKER) continue;
       const it = this.intents.get(t.makerOrder);

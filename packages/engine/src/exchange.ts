@@ -1,7 +1,7 @@
 // 호가창 거래소 (M8). 엔진(Market)은 화면에 안 나오는 기준가를 만들고, 여기서 호가 봇이 그 근처에 호가를 깐다.
 // 사람·봇의 주문은 즉시 체결된다. 화면 가격·캔들·거래량은 모두 이 호가창의 체결값이다.
 //
-// 호가 봇 규칙 (M8-호가창-설계.md 3장):
+// 호가 봇 규칙 (docs/M8-호가창-설계.md 3장):
 // - 중심가 = 기준가 × exp(-기울기 × 재고/유동성). 숏 재고를 떠안으면 중심을 올려 더 비싸게 판다 → 몰려 사면 계속 오른다
 // - 기준가에서 x만큼 떨어진 곳까지 깔린 누적 물량 N(x) = L·(x / 2σ일)². 그래서 금액 N을 시장가로 먹으면 √N에 비례해 밀린다
 //   (예전 주문 충격 공식과 같은 크기)
@@ -49,6 +49,9 @@ export function tickSize(price: number, bp = EXCHANGE_DEFAULTS.tickBp): number {
   return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * exp;
 }
 const roundTo = (v: number, t: number) => Math.round(v / t) * t;
+/** 수량 단위: 주식·신흥주는 1주, 코인은 0.000001개. 호가 봇 물량도 이 단위라 체결 수량이 늘 단위의 배수다 */
+export const qtyUnit = (market: MarketKind) => (market === "coin" ? 1e-6 : 1);
+const floorTo = (v: number, u: number) => Math.floor(v / u + 1e-9) * u;
 
 /** 종목 하나의 호가창. 매수는 높은 가격 먼저, 매도는 낮은 가격 먼저, 같은 가격이면 먼저 건 주문 먼저 */
 class Book {
@@ -98,19 +101,27 @@ export class Exchange {
   tickOf(sym: string) { return tickSize(this.reference(sym), this.opts.tickBp); }
 
   // ---------- 호가 봇 ----------
-  /** 호가 봇 호가를 걷고 기준가·재고에 맞춰 다시 깐다 (tick마다) */
-  requote(sym: string) {
+  /**
+   * 호가 봇 호가를 걷고 기준가·재고에 맞춰 다시 깐다 (tick마다).
+   * 기준가가 사람 지정가를 넘어가 있으면(예: 매도 지정가보다 호가 봇 매수 호가가 높음) 호가 봇이 그 지정가를 그 가격에 받는다.
+   * 그래서 호가창이 엇갈리지 않고, 가격이 지나간 지정가는 체결된다. 그 체결을 돌려준다
+   */
+  requote(sym: string): Trade[] {
     const st = this.st(sym), q = this.market.quote(sym);
-    if (!st || !q) return;
+    if (!st || !q) return [];
     st.book.remove(o => o.owner === MAKER);
     const ref = q.price, L = this.market.liquidity(sym) ?? 1e6, sigma = this.market.sigma(sym) ?? 0.001;
     const sigmaDay = sigma * Math.sqrt(this.market.options.ticksPerDay), o = this.opts, tick = tickSize(ref, o.tickBp);
     const invL = (st.inv * ref) / L; // 재고 (L 단위, 롱 +)
     const center = ref * Math.exp(-o.skewPerL * sigmaDay * invL);
     const half = Math.max(tick / ref, sigma * o.spreadSigma), backstop = o.backstop[q.market], span = backstop * 0.95;
+    const crossed = [
+      ...this.take(MAKER, this.nextId++, sym, "buy", Infinity, roundTo(center * (1 - half), tick)),
+      ...this.take(MAKER, this.nextId++, sym, "sell", Infinity, roundTo(center * (1 + half), tick)),
+    ];
     // 누적 물량 N(x) = L (x / Kσ일)², K = 엔진 impactK (기본 2). 그래서 금액 N을 먹으면 Kσ일·√(N/L)만큼 밀린다 (예전 충격 공식과 같은 크기)
     // 단계는 중심 근처는 촘촘하게, 멀수록 넓게(제곱 간격) 안전 물량 직전까지 깐다. 그 사이에 빈 구간이 없다
-    const K = this.market.options.impactK, N = (x: number) => (L * x * x) / (K * K * sigmaDay * sigmaDay);
+    const unit = qtyUnit(q.market), K = this.market.options.impactK, N = (x: number) => (L * x * x) / (K * K * sigmaDay * sigmaDay);
     for (const side of ["buy", "sell"] as Side[]) {
       const dir = side === "buy" ? -1 : 1;
       // 재고가 한도를 넘으면 더 쌓이는 쪽(롱 재고면 매수 호가)을 줄인다
@@ -123,12 +134,15 @@ export class Exchange {
         const price = Math.max(tick, roundTo(center * (1 + dir * x), tick));
         if (price === prevPrice) continue; // 호가 단위 때문에 같은 가격이면 다음 단계에 합친다
         prevPrice = price;
-        this.rest(MAKER, sym, side, price, pending / price);
-        pending = 0;
+        const qty = floorTo(pending / price, unit);
+        if (qty <= 0) continue; // 1주가 안 되면 다음 단계에 합친다
+        this.rest(MAKER, sym, side, price, qty);
+        pending -= qty * price;
       }
       const far = Math.max(tick, roundTo(ref * (1 + dir * backstop), tick));
-      this.rest(MAKER, sym, side, far, (L * o.backstopL + pending) / far); // 안전 물량
+      this.rest(MAKER, sym, side, far, Math.max(unit, floorTo((L * o.backstopL + pending) / far, unit))); // 안전 물량
     }
+    return crossed;
   }
   /** 호가 봇 재고·손익 (운영자·시뮬레이션용) */
   makerBook(sym: string) { const st = this.st(sym); return st ? { inv: st.inv, cash: st.cash, value: st.cash + st.inv * st.last } : null; }
@@ -153,7 +167,7 @@ export class Exchange {
       best.qty -= fill; left -= fill; money -= fill * best.price;
       const t: Trade = { sym, price: best.price, qty: fill, tick, seq: this.seq++, taker: owner, takerSide: side, takerOrder: orderId, maker: best.owner, makerOrder: best.id };
       trades.push(t);
-      if (best.owner === MAKER) { const d = side === "buy" ? -fill : fill; st.inv += d; st.cash -= d * best.price; }
+      if (best.owner === MAKER || owner === MAKER) { const d = (side === "buy") === (owner === MAKER) ? fill : -fill; st.inv += d; st.cash -= d * best.price; } // 호가 봇 재고 (롱 +)
       if (best.qty <= 1e-12) opp.shift();
     }
     if (trades.length) this.record(sym, trades);
@@ -254,16 +268,16 @@ export class Exchange {
   }
 
   // ---------- tick ----------
-  /** 엔진 1 tick → 상장 변화 반영 → 캔들 → 호가 봇 재호가. 취소된 사람 주문(폐지·병합)도 돌려준다 */
-  step(): StepResult & { cancelled: BookOrder[] } {
-    const r = this.market.step(), cancelled: BookOrder[] = [];
+  /** 엔진 1 tick → 상장 변화 반영 → 캔들 → 호가 봇 재호가. 취소된 사람 주문(폐지·병합)과 재호가 때 호가 봇이 받은 지정가 체결도 돌려준다 */
+  step(): StepResult & { cancelled: BookOrder[]; trades: Trade[] } {
+    const r = this.market.step(), cancelled: BookOrder[] = [], trades: Trade[] = [];
     for (const a of r.actions) cancelled.push(...this.applyAction(a));
     for (const q of this.market.quotes()) if (!this.st(q.sym)) this.list(q.sym);
     for (const [sym, st] of this.s) {
       // 재고 헤지: 쌓인 재고를 tick마다 조금씩 바깥(기준가)에서 정리한다. 그래서 밀린 가격이 천천히 기준가로 돌아간다
       const hedge = st.inv * this.opts.hedgeRate, ref = this.reference(sym);
       st.inv -= hedge; st.cash += hedge * ref;
-      this.requote(sym); // 새 기준가로 먼저 깔아야 가격이 한 tick 늦지 않는다
+      trades.push(...this.requote(sym)); // 새 기준가로 먼저 깔아야 가격이 한 tick 늦지 않는다
     }
     for (const q of this.market.quotes()) {
       const st = this.st(q.sym)!, eng = this.market.bars(q.sym), eb = eng[eng.length - 1];
@@ -281,7 +295,7 @@ export class Exchange {
         if (eb) bar.volume = eb.volume + st.barTraded; // 엔진의 배경 거래량 + 실제 체결 (A9)
       }
     }
-    return { ...r, cancelled };
+    return { ...r, cancelled, trades };
   }
 
   /** 주식병합: 가격·수량을 비율대로, 걸린 주문은 취소. 폐지: 호가창을 닫고 걸린 주문을 돌려준다 */

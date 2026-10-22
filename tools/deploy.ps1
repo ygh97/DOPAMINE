@@ -1,0 +1,95 @@
+﻿# 도파민 센터: 이 PC에서 서버 업데이트·재시작 (Cloudflare Quick Tunnel 운영용). 사용법은 DEPLOY.md.
+#
+#   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1              # 최신 코드 받기 → 설치 → 화면 빌드 → 서버 재시작
+#   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -NewSeason   # 위 + 지금 시즌을 끝내고 새 시즌 (엔진·호가창 규칙이 바뀐 배포)
+#   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop        # 서버만 끈다
+#   -SkipPull: git pull 안 함 / -Tunnel: 터널이 꺼져 있으면 새로 켜고 주소를 보여 준다
+param([switch]$NewSeason, [switch]$Stop, [switch]$SkipPull, [switch]$Tunnel, [int]$Port = 4810)
+
+$ErrorActionPreference = "Stop"
+$Root = Split-Path -Parent $PSScriptRoot
+Set-Location $Root
+$Api = "http://127.0.0.1:$Port"
+New-Item -ItemType Directory -Force (Join-Path $Root "data") | Out-Null
+
+function Step($text) { Write-Host "`n== $text" -ForegroundColor Cyan }
+function AdminKey {
+  $line = Get-Content (Join-Path $Root ".env") -ErrorAction SilentlyContinue | Where-Object { $_ -match "^ADMIN_KEY=" } | Select-Object -First 1
+  if (-not $line) { return $null }
+  return $line.Substring(10).Trim()
+}
+function ServerPid {
+  $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($c) { return $c.OwningProcess }
+  return $null
+}
+function StopServer {
+  $id = ServerPid
+  if (-not $id) { Write-Host "켜져 있는 서버 없음 (포트 $Port)"; return }
+  $key = AdminKey
+  if ($key) {
+    # 끄기 전에 엔진 스냅샷 + DB 백업 (다시 켤 때 재생이 짧아진다)
+    try { Invoke-RestMethod -Method Post -Uri "$Api/api/admin/backup" -Headers @{ "x-admin-key" = $key } -TimeoutSec 30 | Out-Null; Write-Host "스냅샷·백업 저장" }
+    catch { Write-Host "백업 요청 실패 (계속 진행): $($_.Exception.Message)" -ForegroundColor Yellow }
+  }
+  Stop-Process -Id $id -Force
+  for ($i = 0; $i -lt 20 -and (ServerPid); $i++) { Start-Sleep -Milliseconds 500 }
+  Write-Host "서버 종료 (PID $id)"
+}
+
+if ($Stop) { Step "서버 끄기"; StopServer; exit 0 }
+
+if (-not $SkipPull) {
+  Step "최신 코드 받기 (git pull)"
+  git pull --ff-only
+  if ($LASTEXITCODE -ne 0) { throw "git pull 실패. 내 PC에서 고친 파일이 있으면 먼저 커밋하거나 되돌리세요." }
+}
+
+Step "패키지 설치 (npm install)"
+npm install --no-audit --no-fund
+if ($LASTEXITCODE -ne 0) { throw "npm install 실패" }
+
+Step "서버 끄기"
+StopServer
+
+Step "화면 빌드 (npm run build)"
+npm run build
+if ($LASTEXITCODE -ne 0) { throw "화면 빌드 실패. 서버는 꺼진 상태입니다. 고친 뒤 다시 실행하세요." }
+
+Step "서버 켜기 (로그: data\server.log)"
+$log = Join-Path $Root "data\server.log"
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm start --workspace @dopamine/server >> `"$log`" 2>&1" -WorkingDirectory $Root -WindowStyle Minimized
+$health = $null
+for ($i = 0; $i -lt 120 -and -not $health; $i++) {
+  Start-Sleep -Seconds 1
+  try { $health = Invoke-RestMethod -Uri "$Api/api/health" -TimeoutSec 2 } catch { }
+}
+if (-not $health) { throw "서버가 2분 안에 뜨지 않았습니다. data\server.log 끝부분을 보세요." }
+Write-Host "서버 켜짐: 시즌 $($health.season), tick $($health.tick), 재생 $($health.replayed) tick, 부팅 $($health.bootMs)ms"
+
+if ($NewSeason) {
+  Step "새 시즌 시작"
+  $key = AdminKey
+  if (-not $key -or $key.Length -lt 16) { throw ".env에 ADMIN_KEY(16자 이상)가 없어 새 시즌을 시작할 수 없습니다." }
+  $r = Invoke-RestMethod -Method Post -Uri "$Api/api/admin/new-season" -Headers @{ "x-admin-key" = $key } -TimeoutSec 60
+  Write-Host "시즌 $($r.ended) 종료 → 시즌 $($r.season) 시작"
+}
+
+Step "터널 (cloudflared)"
+$cf = Get-Process cloudflared -ErrorAction SilentlyContinue
+$tlog = Join-Path $Root "data\tunnel.log"
+if ($cf) {
+  Write-Host "터널 켜져 있음 (서버만 다시 켰으니 주소는 그대로)"
+} elseif ($Tunnel) {
+  if (Test-Path $tlog) { Remove-Item $tlog }
+  Start-Process -FilePath "cloudflared" -ArgumentList "tunnel", "--url", $Api, "--logfile", $tlog -WindowStyle Minimized
+  $url = $null
+  for ($i = 0; $i -lt 60 -and -not $url; $i++) {
+    Start-Sleep -Seconds 1
+    if (Test-Path $tlog) { $m = Select-String -Path $tlog -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | Select-Object -First 1; if ($m) { $url = $m.Matches[0].Value } }
+  }
+  if ($url) { Write-Host "새 주소: $url" -ForegroundColor Green } else { Write-Host "주소를 아직 못 찾았습니다. data\tunnel.log를 보세요." -ForegroundColor Yellow }
+} else {
+  Write-Host "터널이 꺼져 있습니다. -Tunnel을 붙여 다시 실행하거나 직접: cloudflared tunnel --url $Api" -ForegroundColor Yellow
+}
+Write-Host "`n완료" -ForegroundColor Green

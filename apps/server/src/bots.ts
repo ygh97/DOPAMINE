@@ -1,4 +1,6 @@
-// 🤖 봇과 🏦 세력 계정. 사람과 같은 Broker 주문 경로(충격·수수료·속도 제한·강제 청산)로 매매한다.
+// 🤖 봇과 🏦 세력 계정. 사람과 같은 Broker 주문 경로(호가창 체결·수수료·속도 제한·강제 청산)로 매매한다.
+// M8부터 엔진의 숨은 패턴(개미털기·스퀴즈·설거지·가짜 돌파)은 꺼져 있고, 그 몫을 세력 계좌가 실제 주문으로 한다 (A13).
+// 적정가로 당기는 힘도 가치투자 세력(공매도·저평가 매수)이 맡는다. 엔진의 당김은 안전장치만큼 (A14).
 // 서버는 BOTS·MARKET_MAKERS 환경 변수로 켜고, tools/sim-bots.ts는 같은 코드로 졸업률을 잰다.
 // 결정은 계좌별 seed 난수로만 한다 (Math.random 금지) → 같은 seed면 같은 결과.
 import { ASSETS, LEVERAGE, type NewsItem, type Quote } from "@dopamine/engine";
@@ -54,6 +56,27 @@ abstract class Agent {
   /** 성향 이름 (시뮬레이션 통계용) */
   abstract get label(): string;
 
+  /** 내가 건 지정가가 걸린 tick (오래된 주문 취소용) */
+  private orderAt = new Map<number, number>();
+  /** 지정가. 실패(잔고·속도 제한 등)는 조용히 넘긴다 */
+  protected limit(c: Ctx, sym: string, kind: "spot" | "fut", side: "buy" | "sell", price: number, pct: number, lev?: number) {
+    try {
+      const r = c.broker.limitOrder(this.userId, { sym, kind, side, price, pct: Math.min(100, Math.max(0.5, pct)), lev });
+      if (r.order) this.orderAt.set(r.order.id, c.tick);
+      return r;
+    } catch { return null; }
+  }
+  /** maxAge tick보다 오래 걸려 있는 지정가 취소 (only가 있으면 그 조건에 맞는 것만) */
+  protected cancelStale(c: Ctx, maxAge: number, only?: (o: { side: string; sym: string }) => boolean) {
+    const live = c.broker.ordersOf(this.userId), ids = new Set(live.map(o => o.id));
+    for (const id of [...this.orderAt.keys()]) if (!ids.has(id)) this.orderAt.delete(id); // 체결·취소된 주문 정리
+    for (const o of live) {
+      if (!this.orderAt.has(o.id)) this.orderAt.set(o.id, c.tick);
+      if (c.tick - this.orderAt.get(o.id)! >= maxAge && (!only || only(o))) { try { c.broker.cancelOrder(this.userId, o.id); } catch { /* 다음 tick */ } }
+    }
+  }
+  protected cancelAll(c: Ctx) { try { c.broker.cancelAll(this.userId); } catch { /* 없거나 속도 제한 */ } }
+
   /** 다 잃은 뒤 다시 시작하기까지 기다리는 tick */
   protected resetDelay = 600;
   /** 🤖 봇 교대: retiring = 포지션 정리 중, resting = 쉬는 중 (매매 안 함, 랭킹에서 숨음) */
@@ -64,7 +87,8 @@ abstract class Agent {
     const acc = c.broker.account(this.userId);
     // 청산·스탑 등으로 사라진 포지션의 메모를 지운다 (주문은 다음 tick에 체결되므로 직전 주문은 이미 반영돼 있다)
     for (const sym of [...this.meta.keys()]) if (!this.fut(c, sym) && !acc.positions.has(sym)) this.meta.delete(sym);
-    if (this.retiring) { // 남은 포지션을 정리하고, 다 비면 쉰다
+    if (this.retiring) { // 남은 포지션·지정가를 정리하고, 다 비면 쉰다
+      if (c.broker.ordersOf(this.userId).length) { this.cancelAll(c); return; }
       if (!acc.futures.size && !acc.positions.size) { this.retiring = false; this.resting = true; this.meta.clear(); c.broker.setResting(this.userId, true); return; }
       for (const f of acc.futures.values()) if (!f.closing) { try { c.broker.closeFuture(this.userId, f.id, 100).catch(() => {}); } catch { /* 다음 tick */ } }
       for (const sym of acc.positions.keys()) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
@@ -201,24 +225,31 @@ class Bot extends Agent {
         }
         return;
       }
-      case "dipBuyer": {
-        if (r() < 1 / 30) for (const sym of liveSyms(c, ["stock", "coin"])) {
-          const p = c.market.quote(sym)!.price, then = c.hist.ago(sym, 300);
-          if (then && p / then - 1 < -0.03 && !this.meta.has(sym)) { this.buy(c, sym, 30, 900); break; }
+      case "dipBuyer": { // 지정가형: 현재가보다 1~4% 아래에 사 두고, 평단 +3%에 매도 지정가. -8%면 손절
+        this.cancelStale(c, 900, o => o.side === "buy");
+        const orders = c.broker.ordersOf(this.userId);
+        for (const [sym, pos] of acc.positions) {
+          const p = c.market.quote(sym)?.price ?? 0, selling = orders.find(o => o.sym === sym && o.side === "sell");
+          if (p && p < pos.avg * 0.92) { if (selling) { try { c.broker.cancelOrder(this.userId, selling.id); } catch { /* 다음 tick */ } } else this.sell(c, sym); }
+          else if (!selling) this.limit(c, sym, "spot", "sell", pos.avg * 1.03, 100);
         }
-        this.each(c, (sym, m, p) => { if (p / m.entry - 1 > 0.03) this.sell(c, sym); });
-        this.expire(c);
+        if (!acc.positions.size && !orders.length && r() < 1 / 30) {
+          const sym = pick(r, liveSyms(c, ["stock", "coin"])), p = c.market.quote(sym)!.price;
+          this.limit(c, sym, "spot", "buy", p * (1 - uni(r, 0.01, 0.04)), 30);
+        }
       }
     }
   }
 }
 
 // ---------- 🏦 세력 ----------
-export type MmStyle = "liquidity" | "liqHunter" | "crowdFade" | "momentum" | "meanRevert" | "overvalued" | "pairArb" | "whale";
+export type MmStyle = "liquidity" | "liqHunter" | "crowdFade" | "momentum" | "meanRevert" | "overvalued" | "undervalued" | "pairArb" | "whale";
 export const MM_NAMES: Record<MmStyle, string> = {
   liquidity: "유동성세력", liqHunter: "청산사냥꾼", crowdFade: "역이용세력", momentum: "모멘텀세력",
-  meanRevert: "역추세세력", overvalued: "공매도세력", pairArb: "차익거래단", whale: "고래",
+  meanRevert: "역추세세력", overvalued: "공매도세력", undervalued: "가치투자세력", pairArb: "차익거래단", whale: "고래",
 };
+/** 유동성 세력이 지정가를 거는 거리 (현재가 대비) */
+const LIQ_GAP: Record<string, number> = { stock: 0.004, coin: 0.008, venture: 0.03 };
 /** 세력 세기 (테스트 서버에서 조절). 1 = 기본 */
 export interface MmTuning { strength: Partial<Record<MmStyle, number>> }
 const FAIR_PER = new Map(ASSETS.filter(a => a.fairPER).map(a => [a.sym, a.fairPER!]));
@@ -227,6 +258,8 @@ const PAIRS: [string, string][] = [["BTC", "ETH"], ["NVDA", "AMD"], ["AAPL", "MS
 class MarketMaker extends Agent {
   private style: MmStyle; private k: number;
   private ventures = new Set<string>();
+  private activity = new Map<string, number>(); // 종목별 최근 사람·봇 거래 금액 (감쇠 합)
+  private posAt = new Map<number, number>();    // 선물 포지션이 처음 보인 tick
   constructor(userId: number, name: string, seed: number, style: MmStyle, strength = 1, kind: AccountKind = "mm") {
     super(userId, name, kind, seed); this.style = style; this.k = strength;
   }
@@ -237,11 +270,24 @@ class MarketMaker extends Agent {
   act(c: Ctx) {
     const r = this.rand;
     switch (this.style) {
-      case "liquidity": { // 쏠림 반대편을 받아 준다 (충격 완화). 90틱 보유
-        for (const [sym, flow] of c.broker.lastFlows) {
-          const L = c.market.liquidity(sym) ?? Infinity;
-          if (Math.abs(flow) < 0.05 * L || this.meta.has(sym)) continue;
-          this.open(c, sym, flow > 0 ? "short" : "long", 2, this.pctFor(c, 0.5 * Math.abs(flow), 2), 90);
+      case "liquidity": { // 사람·봇이 많이 거래하는 종목 위·아래에 선물 지정가를 두껍게 건다 (A10). 체결되면 120틱 안에 정리
+        for (const [sym, v] of this.activity) this.activity.set(sym, v * 0.98);
+        for (const [sym, flow] of c.broker.lastFlows) this.activity.set(sym, (this.activity.get(sym) ?? 0) + Math.abs(flow));
+        for (const f of c.broker.account(this.userId).futures.values()) {
+          if (!this.posAt.has(f.id)) this.posAt.set(f.id, c.tick);
+          const q = c.market.quote(f.sym), gain = (f.side === "long" ? 1 : -1) * ((q?.price ?? f.entry) / f.entry - 1);
+          if (!f.closing && (c.tick - this.posAt.get(f.id)! > 120 || gain > LIQ_GAP[q?.market ?? "stock"])) {
+            try { c.broker.closeFuture(this.userId, f.id, 100).then(() => this.posAt.delete(f.id), () => {}); } catch { /* 다음 tick */ }
+          }
+        }
+        if (c.tick % 30) break;
+        this.cancelAll(c);
+        const top = [...this.activity].filter(([sym, v]) => v > 0.02 * (c.market.liquidity(sym) ?? Infinity)).sort((a, b) => b[1] - a[1]).slice(0, 6);
+        for (const [sym, v] of top) {
+          const q = c.market.quote(sym); if (!q) continue;
+          const gap = LIQ_GAP[q.market], pct = Math.min(8, this.pctFor(c, Math.min(0.3 * v, 0.05 * (c.market.liquidity(sym) ?? 0)), 2));
+          this.limit(c, sym, "fut", "sell", q.price * (1 + gap), pct, this.lev(c, sym, 2));
+          this.limit(c, sym, "fut", "buy", q.price * (1 - gap), pct, this.lev(c, sym, 2));
         }
         break;
       }
@@ -294,13 +340,14 @@ class MarketMaker extends Agent {
         this.expire(c);
         break;
       }
-      case "overvalued": { // PER이 적정보다 크게 높은 주식을 공매도. 식으면 정리
-        if (c.tick % 300) { this.expire(c); break; }
+      case "overvalued": case "undervalued": { // 가치투자: 적정가(PER 기준)보다 8% 넘게 비싸면 공매도, 싸면 매수. 3% 안으로 돌아오면 정리 (A14)
+        if (c.tick % 60) { this.expire(c); break; }
+        const short = this.style === "overvalued";
         for (const q of c.market.quotes()) {
           if (q.market !== "stock" || !q.per) continue;
-          const fair = FAIR_PER.get(q.sym) ?? 15;
-          if (q.per > fair * 1.5 && !this.meta.has(q.sym)) this.open(c, q.sym, "short", 2, 8, 3600);
-          else if (this.meta.has(q.sym) && q.per < fair * 1.15) this.close(c, q.sym);
+          const dev = q.per / (FAIR_PER.get(q.sym) ?? 15) - 1; // 승격주는 적정 PER 15
+          if (!this.meta.has(q.sym) && (short ? dev > 0.08 : dev < -0.08)) this.open(c, q.sym, short ? "short" : "long", 2, Math.min(25, 80 * Math.abs(dev)) * this.k, 7200);
+          else if (this.meta.has(q.sym) && Math.abs(dev) < 0.03) this.close(c, q.sym);
         }
         this.expire(c);
         break;

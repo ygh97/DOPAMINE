@@ -12,13 +12,15 @@ export interface FuturePos {
   id: number; sym: string; side: "long" | "short"; lev: number;
   qty: number; entry: number; margin: number; stop: number | null; tp: number | null; liq: number;
 }
+/** 걸어 둔 지정가. qty = 남은 수량, filled = 체결된 수량. kind fut이면 buy 롱 / sell 숏 진입 */
+export interface OpenOrder { id: number; sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; lev: number; price: number; qty: number; filled: number }
 export interface Me {
   /** grad: 20배 졸업 금액, goal: 100배 전설 금액 */
   name: string; cash: number; equity: number; returnPct: number; goal: number; grad: number;
   clearedTick: number | null; gradTick: number | null; resetAt: number | null; tick: number;
   positions: { sym: string; qty: number; avg: number }[];
   futures: FuturePos[];
-  fills: Fill[]; rank: number | null;
+  fills: Fill[]; orders: OpenOrder[]; rank: number | null;
 }
 
 export const useAccount = defineStore("account", () => {
@@ -26,7 +28,7 @@ export const useAccount = defineStore("account", () => {
   const token = ref(readToken());
   const me = ref<Me | null>(null);
   const busy = ref(false);
-  const holdTab = ref<"hold" | "fut" | "fills">("hold");
+  const holdTab = ref<"hold" | "fut" | "orders" | "fills">("hold");
   const toast = ref<{ text: string; kind: "ok" | "error"; id: number } | null>(null);
 
   function notify(text: string, kind: "ok" | "error" = "ok") {
@@ -81,6 +83,7 @@ export const useAccount = defineStore("account", () => {
       me.value = r.me;
       if (side === "buy") holdTab.value = "hold";
       void m.loadRanking();
+      m.bookEpoch++;
       const f = r.fill;
       notify(`${f.sym} ${f.side === "buy" ? "매수" : "매도"} ${+f.qty.toFixed(6)}${m.quotes[f.sym]?.market === "coin" ? "" : "주"} @ $${f.price.toFixed(f.price < 1 ? 4 : 2)}`);
     } catch (e) { notify((e as Error).message, "error"); }
@@ -94,10 +97,38 @@ export const useAccount = defineStore("account", () => {
       me.value = r.me;
       holdTab.value = "fut";
       void m.loadRanking();
+      m.bookEpoch++;
       const f = r.fill;
       notify(`${f.sym} ${lev}x ${side === "long" ? "롱" : "숏"} 진입 ${+f.qty.toFixed(6)}${m.quotes[f.sym]?.market === "coin" ? "" : "주"} @ $${f.price.toFixed(f.price < 1 ? 4 : 2)}`);
     } catch (e) { notify((e as Error).message, "error"); }
     finally { busy.value = false; }
+  }
+
+  /** 지정가: 바로 체결된 몫은 체결 내역에, 남은 수량은 미체결 탭에 */
+  async function limit(req: { sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; price: number; pct: number; lev?: number }) {
+    busy.value = true;
+    try {
+      const r = await api<{ fills: Fill[]; order: OpenOrder | null; me: Me }>("/api/limit", req);
+      me.value = r.me;
+      void m.loadRanking();
+      const filled = r.fills.reduce((s, f) => s + f.qty, 0), unitOf = m.quotes[req.sym]?.market === "coin" ? "" : "주";
+      const what = req.kind === "fut" ? `${req.lev}x ${req.side === "buy" ? "롱" : "숏"}` : req.side === "buy" ? "매수" : "매도";
+      if (r.order) {
+        holdTab.value = "orders";
+        notify(`${req.sym} ${what} 지정가 $${r.order.price.toFixed(r.order.price < 1 ? 4 : 2)} 걸어 둠${filled ? ` (${+filled.toFixed(6)}${unitOf} 바로 체결)` : ""}`);
+      } else notify(`${req.sym} ${what} 지정가 바로 체결 ${+filled.toFixed(6)}${unitOf}`);
+      m.bookEpoch++;
+    } catch (e) { notify((e as Error).message, "error"); }
+    finally { busy.value = false; }
+  }
+
+  async function cancel(id?: number) {
+    try {
+      const r = await api<{ count: number; me: Me }>("/api/cancel", id == null ? { all: true } : { id });
+      me.value = r.me;
+      notify(id == null ? `미체결 ${r.count}건을 모두 취소했습니다.` : "주문을 취소했습니다.");
+      m.bookEpoch++;
+    } catch (e) { notify((e as Error).message, "error"); }
   }
 
   async function closeFuture(posId: number, pct: number) {
@@ -213,9 +244,9 @@ export const useAccount = defineStore("account", () => {
     ? me.value.cash + positions.value.reduce((s, p) => s + p.value, 0) + futures.value.reduce((s, f) => s + f.value, 0)
     : 0));
   const holding = (sym: string) => me.value?.positions.find(p => p.sym === sym)?.qty ?? 0;
-  const hasExposure = (sym: string) => holding(sym) > 0 || (me.value?.futures.some(f => f.sym === sym) ?? false);
+  const hasExposure = (sym: string) => holding(sym) > 0 || (me.value?.futures.some(f => f.sym === sym) ?? false) || (me.value?.orders.some(o => o.sym === sym) ?? false);
 
-  // 내가 가진 종목이 병합·폐지·강제청산·스탑로스로 정산되면 계좌를 다시 받는다
+  // 내가 가진 종목이 병합·폐지·강제청산·스탑로스로 정산되거나 내 지정가가 체결되면 계좌를 다시 받는다
   watch(() => m.settled, async list => {
     if (!list.some(s => hasExposure(s.sym))) return;
     const prevId = me.value?.fills[0]?.id ?? 0;
@@ -232,5 +263,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, closeAll, setStop, setTp, reset, fetchDrawings, syncDrawing, sendChat, share, react, reportChat, adminChat, adminBan, adminHide };
+  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchDrawings, syncDrawing, sendChat, share, react, reportChat, adminChat, adminBan, adminHide };
 });

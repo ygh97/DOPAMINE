@@ -4,6 +4,7 @@ import FloatingNews from "./components/FloatingNews.vue";
 import HoldingsPanel from "./components/HoldingsPanel.vue";
 import NewsDialog from "./components/NewsDialog.vue";
 import NewsLine from "./components/NewsLine.vue";
+import OrderBook from "./components/OrderBook.vue";
 import OrderPanel from "./components/OrderPanel.vue";
 import PriceChart from "./components/PriceChart.vue";
 import QuoteHeader from "./components/QuoteHeader.vue";
@@ -149,12 +150,15 @@ onMounted(() => {
       <HoldingsPanel class="sec-hold" />
     </section>
     <section class="right">
-      <OrderPanel class="sec-order" />
+      <div class="trade-box sec-order">
+        <OrderBook />
+        <OrderPanel />
+      </div>
       <SocialPanel class="sec-social" />
     </section>
   </main>
   <p class="footer">
-    모든 시세·뉴스·실적은 게임용 허구이며 실제 투자 권유가 아닙니다 · 수수료 0.05% + 슬리피지 0.05% ·
+    모든 시세·뉴스·실적은 게임용 허구이며 실제 투자 권유가 아닙니다 · 시장가 수수료 0.05% · 지정가 체결 수수료 0 ·
     <button id="policyBtn" class="link-btn" @click="openPolicy">개인정보 처리방침 및 투자 유의 고지</button>
   </p>
 
@@ -320,7 +324,11 @@ onMounted(() => {
         <p>실시간 주문 체결은 <b>실제 시장 가격을 움직입니다!</b> 우측 <b>랭킹</b>이나 <b>채팅</b>에서 다른 유저 닉네임을 클릭해 <b>선물 진입가와 강제청산가</b>를 훔쳐보고, <b>[🎯 반대 저격]</b> 버튼으로 가격을 밀어 강제청산시킨 뒤 <b>[🤣 티배깅]</b>을 날려보세요!</p>
       </div>
       <div class="guide-card">
-        <h3>5. 귓속말 작전 모의 &amp; 단축키</h3>
+        <h3>5. 호가창 &amp; 지정가</h3>
+        <p>모든 주문은 <b>호가창</b>에서 체결됩니다. 시장가는 호가를 먹으며 바로 체결되고(수수료 0.05%), 큰 주문일수록 여러 호가를 먹어 가격이 더 밀립니다. <b>지정가</b>는 원하는 가격에 걸어 두는 주문이라 체결되면 수수료가 없습니다. 호가 대부분은 <b>시스템 호가 봇</b>이 기준가 근처에 깔아 줍니다.</p>
+      </div>
+      <div class="guide-card">
+        <h3>6. 귓속말 작전 모의 &amp; 단축키</h3>
         <p>채팅창에서 유저 옆 <b>[귓속말]</b>을 누르거나 <code>/w 닉네임 내용</code>을 입력하면 둘만 보는 비밀 대화가 가능합니다. 단축키: <b>B</b>(매수/롱), <b>S</b>(매도/숏), <b>1~4</b>(비율 10~100%).</p>
       </div>
     </div>

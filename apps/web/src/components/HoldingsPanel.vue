@@ -28,6 +28,7 @@ const fillMarketClass = (s: string) => (isSpotSide(s) ? "mkt-spot" : s === "deli
 const sideClass = (s: string) =>
   s === "buy" || s === "long-open" || s === "tp" ? "up" : s === "sell" || s === "short-open" || s === "liquidation" ? "down" : "muted";
 const qtyText = (sym: string, q: number) => (m.quotes[sym]?.market === "coin" || !Number.isInteger(q) ? +q.toFixed(6) : q.toLocaleString());
+const orderSide = (o: { kind: string; side: string }) => (o.kind === "fut" ? (o.side === "buy" ? "롱 진입" : "숏 진입") : o.side === "buy" ? "매수" : "매도");
 const signedMoney = (v: number) => `${v >= 0 ? "+" : "-"}${money(Math.abs(v))}`;
 
 // 내 거래 실시간 요약 데이터
@@ -94,6 +95,9 @@ async function shareFill(f: Fill) {
         </button>
         <button role="tab" data-t="fut" :aria-selected="a.holdTab === 'fut'" @click="a.holdTab = 'fut'">
           선물 포지션 <span v-if="a.me" class="tab-cnt">{{ a.futures.length }}</span>
+        </button>
+        <button role="tab" data-t="orders" :aria-selected="a.holdTab === 'orders'" @click="a.holdTab = 'orders'">
+          미체결 <span v-if="a.me" class="tab-cnt">{{ a.me.orders.length }}</span>
         </button>
         <button role="tab" data-t="fills" :aria-selected="a.holdTab === 'fills'" @click="a.holdTab = 'fills'">
           체결 내역 <span v-if="a.me" class="tab-cnt">{{ a.me.fills.length }}</span>
@@ -199,6 +203,24 @@ async function shareFill(f: Fill) {
         열려 있는 선물 포지션이 없습니다.
         <button v-if="a.positions.length" class="link-btn" @click="a.holdTab = 'hold'">보유 현물 종목 {{ a.positions.length }}건 보기 →</button>
       </p>
+    </div>
+    <div v-else-if="a.holdTab === 'orders'" class="table-scroll">
+      <table v-if="a.me.orders.length" id="openOrders" class="grid">
+        <thead><tr><th>종목</th><th>유형</th><th>구분</th><th>지정가</th><th>현재가</th><th>남은 수량</th><th>체결</th><th><button id="cancelAllBtn" class="mini-btn danger" @click="a.cancel()">전체 취소</button></th></tr></thead>
+        <tbody>
+          <tr v-for="o in a.me.orders" :key="o.id" :data-id="o.id" :data-sym="o.sym" class="clickable" @click="m.select(o.sym)">
+            <td><b>{{ o.sym }}</b></td>
+            <td><span class="fill-mkt-badge" :class="o.kind === 'spot' ? 'mkt-spot' : 'mkt-fut'">{{ o.kind === "spot" ? "현물" : `선물 ${o.lev}x` }}</span></td>
+            <td :class="o.side === 'buy' ? 'up' : 'down'"><b>{{ orderSide(o) }}</b></td>
+            <td>{{ money(o.price) }}</td>
+            <td>{{ money(m.quotes[o.sym]?.price ?? 0) }}</td>
+            <td>{{ qtyText(o.sym, o.qty) }}</td>
+            <td class="muted">{{ o.filled ? qtyText(o.sym, o.filled) : "—" }}</td>
+            <td class="act-cell" @click.stop><button class="mini-btn" data-act="cancel" @click="a.cancel(o.id)">취소</button></td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-else class="empty">걸어 둔 지정가가 없습니다. 주문 패널에서 "지정가"를 고르세요.</p>
     </div>
     <div v-else class="table-scroll">
       <table v-if="a.me.fills.length" id="fills" class="grid">
