@@ -20,6 +20,20 @@ const loadHall = async () => {
 // 애널리스트: 적중률 순 (채점된 리포트가 3건 미만이면 아래로)
 const analystRows = computed(() => [...(m.research?.analysts ?? [])].sort((x, y) =>
   Number(y.total >= 3) - Number(x.total >= 3) || y.hits / Math.max(1, y.total) - x.hits / Math.max(1, x.total)));
+// 랭킹은 20명까지 보여 주고, 펼치면 전체를 받아 5초마다 갱신한다
+const rankOpen = ref(false);
+const rankAll = ref<typeof m.ranking | null>(null);
+const RANK_TOP = 20;
+async function loadRankAll() {
+  try { const d = await (await fetch("/api/ranking?limit=500")).json(); rankAll.value = d.rows; } catch { /* 다음에 */ }
+}
+let rankTimer = 0;
+watch([rankOpen, () => m.socialTab], ([open, tab]) => {
+  clearInterval(rankTimer);
+  if (open && tab === "rank") { void loadRankAll(); rankTimer = window.setInterval(loadRankAll, 5000); }
+});
+const rankRows = computed(() => (rankOpen.value && rankAll.value ? rankAll.value : m.ranking.slice(0, RANK_TOP)));
+const myRank = computed(() => a.me?.rank ?? null);
 const text = ref("");
 const whisperTo = ref<string | null>(null);
 const chatInputEl = ref<HTMLInputElement | null>(null);
@@ -57,8 +71,8 @@ function scrollToBottom() {
   });
 }
 
-// 알림 보기: 끄면 전광판(강제청산·졸업·전설)과 티배깅·묵념 메시지를 내 화면 채팅에서만 숨긴다 (브라우저에 저장)
-const showSys = ref((() => { try { return localStorage.getItem("dc-chat-sys") !== "0"; } catch { return true; } })());
+// 알림 보기 (기본 끔): 끄면 전광판(강제청산·졸업·전설)과 티배깅·묵념 메시지를 내 화면 채팅에서만 숨긴다 (브라우저에 저장)
+const showSys = ref((() => { try { return localStorage.getItem("dc-chat-sys") === "1"; } catch { return false; } })()); // 기본은 끔
 function toggleSys() {
   showSys.value = !showSys.value;
   try { localStorage.setItem("dc-chat-sys", showSys.value ? "1" : "0"); } catch { /* 저장 불가 */ }
@@ -226,10 +240,10 @@ async function toggleBan(name: string, banned: boolean) {
       <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>
     </div>
     <div v-if="m.socialTab === 'rank'" class="table-scroll">
-      <div class="rank-hint muted">참가 <b>{{ m.players }}명</b> · 이름을 누르면 보유 종목·레버리지·<b>청산가</b>를 볼 수 있습니다 🔍</div>
+      <div class="rank-hint muted">참가 <b>{{ m.players }}명</b><template v-if="myRank"> · 내 순위 <b>{{ myRank }}위</b></template> · 이름을 누르면 보유 종목·레버리지·<b>청산가</b>를 볼 수 있습니다 🔍</div>
       <table v-if="m.ranking.length" id="ranking" class="grid rank-table">
         <tbody>
-          <tr v-for="r in m.ranking" :key="r.name" class="rank-row clickable" :class="{ mine: r.name === a.me?.name }" @click="m.spyTarget = r.name">
+          <tr v-for="r in rankRows" :key="r.name" class="rank-row clickable" :class="{ mine: r.name === a.me?.name }" @click="m.spyTarget = r.name">
             <td>{{ r.rank }}</td>
             <td class="rk-name">
               <span v-if="kindBadge(r.kind)" class="kind-badge" :title="r.kind === 'bot' ? '봇' : '세력'">{{ kindBadge(r.kind) }}</span>
@@ -243,6 +257,9 @@ async function toggleBan(name: string, banned: boolean) {
         </tbody>
       </table>
       <p v-else class="empty">아직 참가자가 없습니다. 첫 번째로 참가해 보세요.</p>
+      <button v-if="m.players > RANK_TOP" id="rankMoreBtn" type="button" class="rank-more" :aria-expanded="rankOpen" @click="rankOpen = !rankOpen">
+        {{ rankOpen ? "접기 ▴" : `펼치기 ▾ (전체 ${m.players}명)` }}
+      </button>
     </div>
     <div v-else-if="m.socialTab === 'mm'" class="table-scroll">
       <div class="rank-hint muted">🏦 세력: 시장을 움직이고 거래를 채우는 큰손 계정 (봇, $200만으로 시작). 자금 규모가 달라 수익률 순이고 순위·졸업·명예의 전당에서 빠진다</div>
@@ -272,21 +289,23 @@ async function toggleBan(name: string, banned: boolean) {
     </div>
     <div v-else-if="m.socialTab === 'analyst'" class="table-scroll">
       <div class="rank-hint muted">💡 누구 말이 맞는지는 적중률로 판단하세요. 리포트는 13분 뒤 채점됩니다 (매수: 올랐나 · 매도: 내렸나 · 중립: ±4% 안).</div>
-      <table v-if="analystRows.length" id="analysts" class="grid rank-table">
-        <tbody>
-          <tr v-for="(x, i) in analystRows" :key="x.id">
-            <td>{{ i + 1 }}</td>
-            <td class="rk-name"><b>{{ x.name }}</b><br><small class="muted">{{ x.firm }}</small></td>
-            <td><b>{{ x.total ? `${Math.round((x.hits / x.total) * 100)}%` : "—" }}</b><br><small class="muted">{{ x.hits }}/{{ x.total }}</small></td>
-            <td class="analyst-recent">
-              <button v-for="r in x.recent.slice(0, 3)" :key="r.id" type="button" class="sym-tag news-sym-tag" :title="`목표가 ${money(r.target)} · 당시 ${money(r.price)}`" @click="m.select(r.sym)">
-                {{ r.sym }} <b :class="r.opinion === '매수' ? 'up' : r.opinion === '매도' ? 'down' : 'muted'">{{ r.opinion }}</b>
-                {{ r.hit == null ? "⏳" : r.hit ? "✅" : "❌" }}
-              </button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div v-if="analystRows.length" id="analysts" class="analyst-list">
+        <div v-for="(x, i) in analystRows" :key="x.id" class="analyst-card">
+          <div class="analyst-top">
+            <span class="analyst-rank">{{ i + 1 }}</span>
+            <span class="analyst-name"><b>{{ x.name }}</b> <small class="muted">{{ x.firm }}</small></span>
+            <span class="analyst-rate"><b>{{ x.total ? `${Math.round((x.hits / x.total) * 100)}%` : "—" }}</b> <small class="muted">{{ x.hits }}/{{ x.total }}</small></span>
+          </div>
+          <div class="analyst-bar"><i :style="{ width: x.total ? `${(x.hits / x.total) * 100}%` : '0' }" /></div>
+          <div class="analyst-recent">
+            <button v-for="r in x.recent.slice(0, 4)" :key="r.id" type="button" class="analyst-chip" :title="`목표가 ${money(r.target)} · 당시 ${money(r.price)}`" @click="m.select(r.sym)">
+              {{ r.sym }} <b :class="r.opinion === '매수' ? 'up' : r.opinion === '매도' ? 'down' : 'muted'">{{ r.opinion }}</b>
+              {{ r.hit == null ? "⏳" : r.hit ? "✅" : "❌" }}
+            </button>
+            <span v-if="!x.recent.length" class="muted">아직 리포트 없음</span>
+          </div>
+        </div>
+      </div>
       <p v-else class="empty">리포트를 불러오는 중입니다.</p>
     </div>
     <div v-else-if="m.socialTab === 'hall'" class="hall-wrap">

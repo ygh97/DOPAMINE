@@ -248,7 +248,8 @@ app.get<{ Querystring: { before?: string; limit?: string } }>("/api/news", async
 
 app.get("/api/hall", async () => hallOfFame(db));
 
-app.get("/api/ranking", async () => rankingInfo());
+// limit: 기본 20명 (SSE·폴링과 같음). 화면에서 "펼치기"를 누르면 전체(최대 500명)를 받는다
+app.get<{ Querystring: { limit?: string } }>("/api/ranking", async req => rankingInfo(broker.ranking(Math.min(500, Math.max(1, Number(req.query.limit) || 20)))));
 
 app.post<{ Body: { name: string; password: string } }>("/api/join", {
   schema: { body: { type: "object", required: ["name", "password"], properties: { name: { type: "string", maxLength: 40 }, password: { type: "string", maxLength: 64 } } } },

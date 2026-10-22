@@ -82,7 +82,11 @@ const ENV = {
     log.fillsAfterLiq = (await page.locator("#fills tbody").innerText()).split("\n").map(r => r.split("\t").slice(1, 4).join(" "));
 
     // 3-1) 티배깅: 강제청산 알림 1건당 한 명만. 고래B가 채팅의 버튼을 누르면 모두의 화면에서 버튼이 사라진다
-    for (const p of [page, pageB]) await p.click('[data-c="chat"]');
+    for (const p of [page, pageB]) {
+      await p.click('[data-c="chat"]');
+      log.sysDefault ??= await p.locator('[data-act="chat-sys"]').getAttribute("aria-pressed"); // 알림은 기본으로 꺼져 있다
+      await p.click('[data-act="chat-sys"]'); // 켜기
+    }
     // 얇은 호가창이라 고래B의 숏도 가격이 돌아오면 청산될 수 있다. 선물왕 청산 알림의 버튼만 본다
     const liqMsg = p => p.locator("#chatLog .msg", { hasText: "💥 선물왕님" });
     await liqMsg(pageB).locator('[data-act="teabag-mock"]').click();
@@ -93,7 +97,6 @@ const ENV = {
     // 3-2) 알림 끄기: 전광판(강제청산)·티배깅 메시지가 내 채팅에서만 숨는다
     await pageB.click('[data-act="chat-sys"]');
     log.sysHidden = { liq: await liqMsg(pageB).count(), teabag: await pageB.locator("#chatLog .share-badge.teabag").count(), otherPage: await liqMsg(page).count() };
-    await pageB.click('[data-act="chat-sys"]');
 
     // 4) 다시 시작 직후 10배 진입 시도 → 5배 초과 제한 안내
     page.once("dialog", d => d.accept());

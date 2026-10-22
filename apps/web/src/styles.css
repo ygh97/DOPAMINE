@@ -1119,3 +1119,19 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 .rank-table td.rk-name .stage { margin-left: 4px; }
 .rank-table td.analyst-recent { white-space: normal; }
 .rank-row:hover .rk-name b { text-decoration: underline; text-underline-offset: 2px; }
+
+/* 랭킹 펼치기 */
+.rank-more { display: block; width: calc(100% - 16px); margin: 6px 8px 10px; border: 1px dashed var(--line); background: var(--panel-2); color: var(--muted); border-radius: 6px; padding: 6px; font-size: 12px; }
+.rank-more:hover { color: var(--accent); border-color: var(--accent); }
+/* 애널리스트 카드 */
+.analyst-list { display: grid; gap: 6px; padding: 0 8px 8px; }
+.analyst-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--panel); }
+.analyst-top { display: flex; align-items: baseline; gap: 8px; }
+.analyst-rank { width: 16px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.analyst-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.analyst-rate { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.analyst-bar { height: 4px; border-radius: 2px; background: var(--panel-2); margin: 6px 0; overflow: hidden; }
+.analyst-bar i { display: block; height: 100%; background: var(--accent); }
+.analyst-recent { display: flex; flex-wrap: wrap; gap: 4px; }
+.analyst-chip { white-space: nowrap; border: 1px solid var(--line); background: var(--panel-2); border-radius: 12px; padding: 1px 8px; font-size: 11.5px; color: var(--text); }
+.analyst-chip:hover { border-color: var(--accent); }
