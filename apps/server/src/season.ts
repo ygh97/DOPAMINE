@@ -63,8 +63,12 @@ export const targetTick = (season: Season, warmTicks: number, now = Date.now()) 
 /** 시즌이 끝나는 tick */
 export const endTick = (season: Season, warmTicks: number) => warmTicks + Math.floor(season.lengthMs / season.tickMs);
 
+/** 시즌 엠블럼: 그 시즌에 100배 전설이 되면 영구로 받는다 (S11부터는 다시 처음부터) */
+export const SEASON_EMBLEMS = ["🔥", "💎", "🚀", "🌙", "⚡", "🐉", "🦄", "🌋", "🪐", "👑"];
+export const emblemOf = (season: number) => SEASON_EMBLEMS[(season - 1) % SEASON_EMBLEMS.length];
+
 /**
- * 시즌을 닫고 다음 시즌을 연다. 명예의 전당: 100배 전설을 달성한 사람 전원.
+ * 시즌을 닫고 다음 시즌을 연다. 명예의 전당: 100배 전설을 달성한 사람 전원 + 시즌 최종 순위 사람 1·2·3등(TOP 3).
  * 다음 시즌은 이전 시즌이 끝난 시각에 이어서 시작한다 (서버가 오래 꺼져 있었거나 운영자가 일찍 끝냈으면 지금부터).
  */
 export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = Date.now()): Season {
@@ -76,6 +80,8 @@ export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = D
     // 명예의 전당은 100배 전설을 달성한 사람만 (봇 제외). 순위는 사람끼리 다시 매긴다. 예전 시즌 기록(1~3위)은 그대로 둔다
     const people = ranking.filter(r => r.kind === "user").map((r, i) => ({ ...r, rank: i + 1 }));
     for (const r of people) if (r.clearedTick != null) add.run(season.id, r.rank, r.name, r.equity, r.returnPct, r.clearedTick);
+    const top = db.prepare("INSERT OR IGNORE INTO season_top3 (season_id, rank, name, equity, return_pct) VALUES (?, ?, ?, ?, ?)");
+    for (const r of people.slice(0, 3)) top.run(season.id, r.rank, r.name, r.equity, r.returnPct);
     db.prepare("UPDATE seasons SET ended_at = ? WHERE id = ?").run(now, season.id);
     db.prepare("DELETE FROM snapshots WHERE season_id = ?").run(season.id);
     db.prepare("DELETE FROM open_orders WHERE season_id = ?").run(season.id); // 지정가는 시즌 끝까지만
@@ -95,11 +101,36 @@ export function seasonStats(ranking: RankRow[]) {
   };
 }
 
-/** 명예의 전당: 끝난 시즌 번호(최근 limit개, 오래된 순)와 그 시즌들의 전설. 전설이 없던 시즌도 번호는 나온다 (화면의 시즌 탭) */
+/** 명예의 전당: 끝난 시즌 번호(최근 limit개, 오래된 순), 그 시즌들의 전설(rows)과 TOP 3(top3, 한마디 포함). 전설이 없던 시즌도 번호는 나온다 (화면의 시즌 탭) */
 export function hallOfFame(db: Db, limit = 30) {
   const seasons = (db.prepare("SELECT id FROM seasons WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT ?").all(limit) as { id: number }[]).map(r => r.id).reverse();
   const rows = db.prepare(`SELECT season_id AS season, rank, name, equity, return_pct AS returnPct, cleared_tick AS clearedTick FROM hall_of_fame
     WHERE season_id IN (SELECT id FROM seasons WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT ?) ORDER BY season_id DESC, rank`).all(limit) as
     { season: number; rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }[];
-  return { seasons, rows };
+  const top3 = db.prepare(`SELECT season_id AS season, rank, name, equity, return_pct AS returnPct, message FROM season_top3
+    WHERE season_id IN (SELECT id FROM seasons WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT ?) ORDER BY season_id DESC, rank`).all(limit) as
+    { season: number; rank: number; name: string; equity: number; returnPct: number; message: string | null }[];
+  return { seasons, rows, top3 };
+}
+
+export interface Badges { emblems: { season: number; icon: string }[]; medals: { season: number; rank: number }[] }
+/**
+ * 이름별 배지: 시즌 엠블럼(그 시즌 100배 전설, 진행 중 시즌은 달성하는 순간부터)과 TOP 3 메달.
+ * 채팅·랭킹 이름 옆에 붙는다. 1등 메달이 하나라도 있으면 화면이 이름을 금색으로 칠한다
+ */
+export function badgesOf(db: Db, currentSeason: number): Record<string, Badges> {
+  const out: Record<string, Badges> = {};
+  const get = (name: string) => (out[name] ??= { emblems: [], medals: [] });
+  const legends = db.prepare(`SELECT season_id AS season, name FROM hall_of_fame
+    UNION SELECT a.season_id, u.name FROM accounts a JOIN users u ON u.id = a.user_id WHERE a.season_id = ? AND a.cleared_tick IS NOT NULL AND u.kind = 'user'
+    ORDER BY 1`).all(currentSeason) as { season: number; name: string }[];
+  for (const l of legends) get(l.name).emblems.push({ season: l.season, icon: emblemOf(l.season) });
+  for (const t of db.prepare("SELECT season_id AS season, rank, name FROM season_top3 ORDER BY season_id").all() as { season: number; rank: number; name: string }[])
+    get(t.name).medals.push({ season: t.season, rank: t.rank });
+  return out;
+}
+
+/** TOP 3 본인이 명예의 전당에 한마디 (50자). 그 시즌 TOP 3가 아니면 false */
+export function setTop3Message(db: Db, season: number, name: string, message: string) {
+  return Number(db.prepare("UPDATE season_top3 SET message = ? WHERE season_id = ? AND name = ? COLLATE NOCASE").run(message || null, season, name).changes) > 0;
 }

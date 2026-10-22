@@ -6,6 +6,11 @@ export const MAX_CHAT_LEN = 200;
 export const HIDE_REPORTS = 3;
 
 const BAD_WORDS = ["시발", "씨발", "병신", "개새끼", "좆", "꺼져", "도박사이트", "불법환전", "카지노", "계좌이체"];
+/** 금칙어 검사 (채팅·명예의 전당 한마디). 띄어쓰기·특수문자로 피해 가는 것도 막는다 */
+export function checkWords(text: string) {
+  const compact = text.replace(/[\s._\-*!@#$%^&()]+/g, "").toLowerCase();
+  for (const w of BAD_WORDS) if (compact.includes(w)) throw new ChatError("금칙어가 포함되어 있습니다.");
+}
 
 export class ChatError extends Error {}
 
@@ -88,10 +93,7 @@ export class Chat {
 
     if (!trusted && RESERVED.some(p => text.startsWith(p))) throw new ChatError("이 말머리는 버튼으로만 쓸 수 있습니다.");
 
-    const compact = text.replace(/[\s._\-*!@#$%^&()]+/g, "").toLowerCase();
-    for (const w of BAD_WORDS) {
-      if (compact.includes(w)) throw new ChatError("금칙어가 포함되어 있습니다.");
-    }
+    checkWords(text);
 
     this.lastSent.set(userId, now);
     const id = Number(this.stmts.insMsg.run(userId, user.name, text, now, toName).lastInsertRowid);

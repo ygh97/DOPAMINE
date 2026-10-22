@@ -136,6 +136,16 @@ export function openDb(file: string): Db {
       seq INTEGER NOT NULL,
       filled REAL NOT NULL DEFAULT 0
     );
+    -- 시즌 최종 순위 사람 1·2·3등 (전설이 아니어도). 메달 배지와 명예의 전당 한마디
+    CREATE TABLE IF NOT EXISTS season_top3 (
+      season_id INTEGER NOT NULL,
+      rank INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      equity REAL NOT NULL,
+      return_pct REAL NOT NULL,
+      message TEXT,
+      PRIMARY KEY (season_id, rank)
+    );
     CREATE TABLE IF NOT EXISTS hall_of_fame (
       season_id INTEGER NOT NULL,
       rank INTEGER NOT NULL,
@@ -161,6 +171,10 @@ export function openDb(file: string): Db {
   ]) {
     try { db.exec(sql); } catch { /* 이미 있음 */ }
   }
+  // TOP 3 표가 생기기 전에 끝난 시즌: 예전 규칙으로 남은 명예의 전당 1~3위를 TOP 3로 옮겨 둔다 (이미 있으면 그대로)
+  db.exec(`INSERT OR IGNORE INTO season_top3 (season_id, rank, name, equity, return_pct)
+    SELECT h.season_id, h.rank, h.name, h.equity, h.return_pct FROM hall_of_fame h
+    WHERE h.rank <= 3 AND NOT EXISTS (SELECT 1 FROM season_top3 t WHERE t.season_id = h.season_id)`);
   return db;
 }
 

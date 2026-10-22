@@ -92,7 +92,8 @@ export class Broker {
       selPos: db.prepare("SELECT sym, qty, avg FROM positions WHERE user_id = ? AND season_id = ?"),
       selFut: db.prepare("SELECT id, sym, side, lev, qty, entry, margin, stop, tp FROM futures WHERE user_id = ? AND season_id = ?"),
       selSeasonUsers: db.prepare("SELECT user_id FROM accounts WHERE season_id = ?"),
-      selFills: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE user_id = ? AND season_id = ? ORDER BY id DESC LIMIT 50"),
+      // 다시 시작한 뒤의 체결만 (내 체결 내역·실현손익·승률이 새로 시작한다. 기록은 DB에 남는다)
+      selFills: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE user_id = ? AND season_id = ? AND tick >= ? ORDER BY id DESC LIMIT 50"),
       selFill: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE id = ? AND user_id = ? AND season_id = ?"),
       delPosAll: db.prepare("DELETE FROM positions WHERE user_id = ? AND season_id = ?"),
       delFutAll: db.prepare("DELETE FROM futures WHERE user_id = ? AND season_id = ?"),
@@ -187,7 +188,7 @@ export class Broker {
 
   me(userId: number) {
     const acc = this.account(userId);
-    const fills = this.stmts.selFills.all(userId, this.season.id) as unknown as Fill[];
+    const fills = this.stmts.selFills.all(userId, this.season.id, acc.resetAt ?? 0) as unknown as Fill[];
     const equity = this.equity(acc);
     this.ensureRankCache();
     return {

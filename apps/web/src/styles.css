@@ -1135,3 +1135,22 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 .analyst-recent { display: flex; flex-wrap: wrap; gap: 4px; }
 .analyst-chip { white-space: nowrap; border: 1px solid var(--line); background: var(--panel-2); border-radius: 12px; padding: 1px 8px; font-size: 11.5px; color: var(--text); }
 .analyst-chip:hover { border-color: var(--accent); }
+
+/* 이름 배지·금색 이름·명예의 전당 TOP 3 */
+.name-badges { display: inline-flex; align-items: center; gap: 1px; margin-left: 3px; vertical-align: middle; }
+.nb-emblem { font-size: 12px; line-height: 1; }
+.nb-medal { font-size: 12px; line-height: 1; margin-left: 2px; white-space: nowrap; }
+.nb-medal small, .nb-more { font-size: 9px; color: var(--muted); margin-left: 1px; }
+.champ-name { color: #d4a017 !important; text-shadow: 0 0 6px rgba(212, 160, 23, .35); }
+.hall-sec-title { font-size: 12px; font-weight: 700; padding: 8px 10px 4px; }
+.hall-sec-title small { font-weight: 400; margin-left: 4px; }
+.hall-top3 { list-style: none; margin: 0; padding: 0 8px; display: grid; gap: 6px; }
+.hall-top3 li { border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: var(--panel); }
+.hall-top3 li.mine { background: var(--accent-soft); }
+.ht-head { display: flex; align-items: center; gap: 4px; }
+.ht-medal { font-size: 18px; }
+.ht-ret { margin-left: auto; font-variant-numeric: tabular-nums; }
+.ht-msg { margin: 4px 0 0 26px; font-size: 12.5px; color: var(--text); font-style: italic; }
+.ht-edit { display: flex; gap: 4px; margin: 6px 0 0 26px; }
+.ht-edit input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12px; }
+.hall-seasons small { font-size: 10px; color: var(--up); }

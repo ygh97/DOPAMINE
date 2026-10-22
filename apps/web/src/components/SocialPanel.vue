@@ -3,19 +3,36 @@ import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { clock, money, pct } from "../format";
 import { useAccount } from "../stores/account";
 import { kindBadge, useMarket, type ChatMsg } from "../stores/market";
+import NameBadges from "./NameBadges.vue";
 
 const m = useMarket();
 const a = useAccount();
 interface HallRow { season: number; rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }
-const hall = ref<HallRow[]>([]);
-const hallSeasons = ref<number[]>([]);
-const hallSeason = ref<number | null>(null); // 아래 시즌 탭에서 고른 시즌. 처음엔 가장 최근에 끝난 시즌
-const hallRows = computed(() => hall.value.filter(h => h.season === hallSeason.value));
+interface TopRow { season: number; rank: number; name: string; equity: number; returnPct: number; message: string | null }
+interface HallData { seasons: number[]; rows: HallRow[]; top3: TopRow[]; current: number; live: { rows: HallRow[]; top3: TopRow[] } }
+const MEDAL = ["🥇", "🥈", "🥉"];
+const hall = ref<HallData | null>(null);
+const hallSeason = ref<number | null>(null); // 아래 시즌 탭에서 고른 시즌. 처음엔 가장 최근에 끝난 시즌 (없으면 진행 중 시즌)
+const hallTabs = computed(() => (hall.value ? [...hall.value.seasons, hall.value.current] : []));
+const hallLive = computed(() => hall.value != null && hallSeason.value === hall.value.current);
+const hallTop = computed(() => (hall.value ? (hallLive.value ? hall.value.live.top3 : hall.value.top3.filter(t => t.season === hallSeason.value)) : []));
+const hallRows = computed(() => (hall.value ? (hallLive.value ? hall.value.live.rows : hall.value.rows.filter(h => h.season === hallSeason.value)) : []));
+const drafts = ref<Record<number, string>>({});
 const loadHall = async () => {
-  const d: { seasons: number[]; rows: HallRow[] } = await (await fetch("/api/hall")).json();
-  hall.value = d.rows; hallSeasons.value = d.seasons;
-  if (hallSeason.value == null || !d.seasons.includes(hallSeason.value)) hallSeason.value = d.seasons.at(-1) ?? null;
+  const d: HallData = await (await fetch("/api/hall")).json();
+  hall.value = d;
+  const tabs = [...d.seasons, d.current];
+  if (hallSeason.value == null || !tabs.includes(hallSeason.value)) hallSeason.value = d.seasons.at(-1) ?? d.current;
 };
+const isMe = (name: string) => !!a.me && a.me.name.toLowerCase() === name.toLowerCase();
+async function saveHallMessage(t: TopRow) {
+  if (await a.hallMessage(t.season, (drafts.value[t.season] ?? "").trim())) { drafts.value[t.season] = ""; await loadHall(); }
+}
+let hallTimer = 0;
+watch([() => m.socialTab, hallLive], ([tab, live]) => { // 진행 중 시즌은 10초마다 갱신
+  clearInterval(hallTimer);
+  if (tab === "hall" && live) hallTimer = window.setInterval(loadHall, 10_000);
+});
 
 // 애널리스트: 적중률 순 (채점된 리포트가 3건 미만이면 아래로)
 const analystRows = computed(() => [...(m.research?.analysts ?? [])].sort((x, y) =>
@@ -127,9 +144,30 @@ function startWhisper(targetName: string) {
   void nextTick(() => chatInputEl.value?.focus());
 }
 
+/** 나에게 마지막으로 귓속말한 사람 (/r) */
+function lastWhisperer() {
+  const me = a.me?.name.toLowerCase();
+  return [...m.chat].reverse().find(c => c.to && c.to.toLowerCase() === me && c.name.toLowerCase() !== me)?.name ?? null;
+}
+/** /r → 마지막 귓속말 상대와 귓속말 모드. 없으면 안내 */
+function replyMode() {
+  const who = lastWhisperer();
+  if (!who) { a.notify("답장할 귓속말이 없습니다.", "error"); return; }
+  whisperTo.value = who; text.value = "";
+}
+// "/r " 까지 치면 바로 상대가 채워진다
+watch(text, v => { if (/^\/(?:r|ㄱ) $/i.test(v)) replyMode(); });
+
 async function submitChat() {
   const v = text.value.trim();
   if (!v) return;
+  // "/w 닉네임" + 엔터 = 그 사람과 귓속말 모드 (그다음부터는 그냥 치면 귓속말). "/r" + 엔터 = 마지막 귓속말 상대와
+  const wOnly = /^\/(?:w|ㅈ|귓)\s+(\S+)$/i.exec(v);
+  if (wOnly) {
+    if (isMe(wOnly[1])) { a.notify("자기 자신에게는 귓속말을 보낼 수 없습니다.", "error"); return; }
+    whisperTo.value = wOnly[1]; text.value = ""; return;
+  }
+  if (/^\/(?:r|ㄱ)$/i.test(v)) { replyMode(); return; }
   const payload = whisperTo.value && !v.startsWith("/") ? `/w ${whisperTo.value} ${v}` : v;
   if (await a.sendChat(payload)) {
     text.value = "";
@@ -247,7 +285,8 @@ async function toggleBan(name: string, banned: boolean) {
             <td>{{ r.rank }}</td>
             <td class="rk-name">
               <span v-if="kindBadge(r.kind)" class="kind-badge" :title="r.kind === 'bot' ? '봇' : '세력'">{{ kindBadge(r.kind) }}</span>
-              <b>{{ r.name }}</b>
+              <b :class="{ 'champ-name': m.isChamp(r.name) }">{{ r.name }}</b>
+              <NameBadges :name="r.name" />
               <span v-if="r.clearedTick" class="stage legend">전설</span>
               <span v-else-if="r.gradTick" class="stage grad">졸업</span>
             </td>
@@ -310,19 +349,37 @@ async function toggleBan(name: string, banned: boolean) {
     </div>
     <div v-else-if="m.socialTab === 'hall'" class="hall-wrap">
       <div class="table-scroll">
+        <div class="hall-sec-title">🏅 S{{ hallSeason }} TOP 3 <small v-if="hallLive" class="muted">진행 중 · 지금 순위</small></div>
+        <ul v-if="hallTop.length" id="hallTop3" class="hall-top3">
+          <li v-for="t in hallTop" :key="`${t.season}-${t.rank}`" :class="{ mine: isMe(t.name) }">
+            <div class="ht-head">
+              <span class="ht-medal">{{ MEDAL[t.rank - 1] }}</span>
+              <b :class="{ 'champ-name': m.isChamp(t.name) }">{{ t.name }}</b>
+              <NameBadges :name="t.name" />
+              <span class="ht-ret" :class="t.returnPct >= 0 ? 'up' : 'down'">{{ pct(t.returnPct) }}</span>
+            </div>
+            <p v-if="t.message" class="ht-msg">“{{ t.message }}”</p>
+            <form v-if="!hallLive && isMe(t.name)" class="ht-edit" @submit.prevent="saveHallMessage(t)">
+              <input v-model="drafts[t.season]" maxlength="50" :placeholder="t.message ? '한마디 고치기 (50자, 비우면 지움)' : '한마디 남기기 (50자)'" aria-label="명예의 전당 한마디">
+              <button type="submit" class="mini-btn" data-act="hall-msg">저장</button>
+            </form>
+          </li>
+        </ul>
+        <p v-else class="empty">아직 TOP 3가 없습니다.</p>
+        <div class="hall-sec-title">👑 S{{ hallSeason }} 전설 (100배)</div>
         <table v-if="hallRows.length" id="hall" class="grid rank-table">
           <tbody>
-            <tr v-for="h in hallRows" :key="`${h.season}-${h.name}`" :class="{ mine: h.name === a.me?.name }">
-              <td>{{ h.rank <= 3 ? ["🥇", "🥈", "🥉"][h.rank - 1] : `${h.rank}위` }}</td>
-              <td class="rk-name"><b>{{ h.name }}</b><span v-if="h.clearedTick" class="stage legend">전설</span></td>
+            <tr v-for="h in hallRows" :key="`${h.season}-${h.name}`" :class="{ mine: isMe(h.name) }">
+              <td>{{ h.rank }}위</td>
+              <td class="rk-name"><b :class="{ 'champ-name': m.isChamp(h.name) }">{{ h.name }}</b> <NameBadges :name="h.name" /></td>
               <td :class="h.returnPct >= 0 ? 'up' : 'down'">{{ pct(h.returnPct) }}</td>
             </tr>
           </tbody>
         </table>
-        <p v-else class="empty">{{ hallSeason ? `S${hallSeason}에는 전설이 없습니다.` : "아직 끝난 시즌이 없습니다." }} 시즌 중 100배(총자산 $1,000만)를 달성하면 전설로 여기에 남습니다.</p>
+        <p v-else class="empty">S{{ hallSeason }}에는 전설이 없습니다. 시즌 중 100배(총자산 $1,000만)를 달성하면 전설로 여기에 남고 시즌 엠블럼을 받습니다.</p>
       </div>
-      <div v-if="hallSeasons.length" class="tabs hall-seasons" role="tablist" aria-label="시즌">
-        <button v-for="sid in hallSeasons" :key="sid" role="tab" :data-hs="sid" :aria-selected="hallSeason === sid" @click="hallSeason = sid">S{{ sid }}</button>
+      <div v-if="hallTabs.length" class="tabs hall-seasons" role="tablist" aria-label="시즌">
+        <button v-for="sid in hallTabs" :key="sid" role="tab" :data-hs="sid" :aria-selected="hallSeason === sid" @click="hallSeason = sid">S{{ sid }}<small v-if="hall && sid === hall.current"> 진행 중</small></button>
       </div>
     </div>
     <div v-else class="chat-wrap" :class="{ 'is-folded': chatFolded }">
@@ -379,13 +436,14 @@ async function toggleBan(name: string, banned: boolean) {
                 v-else
                 type="button"
                 class="chat-user-btn"
-                :class="{ 'mine-name': c.name === a.me?.name }"
+                :class="{ 'mine-name': c.name === a.me?.name, 'champ-name': m.isChamp(c.name) }"
                 :title="c.name === '⚡전광판' ? '' : '클릭: 포트폴리오 훔쳐보기 / 우클릭: 귓속말'"
                 @click="c.name !== '⚡전광판' && (m.spyTarget = c.name)"
                 @contextmenu.prevent="startWhisper(c.name)"
               >
                 {{ c.name }}
               </button>
+              <NameBadges v-if="!c.to && c.name !== '⚡전광판'" :name="c.name" />
               <button
                 v-if="a.me && c.name !== '⚡전광판' && c.name !== a.me.name"
                 type="button"
@@ -417,8 +475,8 @@ async function toggleBan(name: string, banned: boolean) {
       </div>
 
       <div v-if="whisperTo" class="whisper-target-bar">
-        <span>🔒 <b>{{ whisperTo }}</b>님에게 비밀 귓속말 작성 중</span>
-        <button type="button" class="mini-btn" @click="whisperTo = null">전체 채팅으로 전환 ✕</button>
+        <span>🔒 <b>{{ whisperTo }}</b>님과 귓속말 중 · 그냥 입력하면 귓속말로 갑니다 (Esc로 끝내기)</span>
+        <button type="button" class="mini-btn" data-act="whisper-end" @click="whisperTo = null">전체 채팅 ✕</button>
       </div>
       <form id="chatForm" class="chat-input" @submit.prevent="submitChat">
         <button id="sharePosBtn" type="button" class="share-btn" :disabled="!a.me" title="내 현재 수익률·포지션 채팅 공유" @click="shareSummary">수익인증</button>
@@ -427,8 +485,9 @@ async function toggleBan(name: string, banned: boolean) {
           v-model="text"
           :disabled="!a.me"
           maxlength="200"
-          :placeholder="!a.me ? '참가 후 채팅할 수 있습니다' : whisperTo ? `${whisperTo}님에게 귓속말 입력...` : '메시지 입력 ($NVDA 태그, /w 닉네임 귓속말, /r 답장, 1초 쿨타임)'"
+          :placeholder="!a.me ? '참가 후 채팅할 수 있습니다' : whisperTo ? `${whisperTo}님에게 귓속말 입력...` : '메시지 입력 ($NVDA 태그, /w 닉네임+엔터 = 귓속말 모드, /r = 답장)'"
           aria-label="채팅 메시지"
+          @keydown.esc="whisperTo = null"
         >
         <button type="submit" :disabled="!a.me || !text.trim()">전송</button>
       </form>

@@ -210,6 +210,12 @@ export const useAccount = defineStore("account", () => {
     return ok;
   }
 
+  /** 명예의 전당 TOP 3 본인의 한마디 (50자) */
+  async function hallMessage(season: number, text: string) {
+    try { await api("/api/hall/message", { season, text }); notify(text ? "명예의 전당에 한마디를 남겼습니다." : "한마디를 지웠습니다."); return true; }
+    catch (e) { notify((e as Error).message, "error"); return false; }
+  }
+
   async function reportChat(id: number) {
     try {
       const r = await api<{ id: number; reports: number; hidden: boolean }>("/api/chat/report", { id });
@@ -275,5 +281,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchDrawings, syncDrawing, sendChat, share, react, reportChat, adminChat, adminBan, adminHide };
+  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchDrawings, syncDrawing, sendChat, share, react, hallMessage, reportChat, adminChat, adminBan, adminHide };
 });

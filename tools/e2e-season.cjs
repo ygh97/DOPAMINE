@@ -55,6 +55,15 @@ const health = async () => (await fetch(`${API}/api/health`)).json();
     const hallEmpty = page.locator(".table-scroll .empty", { hasText: "전설" });
     await hallEmpty.waitFor();
     log.hall = await hallEmpty.innerText();
+    // 4-1) 끝난 시즌 TOP 3: 1등은 이 사람 (사람이 한 명). 본인은 한마디를 남길 수 있고, 시즌 탭에 진행 중 시즌도 있다
+    await page.waitForSelector("#hallTop3 li");
+    await page.fill("#hallTop3 input", "다음 시즌도 1등");
+    await page.click('#hallTop3 [data-act="hall-msg"]');
+    await page.waitForSelector('#hallTop3 .ht-msg:has-text("다음 시즌도 1등")');
+    log.top3 = { medal: await page.locator("#hallTop3 .ht-medal").first().innerText(), tabs: await page.locator(".hall-seasons button").allInnerTexts() };
+    await page.click('[data-c="rank"]');
+    await page.waitForSelector("#ranking .nb-medal");
+    log.medalInRanking = await page.locator("#ranking .nb-medal").first().innerText();
     await page.screenshot({ path: path.join(OUT, "m3-hall.png") });
     await browser.close();
   } catch (e) {

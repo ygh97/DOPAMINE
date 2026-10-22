@@ -41,7 +41,29 @@ const OUT = outDir();
     await page2.waitForSelector('#chatLog .msg:has-text("NVDA 가즈아!")');
     log.receivedByPeer = true;
 
-    // 2) 1초 쿨타임 거절 토스트 확인
+    // 1-1) 귓속말 모드: "/w 단타신" + 엔터 → 모드만 켜지고, 그다음 입력은 귓속말. 상대는 "/r " 까지 치면 바로 답장 모드
+    await page.waitForTimeout(1100);
+    await page.fill("#chatForm input", "/w 단타신");
+    await page.press("#chatForm input", "Enter");
+    await page.waitForSelector(".whisper-target-bar:has-text('단타신')");
+    await page.fill("#chatForm input", "몰래 작전 ㄱ");
+    await page.press("#chatForm input", "Enter");
+    await page2.waitForSelector('#chatLog .msg.is-whisper:has-text("몰래 작전 ㄱ")');
+    await page2.waitForTimeout(1100);
+    await page2.type("#chatForm input", "/r ");
+    await page2.waitForSelector(".whisper-target-bar:has-text('개미왕')");
+    await page2.fill("#chatForm input", "콜");
+    await page2.press("#chatForm input", "Enter");
+    await page.waitForSelector('#chatLog .msg.is-whisper:has-text("단타신 → 개미왕")');
+    await page.press("#chatForm input", "Escape");
+    await page2.press("#chatForm input", "Escape");
+    log.whisperMode = { modeOnly: true, reply: true, ended: !(await page.locator(".whisper-target-bar").count()) };
+    await page.waitForTimeout(1100);
+
+    // 2) 1초 쿨타임 거절 토스트 확인 (연달아 두 번)
+    await page.fill("#chatForm input", "첫 메시지");
+    await page.click('#chatForm button[type="submit"]');
+    await page.waitForSelector('#chatLog .msg:has-text("첫 메시지")');
     await page.fill("#chatForm input", "도배 테스트");
     await page.click('#chatForm button[type="submit"]');
     await page.waitForSelector('.toast.error:has-text("1초")');

@@ -8,9 +8,9 @@ import { SECTORS, type Bar, type NewsItem, type Quote } from "@dopamine/engine";
 import { Auth, AuthError } from "./auth.ts";
 import { BotRunner } from "./bots.ts";
 import { Broker, OrderError } from "./broker.ts";
-import { Chat, ChatError } from "./chat.ts";
+import { Chat, ChatError, checkWords } from "./chat.ts";
 import { backupDb, openDb } from "./db.ts";
-import { bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, seasonStats, targetTick } from "./season.ts";
+import { badgesOf, bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, seasonStats, setTop3Message, targetTick } from "./season.ts";
 
 const PORT = Number(process.env.PORT ?? 4810);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -246,7 +246,26 @@ app.get<{ Querystring: { before?: string; limit?: string } }>("/api/news", async
   return { news: market.news.filter(n => n.tick < before).slice(0, limit) };
 });
 
-app.get("/api/hall", async () => hallOfFame(db));
+// 명예의 전당: 끝난 시즌(전설·TOP 3) + 진행 중 시즌(지금까지의 전설과 지금 순위 1·2·3등, 실시간)
+app.get("/api/hall", async () => {
+  const people = broker.ranking(Infinity).filter(r => r.kind === "user").map((r, i) => ({ season: season.id, ...r, rank: i + 1 }));
+  return { ...hallOfFame(db), current: season.id, live: { rows: people.filter(r => r.clearedTick != null), top3: people.slice(0, 3).map(r => ({ ...r, message: null })) } };
+});
+
+// 이름별 배지 (시즌 엠블럼·TOP 3 메달). 화면은 1분마다, 전설·새 시즌 알림 때 다시 받는다
+app.get("/api/badges", async () => badgesOf(db, season.id));
+
+// TOP 3 본인의 명예의 전당 한마디 (50자, 금칙어 검사). 언제든 고칠 수 있다
+app.post<{ Body: { season: number; text: string } }>("/api/hall/message", {
+  schema: { body: { type: "object", required: ["season", "text"], properties: { season: { type: "integer" }, text: { type: "string", maxLength: 50 } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const text = req.body.text.replace(/\s+/g, " ").trim();
+  if (text) checkWords(text);
+  if (!setTop3Message(db, req.body.season, broker.account(id).name, text)) throw new ChatError("그 시즌 TOP 3만 한마디를 남길 수 있습니다.");
+  return { ok: true };
+});
 
 // limit: 기본 20명 (SSE·폴링과 같음). 화면에서 "펼치기"를 누르면 전체(최대 500명)를 받는다
 app.get<{ Querystring: { limit?: string } }>("/api/ranking", async req => rankingInfo(broker.ranking(Math.min(500, Math.max(1, Number(req.query.limit) || 20)))));

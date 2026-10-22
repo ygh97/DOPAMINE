@@ -8,7 +8,7 @@ import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { backupDb, openDb } from "../src/db.ts";
-import { bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot } from "../src/season.ts";
+import { badgesOf, bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot, setTop3Message } from "../src/season.ts";
 
 const T0 = 1_792_000_000_000;
 const FAST = { ticksPerBar: 10, warmupBars: 200 };
@@ -299,6 +299,38 @@ test("졸업(20배)·전설(100배) 알림, 시즌 종료: 명예의 전당은 �
   const broker = new Broker(s.db, next, exchange);
   assert.equal(broker.me(a).equity, START_CASH);
   assert.equal(broker.me(a).positions.length, 0);
+});
+
+test("시즌 TOP 3(사람 최종 순위)는 메달과 한마디, 전설은 시즌 엠블럼 (진행 중 시즌은 달성하는 순간부터)", async () => {
+  const s = setup(11);
+  const a = s.user("first"), b = s.user("second"), c = s.user("third"), d = s.user("fourth");
+  s.broker.account(a).cash = 11_000_000; s.broker.account(b).cash = 900_000; s.broker.account(c).cash = 500_000; void d;
+  s.tick();
+  const rows = s.broker.ranking(Infinity);
+  let badges = badgesOf(s.db, s.season.id);
+  assert.deepEqual(badges.first?.emblems.map(e => e.icon), ["🔥"], "S1 전설은 🔥, 시즌 중에도 바로");
+  finishSeason(s.db, s.season, rows, T0 + s.season.lengthMs + 1000);
+  const hall = hallOfFame(s.db);
+  assert.deepEqual(hall.top3.map(t => [t.rank, t.name]), [[1, "first"], [2, "second"], [3, "third"]], "TOP 3는 전설이 아니어도");
+  badges = badgesOf(s.db, s.season.id + 1);
+  assert.deepEqual(badges.second?.medals, [{ season: s.season.id, rank: 2 }]);
+  assert.ok(setTop3Message(s.db, s.season.id, "SECOND", "다음 시즌도 간다"), "본인(대소문자 무시)");
+  assert.equal(hallOfFame(s.db).top3[1].message, "다음 시즌도 간다");
+  assert.equal(setTop3Message(s.db, s.season.id, "fourth", "나도"), false, "TOP 3가 아니면 못 남김");
+});
+
+test("다시 시작하면 체결 내역·실현손익은 그 뒤부터 (기록은 DB에 남는다)", async () => {
+  const s = setup();
+  const u = s.user("restart");
+  await order(s, u, "NVDA", "buy", 20);
+  await order(s, u, "NVDA", "sell", 100);
+  assert.equal(s.broker.me(u).fills.length, 2);
+  s.tick();
+  s.broker.reset(u);
+  assert.equal(s.broker.me(u).fills.length, 0, "리셋 뒤 빈 체결 내역");
+  await order(s, u, "AAPL", "buy", 10);
+  assert.deepEqual(s.broker.me(u).fills.map(f => f.sym), ["AAPL"]);
+  assert.equal((s.db.prepare("SELECT COUNT(*) AS c FROM fills WHERE user_id = ?").get(u) as { c: number }).c, 3, "DB 기록은 그대로");
 });
 
 

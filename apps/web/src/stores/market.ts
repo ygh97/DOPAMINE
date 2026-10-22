@@ -14,6 +14,8 @@ export const kindBadge = (k?: AccountKind) => (k === "bot" ? "🤖" : k === "mm"
 export interface OrderPreset { mode: "spot" | "fut"; side: "buy" | "sell"; lev?: number; seq: number }
 /** 서버가 보내는 압축 봉: [timestamp, open, high, low, close, volume] */
 export type PackedBar = [number, number, number, number, number, number];
+/** 이름별 배지: 시즌 엠블럼(100배 전설)과 TOP 3 메달 (/api/badges) */
+export interface Badges { emblems: { season: number; icon: string }[]; medals: { season: number; rank: number }[] }
 /** 일정·애널리스트·보고 있는 종목의 의견 분포 (/api/research) */
 export interface Research { tick: number; upcoming: Upcoming[]; analysts: AnalystView[]; consensus: Consensus | null }
 interface TickEvent { tick: number; date: GameDate; bars: Record<string, [...PackedBar, number]> }
@@ -51,6 +53,7 @@ export const useMarket = defineStore("market", () => {
   let lastBannerId = 0;
   let lastWhisperId = 0;
   function checkBanner(msg: ChatMsg) {
+    if (msg.name === "⚡전광판" && msg.text.startsWith("[전설]")) void loadBadges(); // 새 전설: 엠블럼이 바로 붙게
     if (msg.to && msg.id > lastWhisperId) {
       const myName = (() => { try { return (localStorage.getItem("dc-name") ?? "").toLowerCase(); } catch { return ""; } })();
       if (myName && msg.to.toLowerCase() === myName && msg.name.toLowerCase() !== myName) {
@@ -81,6 +84,12 @@ export const useMarket = defineStore("market", () => {
   const orderPreset = ref<OrderPreset | null>(null);
   const socialTab = ref<"chat" | "rank" | "mm" | "whale" | "hall" | "analyst">("rank");
   const research = ref<Research | null>(null);
+  const badges = ref<Record<string, Badges>>({});
+  async function loadBadges() {
+    try { const r = await fetch("/api/badges"); if (r.ok) badges.value = await r.json(); } catch { /* 다음에 다시 */ }
+  }
+  /** 1등 메달이 하나라도 있으면 채팅·랭킹 이름을 금색으로 */
+  const isChamp = (name: string) => !!badges.value[name]?.medals.some(x => x.rank === 1);
   const calendarOpen = ref(false);
   async function loadResearch() {
     try {
@@ -141,6 +150,7 @@ export const useMarket = defineStore("market", () => {
       lastWhisperId = s.chat.at(-1)?.id ?? 0;
     }
     applyQuotes(s.quotes);
+    void loadBadges();
     await loadRanking();
   }
 
@@ -207,6 +217,7 @@ export const useMarket = defineStore("market", () => {
 
   // 일정·애널리스트는 천천히 바뀐다: 10초마다
   if (typeof window !== "undefined") window.setInterval(() => { if (document.visibilityState === "visible") void loadResearch(); }, 10_000);
+  if (typeof window !== "undefined") window.setInterval(() => { if (document.visibilityState === "visible") void loadBadges(); }, 60_000);
 
   function connect() {
     if (typeof location !== "undefined" && location.hostname.endsWith(".trycloudflare.com")) {
@@ -292,6 +303,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });
