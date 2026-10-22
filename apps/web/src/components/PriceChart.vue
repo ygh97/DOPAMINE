@@ -49,6 +49,8 @@ export interface ChartUserConfig {
   showHighLow: boolean;
   showLastPrice: boolean;
   showPosLines: boolean;
+  /** 포지션 선 종류별: 현물 평단·선물 진입가·청산가·익절·손절·지정가(미체결) */
+  pos: { avg: boolean; entry: boolean; liq: boolean; tp: boolean; stop: boolean; orders: boolean };
   showGrid: boolean;
   yAxisInside: boolean;
   ma1On: boolean; ma1: number;
@@ -65,6 +67,7 @@ const cfg = reactive<ChartUserConfig>({
   showHighLow: !isMobileInit,
   showLastPrice: true,
   showPosLines: true,
+  pos: { avg: true, entry: true, liq: true, tp: true, stop: true, orders: true },
   showGrid: true,
   yAxisInside: isMobileInit,
   ma1On: true, ma1: 5,
@@ -75,7 +78,7 @@ const cfg = reactive<ChartUserConfig>({
 
 try {
   const saved = localStorage.getItem("dc-chart-settings-v1");
-  if (saved) Object.assign(cfg, JSON.parse(saved));
+  if (saved) { const s = JSON.parse(saved); Object.assign(cfg, s, { pos: { ...cfg.pos, ...(s.pos ?? {}) } }); } // 예전 저장값에는 pos가 없다
 } catch { /* ignore */ }
 
 function saveCfg() {
@@ -204,7 +207,7 @@ function applyUserConfig() {
   syncPosLines();
 }
 
-/** 현재 종목의 현물 평단·선물 진입가·청산가·익절·스탑로스 수평선을 갱신한다 */
+/** 현재 종목의 현물 평단·선물 진입가·청산가·익절·스탑로스·미체결 지정가 수평선을 갱신한다 (설정에서 종류별로 켜고 끈다) */
 function syncPosLines() {
   if (!chart) return;
   for (const id of posIds) chart.removeOverlay(id);
@@ -215,14 +218,19 @@ function syncPosLines() {
     const id = chart!.createOverlay({ name: "posLine", groupId: "positions", lock: true, points: [{ timestamp: ts, value }], extendData: { label, color, dashed } });
     if (typeof id === "string") posIds.push(id);
   };
+  const on = cfg.pos;
   const spot = a.me.positions.find(p => p.sym === shown);
-  if (spot) add(spot.avg, `현물 평단 ${money(spot.avg)}`, cssVar("--accent"));
+  if (spot && on.avg) add(spot.avg, `현물 평단 ${money(spot.avg)}`, cssVar("--accent"));
   for (const f of a.me.futures.filter(x => x.sym === shown)) {
     const dir = f.side === "long" ? "롱" : "숏";
-    add(f.entry, `${dir} ${f.lev}x 진입 ${money(f.entry)}`, cssVar(f.side === "long" ? "--up" : "--down"));
-    add(f.liq, `청산가 ${money(f.liq)}`, cssVar("--warn"), true);
-    if (f.tp != null) add(f.tp, `익절 ${money(f.tp)}`, "#16a34a", true);
-    if (f.stop != null) add(f.stop, `스탑로스 ${money(f.stop)}`, cssVar("--muted"), true);
+    if (on.entry) add(f.entry, `${dir} ${f.lev}x 진입 ${money(f.entry)}`, cssVar(f.side === "long" ? "--up" : "--down"));
+    if (on.liq) add(f.liq, `청산가 ${money(f.liq)}`, cssVar("--warn"), true);
+    if (f.tp != null && on.tp) add(f.tp, `익절 ${money(f.tp)}`, "#16a34a", true);
+    if (f.stop != null && on.stop) add(f.stop, `스탑로스 ${money(f.stop)}`, cssVar("--muted"), true);
+  }
+  if (on.orders) for (const o of a.me.orders.filter(x => x.sym === shown)) {
+    const what = o.kind === "fut" ? `${o.side === "buy" ? "롱" : "숏"} ${o.lev}x` : o.side === "buy" ? "매수" : "매도";
+    add(o.price, `${what} 지정가 ${money(o.price)}`, cssVar(o.side === "buy" ? "--up" : "--down"), true);
   }
 }
 
@@ -478,7 +486,15 @@ onBeforeUnmount(() => {
         <div class="cs-group cs-checks">
           <label><input v-model="cfg.showHighLow" type="checkbox" @change="applyUserConfig"> 최고·최저가 라벨 표시</label>
           <label><input v-model="cfg.showLastPrice" type="checkbox" @change="applyUserConfig"> 실시간 현재가 점선</label>
-          <label><input v-model="cfg.showPosLines" type="checkbox" @change="applyUserConfig"> 내 포지션 선 (평단·청산·익절·손절)</label>
+          <label><input v-model="cfg.showPosLines" type="checkbox" @change="applyUserConfig"> 내 포지션 선</label>
+          <div v-if="cfg.showPosLines" class="cs-sub-checks">
+            <label><input v-model="cfg.pos.avg" type="checkbox" data-pos="avg" @change="applyUserConfig"> 현물 평단</label>
+            <label><input v-model="cfg.pos.entry" type="checkbox" data-pos="entry" @change="applyUserConfig"> 선물 진입가</label>
+            <label><input v-model="cfg.pos.liq" type="checkbox" data-pos="liq" @change="applyUserConfig"> 청산가</label>
+            <label><input v-model="cfg.pos.tp" type="checkbox" data-pos="tp" @change="applyUserConfig"> 익절</label>
+            <label><input v-model="cfg.pos.stop" type="checkbox" data-pos="stop" @change="applyUserConfig"> 손절</label>
+            <label><input v-model="cfg.pos.orders" type="checkbox" data-pos="orders" @change="applyUserConfig"> 지정가(미체결)</label>
+          </div>
           <label><input v-model="cfg.showGrid" type="checkbox" @change="applyUserConfig"> 배경 격자선 (Grid)</label>
           <label><input v-model="cfg.yAxisInside" type="checkbox" @change="applyUserConfig"> Y축 가격표 차트 안쪽 배치 (모바일 넓게 보기)</label>
         </div>

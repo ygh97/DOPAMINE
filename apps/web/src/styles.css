@@ -1102,3 +1102,6 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 .consensus-btn { font-size: 12px; }
 .analyst-recent { text-align: left !important; }
 .analyst-recent .sym-tag { margin: 1px 2px; }
+
+/* 차트 설정: 포지션 선 종류별 */
+.cs-sub-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 10px; padding: 2px 0 4px 22px; font-size: 12px; }

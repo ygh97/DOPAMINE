@@ -137,8 +137,14 @@ export class Broker {
     for (const p of this.stmts.selPos.all(userId, sid) as { sym: string; qty: number; avg: number }[])
       positions.set(p.sym, { qty: p.qty, avg: p.avg });
     const futures = new Map<number, Future>();
-    for (const f of this.stmts.selFut.all(userId, sid) as unknown as Future[])
-      futures.set(f.id, { ...f, tp: f.tp ?? null, closing: false });
+    for (const f of this.stmts.selFut.all(userId, sid) as unknown as Future[]) {
+      // 예전에 따로 열린 같은 종목·방향·배율 포지션은 불러올 때 하나로 합친다 (익절·손절은 먼저 연 쪽, 없으면 나중 쪽)
+      const g = [...futures.values()].find(x => x.sym === f.sym && x.side === f.side && x.lev === f.lev);
+      if (!g) { futures.set(f.id, { ...f, tp: f.tp ?? null, closing: false }); continue; }
+      g.entry = (g.entry * g.qty + f.entry * f.qty) / (g.qty + f.qty); g.qty += f.qty; g.margin += f.margin;
+      g.stop ??= f.stop; g.tp ??= f.tp;
+      this.stmts.updFutOpen.run(g.qty, g.entry, g.margin, g.id); this.stmts.updStop.run(g.stop, g.id); this.stmts.updTp.run(g.tp, g.id); this.stmts.delFut.run(f.id); // 주문 트랜잭션 안에서 불릴 수 있어 tx로 감싸지 않는다
+    }
     const acc: Account = { userId, name: user.name, kind: user.kind, cash: row.cash, positions, futures, clearedTick: row.cleared_tick, gradTick: row.grad_tick, resetAt: row.reset_at };
     this.accounts.set(userId, acc);
     this.rankCache = null;
@@ -399,7 +405,17 @@ export class Broker {
     this.runTriggers(sym);
     return fill;
   }
+  /**
+   * 선물 진입. 같은 종목·방향·배율 포지션이 있으면 거기에 합친다 (물타기·불타기): 수량·증거금은 더하고 진입가는 수량 가중 평균,
+   * 청산가는 새 진입가로 다시 계산되고 익절·손절은 그대로. 배율이 다르면 청산가가 달라 따로 둔다
+   */
   private newFuture(acc: Account, sym: string, side: "long" | "short", lev: number, qty: number, entry: number, margin: number): Future {
+    for (const g of acc.futures.values()) {
+      if (g.sym !== sym || g.side !== side || g.lev !== lev || g.closing) continue;
+      g.entry = (g.entry * g.qty + entry * qty) / (g.qty + qty); g.qty += qty; g.margin += margin;
+      this.stmts.updFutOpen.run(g.qty, g.entry, g.margin, g.id);
+      return g;
+    }
     const f: Future = { id: 0, sym, side, lev, qty, entry, margin, stop: null, tp: null, closing: false };
     f.id = Number(this.stmts.insFut.run(acc.userId, this.season.id, sym, side, lev, qty, entry, margin, this.market.tick).lastInsertRowid);
     acc.futures.set(f.id, f);
@@ -544,7 +560,8 @@ export class Broker {
   }
   ordersOf(userId: number) { return [...this.intents.values()].filter(it => it.userId === userId).map(it => this.orderView(it)); }
   private orderView(it: Intent) {
-    return { id: it.id, sym: it.sym, kind: it.kind, side: it.side, lev: it.lev, price: it.price, qty: it.qty, filled: it.filled ?? 0 };
+    // cash = 묶어 둔 돈, held = 현물 매도로 떼어 둔 수량 (화면이 총자산에 더한다)
+    return { id: it.id, sym: it.sym, kind: it.kind, side: it.side, lev: it.lev, price: it.price, qty: it.qty, filled: it.filled ?? 0, cash: it.cash, held: it.held };
   }
 
   /**
@@ -582,11 +599,8 @@ export class Broker {
     }
     const margin = notional / it.lev, side = it.side === "buy" ? "long" : "short";
     it.cash -= margin + fee;
-    let f = it.posId != null ? acc.futures.get(it.posId) : undefined;
-    if (f) { // 같은 주문의 체결은 한 포지션으로 모은다
-      f.entry = (f.entry * f.qty + notional) / (f.qty + qty); f.qty += qty; f.margin += margin;
-      this.stmts.updFutOpen.run(f.qty, f.entry, f.margin, f.id);
-    } else { f = this.newFuture(acc, it.sym, side, it.lev, qty, price, margin); it.posId = f.id; }
+    const f = this.newFuture(acc, it.sym, side, it.lev, qty, price, margin); // 같은 종목·방향·배율이면 합쳐진다
+    it.posId = f.id;
     return this.record(acc, it.sym, `${side}-open`, qty, price, fee);
   }
   /** 주문이 끝나거나 취소됨: 남은 묶음을 돌려주고 지운다 */

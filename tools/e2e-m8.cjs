@@ -36,15 +36,18 @@ const ENV = { ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120, impactK: 20 }) }
     await page.click(".pct-chips button:has-text('20%')");
     await page.click("#orderBtn");
     await page.waitForFunction(() => document.querySelector(".toast")?.textContent.includes("매수"));
+    log.tabAfterBuy = await page.locator('[data-t][aria-selected="true"]').getAttribute("data-t"); // 현물 매수 → 보유종목 탭
+    const money = async () => Number((await page.locator("#equity").innerText()).replace(/[$,]/g, ""));
+    const eq0 = await money();
 
-    // 2) 지정가 매수를 아래에 걸고 → 미체결 1건 → 취소
+    // 2) 지정가 매수를 아래에 걸고 → 미체결 1건 → 취소 (걸어 둔 동안에도 총자산은 그대로)
     const book = await (await fetch(`${API}/api/book?sym=NVDA`)).json();
     await page.click('[data-ot="limit"]');
     await page.fill("#limitPrice", String(+(book.bids[0][0] * 0.98).toFixed(2)));
     await page.click(".pct-chips button:has-text('10%')");
     await page.click("#orderBtn");
     await page.waitForSelector("#openOrders tbody tr");
-    log.placed = { toast: await toast(page), rows: await orders() };
+    log.placed = { toast: await toast(page), rows: await orders(), tab: await page.locator('[data-t][aria-selected="true"]').getAttribute("data-t"), equityDiff: Math.abs((await money()) - eq0) };
     await page.waitForTimeout(1100); // 주문 속도 제한: 1초에 2건 (취소 포함)
     await page.click('#openOrders [data-act="cancel"]');
     await page.waitForSelector("#openOrders", { state: "detached" });
@@ -112,7 +115,13 @@ const ENV = { ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120, impactK: 20 }) }
     };
     await page.screenshot({ path: path.join(OUT, "m8-2-mobile.png") });
 
-    const ok = log.levels.asks === 10 && log.levels.bids === 10 && log.placed.rows === 1 && log.makerFill.side === "매도" && log.makerFill.fee === "$0.0000"
+    // 8) 차트 설정: 포지션 선 종류별 체크박스
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.click('[data-mv="all"]').catch(() => {});
+    await page.click("button[title='차트 모양·이평선·수치 표시 직접 설정']");
+    log.posChecks = await page.locator("#chartSettingsPanel [data-pos]").count();
+
+    const ok = log.tabAfterBuy === "hold" && log.placed.tab === "orders" && log.placed.equityDiff < 100 && log.posChecks === 6 && log.levels.asks === 10 && log.levels.bids === 10 && log.placed.rows === 1 && log.makerFill.side === "매도" && log.makerFill.fee === "$0.0000"
       && Math.abs(log.pick.ask - log.pick.input) < 1e-9 && log.trades > 0 && log.mobile.asks === 5 && log.mobile.bids === 5 && log.mobile.bookAboveOrder && !log.mobile.scrollX;
     if (!ok) throw new Error("기대와 다름");
     await browser.close();

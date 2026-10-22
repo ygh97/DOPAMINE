@@ -13,7 +13,8 @@ export interface FuturePos {
   qty: number; entry: number; margin: number; stop: number | null; tp: number | null; liq: number;
 }
 /** 걸어 둔 지정가. qty = 남은 수량, filled = 체결된 수량. kind fut이면 buy 롱 / sell 숏 진입 */
-export interface OpenOrder { id: number; sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; lev: number; price: number; qty: number; filled: number }
+/** cash = 묶인 돈, held = 현물 매도로 떼어 둔 수량. 둘 다 총자산에 들어간다 */
+export interface OpenOrder { id: number; sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; lev: number; price: number; qty: number; filled: number; cash: number; held: number }
 export interface Me {
   /** grad: 20배 졸업 금액, goal: 100배 전설 금액 */
   name: string; cash: number; equity: number; returnPct: number; goal: number; grad: number;
@@ -114,9 +115,12 @@ export const useAccount = defineStore("account", () => {
       const filled = r.fills.reduce((s, f) => s + f.qty, 0), unitOf = m.quotes[req.sym]?.market === "coin" ? "" : "주";
       const what = req.kind === "fut" ? `${req.lev}x ${req.side === "buy" ? "롱" : "숏"}` : req.side === "buy" ? "매수" : "매도";
       if (r.order) {
-        holdTab.value = "orders";
+        holdTab.value = "orders"; // 남은 수량이 걸렸다
         notify(`${req.sym} ${what} 지정가 $${r.order.price.toFixed(r.order.price < 1 ? 4 : 2)} 걸어 둠${filled ? ` (${+filled.toFixed(6)}${unitOf} 바로 체결)` : ""}`);
-      } else notify(`${req.sym} ${what} 지정가 바로 체결 ${+filled.toFixed(6)}${unitOf}`);
+      } else {
+        if (req.kind === "fut") holdTab.value = "fut"; else if (req.side === "buy") holdTab.value = "hold"; // 전부 바로 체결
+        notify(`${req.sym} ${what} 지정가 바로 체결 ${+filled.toFixed(6)}${unitOf}`);
+      }
       m.bookEpoch++;
     } catch (e) { notify((e as Error).message, "error"); }
     finally { busy.value = false; }
@@ -240,8 +244,10 @@ export const useAccount = defineStore("account", () => {
     const value = Math.max(0, f.margin + pnl);
     return { ...f, price, value, pnl, pnlPct: f.margin ? (pnl / f.margin) * 100 : 0, name: m.quotes[f.sym]?.name ?? f.sym };
   }));
+  // 지정가에 묶인 돈·수량도 내 돈이다 (안 넣으면 지정가를 걸 때마다 총자산이 줄어 보인다)
+  const locked = computed(() => (me.value?.orders ?? []).reduce((s, o) => s + o.cash + o.held * (m.quotes[o.sym]?.price ?? o.price), 0));
   const equity = computed(() => (me.value
-    ? me.value.cash + positions.value.reduce((s, p) => s + p.value, 0) + futures.value.reduce((s, f) => s + f.value, 0)
+    ? me.value.cash + locked.value + positions.value.reduce((s, p) => s + p.value, 0) + futures.value.reduce((s, f) => s + f.value, 0)
     : 0));
   const holding = (sym: string) => me.value?.positions.find(p => p.sym === sym)?.qty ?? 0;
   const hasExposure = (sym: string) => holding(sym) > 0 || (me.value?.futures.some(f => f.sym === sym) ?? false) || (me.value?.orders.some(o => o.sym === sym) ?? false);
@@ -252,6 +258,12 @@ export const useAccount = defineStore("account", () => {
     const prevId = me.value?.fills[0]?.id ?? 0;
     await refresh();
     const latest = me.value?.fills[0];
+    // 걸어 둔 지정가가 체결됐다: 현물 매수면 보유종목, 선물 진입이면 선물 포지션 탭으로
+    if (list.some(s => s.type === "order")) {
+      const fresh = (me.value?.fills ?? []).filter(f => f.id > prevId);
+      if (fresh.some(f => f.side.endsWith("-open"))) holdTab.value = "fut";
+      else if (fresh.some(f => f.side === "buy")) holdTab.value = "hold";
+    }
     if (latest && latest.id > prevId) {
       if (latest.side === "liquidation") notify(`${latest.sym} 선물 포지션이 강제 청산됐습니다.`, "error");
       else if (latest.side === "stop") notify(`${latest.sym} 스탑로스가 체결됐습니다.`);

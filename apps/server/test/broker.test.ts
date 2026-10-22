@@ -332,6 +332,29 @@ test("선물 진입·분할 종료·전량 종료: 격리 증거금, 수수료, 
   assert.equal(s.broker.me(u).futures.length, 0);
 });
 
+test("같은 종목·방향·배율 선물은 하나로 합친다 (물타기): 수량·증거금 합, 진입가 가중 평균, 손절 유지. 배율이 다르면 따로", async () => {
+  const s = setup(3);
+  const u = s.user("water");
+  const f1 = await openFut(s, u, "AAPL", "long", 2, 10);
+  s.broker.setStop(u, s.broker.me(u).futures[0].id, f1.price * 0.9);
+  const f2 = await openFut(s, u, "AAPL", "long", 2, 10);
+  let fs = s.broker.me(u).futures;
+  assert.equal(fs.length, 1, "하나로 합침");
+  const want = (f1.qty * f1.price + f2.qty * f2.price) / (f1.qty + f2.qty);
+  assert.ok(Math.abs(fs[0].qty - (f1.qty + f2.qty)) < 1e-9 && Math.abs(fs[0].entry / want - 1) < 1e-9, "수량 합·가중 평균 진입가");
+  assert.ok(fs[0].stop != null, "손절 유지");
+  await openFut(s, u, "AAPL", "long", 5, 10);
+  await openFut(s, u, "AAPL", "short", 2, 10);
+  fs = s.broker.me(u).futures;
+  assert.equal(fs.length, 3, "배율·방향이 다르면 따로");
+  // 예전 DB처럼 같은 키 포지션이 둘이면 서버를 켤 때 합친다
+  const id = fs.find(f => f.lev === 5)!.id;
+  s.db.prepare("INSERT INTO futures (user_id, season_id, sym, side, lev, qty, entry, margin, stop, tp, opened_tick) SELECT user_id, season_id, sym, side, lev, qty, entry * 1.1, margin, NULL, NULL, opened_tick FROM futures WHERE id = ?").run(id);
+  const b2 = new Broker(s.db, s.season, s.exchange);
+  assert.equal(b2.me(u).futures.length, 3, "불러올 때 합침");
+  assert.equal((s.db.prepare("SELECT COUNT(*) AS c FROM futures WHERE user_id = ?").get(u) as { c: number }).c, 3, "DB에서도 합침");
+});
+
 test("선물 레버리지 한도 및 다시 시작 후 10분간 5배 초과 금지", async () => {
   const s = setup();
   const u = s.user("lev_tester");
