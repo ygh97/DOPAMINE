@@ -57,9 +57,17 @@ function scrollToBottom() {
   });
 }
 
+// 알림 보기: 끄면 전광판(강제청산·졸업·전설)과 티배깅·묵념 메시지를 내 화면 채팅에서만 숨긴다 (브라우저에 저장)
+const showSys = ref((() => { try { return localStorage.getItem("dc-chat-sys") !== "0"; } catch { return true; } })());
+function toggleSys() {
+  showSys.value = !showSys.value;
+  try { localStorage.setItem("dc-chat-sys", showSys.value ? "1" : "0"); } catch { /* 저장 불가 */ }
+  scrollToBottom();
+}
+const isSys = (c: ChatMsg) => c.name === "⚡전광판" || c.text.startsWith("[티배깅]");
 const visibleChat = computed(() => {
   const myName = a.me?.name?.toLowerCase() ?? "";
-  return m.chat.filter(c => !c.to || (myName && (c.name.toLowerCase() === myName || c.to.toLowerCase() === myName)));
+  return m.chat.filter(c => (showSys.value || !isSys(c)) && (!c.to || (myName && (c.name.toLowerCase() === myName || c.to.toLowerCase() === myName))));
 });
 
 const lastMsgId = computed(() => visibleChat.value[visibleChat.value.length - 1]?.id ?? 0);
@@ -215,6 +223,7 @@ async function toggleBan(name: string, banned: boolean) {
         </button>
       </div>
       <span class="muted" style="margin-left: auto">참가 {{ m.players }}명</span>
+      <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="chat-sys" :aria-pressed="showSys" title="강제청산·졸업·전설·티배깅 알림을 채팅에서 보이거나 숨깁니다 (내 화면만)" @click="toggleSys">{{ showSys ? "🔔 알림 켬" : "🔕 알림 끔" }}</button>
       <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>
     </div>
     <div v-if="m.socialTab === 'rank'" class="table-scroll">

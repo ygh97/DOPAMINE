@@ -90,6 +90,10 @@ const ENV = {
     await liqMsg(pageB).locator('[data-act="teabag-mock"]').waitFor({ state: "detached" });
     log.victimSeesButton = await liqMsg(page).locator('[data-act="teabag-mock"]').count(); // 본인 청산에는 버튼 없음
     log.teabag = await pageB.locator("#chatLog .share-badge.teabag").count();
+    // 3-2) 알림 끄기: 전광판(강제청산)·티배깅 메시지가 내 채팅에서만 숨는다
+    await pageB.click('[data-act="chat-sys"]');
+    log.sysHidden = { liq: await liqMsg(pageB).count(), teabag: await pageB.locator("#chatLog .share-badge.teabag").count(), otherPage: await liqMsg(page).count() };
+    await pageB.click('[data-act="chat-sys"]');
 
     // 4) 다시 시작 직후 10배 진입 시도 → 5배 초과 제한 안내
     page.once("dialog", d => d.accept());
