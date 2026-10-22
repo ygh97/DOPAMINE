@@ -24,7 +24,7 @@
 | `PORT` | 4810 | 서버 포트. 바꾸면 터널·스크립트의 `-Port`도 같이 바꾼다 |
 | `SEASON_MS` | 28800000 (8시간) | 시즌 길이(밀리초). 진행 중 시즌에도 바로 적용 |
 | `SEED` | 20261021 | 첫 시즌 seed. 이후 시즌은 무작위 |
-| `BOTS` / `MARKET_MAKERS` | 0 / 꺼짐 | 실제 게임에 🤖 봇 N명, `MARKET_MAKERS=1`이면 🏦 세력·🐋 고래를 넣는다 |
+| `BOTS` / `MARKET_MAKERS` | 0 / 꺼짐 | 실제 게임에 🤖 봇 N명, `MARKET_MAKERS=1`이면 🏦 세력·🐋 고래를 넣는다. 지금 운영은 `BOTS=100`, `MARKET_MAKERS=1` (사람이 들어오면 그 수만큼 봇이 쉰다). 끄려면 두 줄을 지우고 `deploy.ps1 -SkipPull` |
 | `DB_FILE` | `data/dopamine.db` | 게임 DB 위치 |
 
 ---

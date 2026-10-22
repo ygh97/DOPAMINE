@@ -54,7 +54,7 @@ npm run e2e:m8            # 호가창 10단계·지정가 걸기·취소·전체
 
 ## 현재 단계
 
-M0~M8 완료 (SPEC 9장). 운영: 이 PC에서 `npm start` + Cloudflare Quick Tunnel (DEPLOY.md A).
+M0~M8 완료 (SPEC 9장). 운영: 이 PC에서 `npm start` + Cloudflare Quick Tunnel (DEPLOY.md A), `.env`에 `BOTS=100`·`MARKET_MAKERS=1`로 🤖 봇·🏦 세력·🐋 고래가 같이 돈다.
 
 알려진 남은 문제:
 - 🏦 가치투자세력은 시즌 우상향 덕에 수익률이 수백 %로 커진다 (세력 현황 탭에 보임). 졸업률은 이 상태로 보정했다.
