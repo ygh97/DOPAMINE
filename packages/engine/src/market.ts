@@ -111,6 +111,8 @@ export interface Market {
   bars(sym: string): readonly Bar[];
   /** 가상 유동성 L (게임 하루 거래대금, 달러). 보유 한도 계산에 쓴다 */
   liquidity(sym: string): number | null;
+  /** 종목의 틱당 기본 변동성 σ (호가창 스프레드·간격 계산용) */
+  sigma(sym: string): number | null;
   /**
    * 이번 tick에 모인 순매수(+)·순매도(-) 명목 금액을 가격에 반영하고 체결 기준가를 돌려준다.
    * step() 전에 종목마다 한 번 부른다. 같은 tick 주문은 모두 이 가격에 체결된다.
@@ -692,6 +694,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     quote: sym => (state[sym] ? toQuote(state[sym]) : null),
     bars: sym => state[sym]?.bars ?? [],
     liquidity: sym => (state[sym] ? liquidity(state[sym]) : null),
+    sigma: sym => state[sym]?.sigma ?? null,
     snapshot: takeSnapshot,
     applyFlow,
   };
