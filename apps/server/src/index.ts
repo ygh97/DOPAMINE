@@ -382,6 +382,13 @@ app.post<{ Body: { confirm: boolean } }>("/api/reset", {
   return { me: broker.me(id) };
 });
 
+app.get<{ Querystring: { sym: string } }>("/api/fills", {
+  schema: { querystring: { type: "object", required: ["sym"], properties: { sym: { type: "string", maxLength: 12 } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  return id && { fills: broker.fillsFor(id, req.query.sym) };
+});
+
 app.get("/api/drawings", async (req, reply) => {
   const id = userOf(req, reply);
   return id && { drawings: broker.getDrawings(id) };

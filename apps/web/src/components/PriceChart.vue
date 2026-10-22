@@ -7,7 +7,7 @@ import { dispose, init, type Chart, type KLineData } from "klinecharts";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { alpha, mount, register, type DrawingController } from "../chart/drawing-tools.js";
 import { change, money, pct } from "../format";
-import { useAccount } from "../stores/account";
+import { useAccount, type Fill } from "../stores/account";
 import { useMarket, type PackedBar } from "../stores/market";
 import { useUi } from "../stores/ui";
 
@@ -238,13 +238,23 @@ function syncPosLines() {
 /** 체결 방향: 매수·롱 진입·숏 종료 = B, 매도·숏 진입·롱 종료 = S (청산·스탑·익절·정산은 방향을 몰라 뺀다) */
 const FILL_DIR: Record<string, "B" | "S"> = { buy: "B", "long-open": "B", "short-close": "B", sell: "S", "short-open": "S", "long-close": "S" };
 
-/** 최근 체결(최대 50건)을 그 체결이 들어간 봉에 B/S로 찍는다. 같은 봉·같은 방향은 하나로 묶어 평균가에 */
+/** 보고 있는 종목의 이번 시즌 내 체결 전부 (id → 체결). 종목을 열 때 서버에서 받고, 새 체결은 a.me.fills에서 더한다 */
+let symFills = new Map<number, Fill>();
+async function loadFills(sym: string) {
+  const list = await a.fetchFills(sym);
+  if (sym !== shown) return;
+  symFills = new Map(list.map(f => [f.id, f]));
+  syncPosLines();
+}
+
+/** 이번 시즌 내 체결을 그 체결이 들어간 봉에 B/S로 찍는다. 같은 봉·같은 방향은 하나로 묶어 평균가에 */
 function syncFillMarks(lastTs: number) {
   const span = period.value * 60_000, barIdx = (t: number) => Math.floor((t - 1) / 60); // 1분봉 = 60 tick
+  for (const f of a.me!.fills) if (f.sym === shown) symFills.set(f.id, f);
   const groups = new Map<string, { ts: number; side: "B" | "S"; qty: number; notional: number; n: number }>();
-  for (const f of a.me!.fills) {
+  for (const f of symFills.values()) {
     const side = FILL_DIR[f.side];
-    if (f.sym !== shown || !side) continue;
+    if (!side) continue;
     const t1 = lastTs - Math.max(0, barIdx(m.tick) - barIdx(f.tick)) * 60_000;
     if (t1 < base[0].timestamp) continue;
     const ts = Math.floor(t1 / span) * span, key = `${ts}${side}`, g = groups.get(key) ?? { ts, side, qty: 0, notional: 0, n: 0 };
@@ -313,6 +323,8 @@ async function show(sym: string) {
   if (!chart || !drawings) return;
   if (shown) drawings.save(shown, shownFactor);
   shown = sym;
+  symFills = new Map();
+  void loadFills(sym);
   const packed = await m.fetchBars(sym);
   if (sym !== shown) return;
   base = packed.map(toBar);
@@ -353,7 +365,8 @@ watch(() => m.barsEpoch[m.selected], () => void show(m.selected));
 watch(() => m.seasonEpoch, () => { drawings?.clearAll(); shown = ""; void show(m.selected); });
 watch(period, redraw);
 watch(() => a.me, syncPosLines);
-watch(() => a.token, tok => { if (tok) void loadRemoteDrawings(); });
+watch(() => a.me?.resetAt, () => { if (shown) void loadFills(shown); }); // 다시 시작하면 그 전 체결은 빠진다
+watch(() => a.token, tok => { if (tok) { void loadRemoteDrawings(); if (shown) void loadFills(shown); } });
 watch(() => ui.theme, () => { chart?.setStyles(chartStyles()); syncPosLines(); }, { flush: "post" });
 
 function toggle(name: string, main: boolean) {

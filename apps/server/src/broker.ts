@@ -94,6 +94,7 @@ export class Broker {
       selSeasonUsers: db.prepare("SELECT user_id FROM accounts WHERE season_id = ?"),
       // 다시 시작한 뒤의 체결만 (내 체결 내역·실현손익·승률이 새로 시작한다. 기록은 DB에 남는다)
       selFills: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE user_id = ? AND season_id = ? AND tick >= ? ORDER BY id DESC LIMIT 50"),
+      selSymFills: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE user_id = ? AND season_id = ? AND sym = ? AND tick >= ? ORDER BY id"),
       selFill: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE id = ? AND user_id = ? AND season_id = ?"),
       delPosAll: db.prepare("DELETE FROM positions WHERE user_id = ? AND season_id = ?"),
       delFutAll: db.prepare("DELETE FROM futures WHERE user_id = ? AND season_id = ?"),
@@ -184,6 +185,11 @@ export class Broker {
     for (const f of acc.futures.values()) v += this.futureValue(f);
     for (const it of this.intents.values()) if (it.userId === acc.userId) v += it.cash + it.held * this.price(it.sym); // 묶어 둔 돈·수량
     return v;
+  }
+
+  /** 이번 시즌(다시 시작한 뒤) 한 종목의 내 체결 전부: 차트 B/S 표시용 */
+  fillsFor(userId: number, sym: string): Fill[] {
+    return this.stmts.selSymFills.all(userId, this.season.id, sym, this.account(userId).resetAt ?? 0) as unknown as Fill[];
   }
 
   me(userId: number) {

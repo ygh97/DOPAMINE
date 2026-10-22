@@ -182,6 +182,13 @@ export const useAccount = defineStore("account", () => {
     catch (e) { notify((e as Error).message, "error"); }
   }
 
+  /** 이번 시즌 한 종목의 내 체결 전부 (차트 B/S) */
+  async function fetchFills(sym: string) {
+    if (!token.value) return [];
+    try { return (await api<{ fills: Fill[] }>(`/api/fills?sym=${encodeURIComponent(sym)}`)).fills; }
+    catch { return []; }
+  }
+
   async function fetchDrawings() {
     if (!token.value) return null;
     try { return (await api<{ drawings: Record<string, { factor: number; items: unknown[] }> }>("/api/drawings")).drawings; }
@@ -281,5 +288,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchDrawings, syncDrawing, sendChat, share, react, hallMessage, reportChat, adminChat, adminBan, adminHide };
+  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchFills, fetchDrawings, syncDrawing, sendChat, share, react, hallMessage, reportChat, adminChat, adminBan, adminHide };
 });
