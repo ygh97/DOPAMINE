@@ -5,6 +5,5 @@ apps/web/dist
 data
 .git
 .claude
-design
 tools
 *.log

@@ -246,7 +246,7 @@ app.get<{ Querystring: { before?: string; limit?: string } }>("/api/news", async
   return { news: market.news.filter(n => n.tick < before).slice(0, limit) };
 });
 
-app.get("/api/hall", async () => ({ rows: hallOfFame(db) }));
+app.get("/api/hall", async () => hallOfFame(db));
 
 app.get("/api/ranking", async () => rankingInfo());
 

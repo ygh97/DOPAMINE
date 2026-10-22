@@ -89,7 +89,11 @@ export function seasonStats(ranking: RankRow[]) {
   };
 }
 
-export function hallOfFame(db: Db, seasons = 10) {
-  return db.prepare(`SELECT season_id AS season, rank, name, equity, return_pct AS returnPct, cleared_tick AS clearedTick FROM hall_of_fame
-    WHERE season_id IN (SELECT id FROM seasons WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT ?) ORDER BY season_id DESC, rank`).all(seasons);
+/** 명예의 전당: 끝난 시즌 번호(최근 limit개, 오래된 순)와 그 시즌들의 전설. 전설이 없던 시즌도 번호는 나온다 (화면의 시즌 탭) */
+export function hallOfFame(db: Db, limit = 30) {
+  const seasons = (db.prepare("SELECT id FROM seasons WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT ?").all(limit) as { id: number }[]).map(r => r.id).reverse();
+  const rows = db.prepare(`SELECT season_id AS season, rank, name, equity, return_pct AS returnPct, cleared_tick AS clearedTick FROM hall_of_fame
+    WHERE season_id IN (SELECT id FROM seasons WHERE ended_at IS NOT NULL ORDER BY id DESC LIMIT ?) ORDER BY season_id DESC, rank`).all(limit) as
+    { season: number; rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }[];
+  return { seasons, rows };
 }

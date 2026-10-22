@@ -279,8 +279,9 @@ test("졸업(20배)·전설(100배) 알림, 시즌 종료: 명예의 전당은 �
   assert.equal(next.id, s.season.id + 1);
   assert.notEqual(next.seed, s.season.seed);
   assert.equal(next.startedAt, T0 + s.season.lengthMs, "이전 시즌이 끝난 시각에 이어서 시작");
-  const hall = hallOfFame(s.db) as { season: number; rank: number; name: string }[];
+  const { seasons, rows: hall } = hallOfFame(s.db);
   assert.deepEqual(hall.map(h => h.name), ["legend"], "명예의 전당은 100배 전설만 (1위 자동 등재 없음)");
+  assert.deepEqual(seasons, [s.season.id], "끝난 시즌 번호 (시즌 탭)");
   assert.equal(currentSeason(s.db, 1, 1000, 1, T0).id, next.id, "진행 중 시즌 = 새 시즌");
   const { exchange } = bootMarket(s.db, next, FAST, next.startedAt);
   const broker = new Broker(s.db, next, exchange);
@@ -339,7 +340,7 @@ test("강제 청산: 증거금 90% 손실 가격이 되면 바로 시장가 강�
   const u = s.user("degen");
   await openFut(s, u, "LMQ", "long", 5, 50); // 청산가 = 진입가 × (1 - 0.9/5) = 0.82
   const f = s.broker.me(u).futures[0];
-  while (s.market.quote("LMQ")!.price > f.liq * 0.98) s.market.applyFlow("LMQ", -1e9);
+  while (s.market.quote("LMQ")!.price > f.liq * 0.98) s.market.absorbFlow("LMQ", -1e9);
   s.tick(); // 호가 봇이 밀린 기준가로 다시 깔면 체결가가 청산가를 넘고, 바로 시장가 강제 청산
   const auto = s.broker.drainAuto().closed;
   assert.deepEqual(auto, [{ type: "liquidation", sym: "LMQ" }]);
@@ -357,7 +358,7 @@ test("스탑로스: 설정 검증 및 목표가 도달 시 자동 종료", async
   const now = s.market.quote("NVDA")!.price;
   assert.throws(() => s.broker.setStop(u, f.id, now * 0.95), OrderError, "숏 스탑로스는 현재가 위여야 함");
   s.broker.setStop(u, f.id, now * 1.002);
-  while (s.market.quote("NVDA")!.price <= now * 1.003) s.market.applyFlow("NVDA", 1e11);
+  while (s.market.quote("NVDA")!.price <= now * 1.003) s.market.absorbFlow("NVDA", 1e11);
   s.tick();
   const auto = s.broker.drainAuto().closed;
   assert.deepEqual(auto, [{ type: "stop", sym: "NVDA" }]);
@@ -504,7 +505,7 @@ test("익절(TP): 설정 검증 및 목표가 도달 시 자동 익절 체결", 
   const now = s.market.quote("NVDA")!.price;
   assert.throws(() => s.broker.setTp(u, f.id, now * 0.95), OrderError, "롱 익절가는 현재가 위여야 함");
   s.broker.setTp(u, f.id, now * 1.002);
-  while (s.market.quote("NVDA")!.price <= now * 1.003) s.market.applyFlow("NVDA", 1e11);
+  while (s.market.quote("NVDA")!.price <= now * 1.003) s.market.absorbFlow("NVDA", 1e11);
   s.tick();
   const auto = s.broker.drainAuto().closed;
   assert.deepEqual(auto, [{ type: "tp", sym: "NVDA" }]);
@@ -560,7 +561,7 @@ test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭
   s.tick();
   assert.ok(!s.broker.drainBroadcasts().some(t => t.includes(bot.name)), "봇은 전광판 알림 없음");
   finishSeason(s.db, s.season, s.broker.ranking(Infinity), T0 + s.season.lengthMs + 1000);
-  const hall = hallOfFame(s.db) as { name: string }[];
+  const hall = hallOfFame(s.db).rows;
   assert.deepEqual(hall.map(h => h.name), ["사람1"], "명예의 전당은 사람 전설만");
 });
 

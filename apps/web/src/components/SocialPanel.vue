@@ -8,7 +8,14 @@ const m = useMarket();
 const a = useAccount();
 interface HallRow { season: number; rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }
 const hall = ref<HallRow[]>([]);
-const loadHall = async () => { hall.value = (await (await fetch("/api/hall")).json()).rows; };
+const hallSeasons = ref<number[]>([]);
+const hallSeason = ref<number | null>(null); // 아래 시즌 탭에서 고른 시즌. 처음엔 가장 최근에 끝난 시즌
+const hallRows = computed(() => hall.value.filter(h => h.season === hallSeason.value));
+const loadHall = async () => {
+  const d: { seasons: number[]; rows: HallRow[] } = await (await fetch("/api/hall")).json();
+  hall.value = d.rows; hallSeasons.value = d.seasons;
+  if (hallSeason.value == null || !d.seasons.includes(hallSeason.value)) hallSeason.value = d.seasons.at(-1) ?? null;
+};
 
 const text = ref("");
 const whisperTo = ref<string | null>(null);
@@ -250,18 +257,22 @@ async function toggleBan(name: string, banned: boolean) {
         </tbody>
       </table>
     </div>
-    <div v-else-if="m.socialTab === 'hall'" class="table-scroll">
-      <table v-if="hall.length" id="hall" class="grid">
-        <tbody>
-          <tr v-for="h in hall" :key="`${h.season}-${h.name}`" :class="{ mine: h.name === a.me?.name }">
-            <td>S{{ h.season }}</td>
-            <td>{{ h.rank <= 3 ? ["🥇", "🥈", "🥉"][h.rank - 1] : `${h.rank}위` }}</td>
-            <td><b>{{ h.name }}</b><span v-if="h.clearedTick" class="stage legend">전설</span></td>
-            <td :class="h.returnPct >= 0 ? 'up' : 'down'">{{ pct(h.returnPct) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-else class="empty">아직 전설이 없습니다. 시즌 중 100배(총자산 $1,000만)를 달성하면 여기에 남습니다.</p>
+    <div v-else-if="m.socialTab === 'hall'" class="hall-wrap">
+      <div class="table-scroll">
+        <table v-if="hallRows.length" id="hall" class="grid">
+          <tbody>
+            <tr v-for="h in hallRows" :key="`${h.season}-${h.name}`" :class="{ mine: h.name === a.me?.name }">
+              <td>{{ h.rank <= 3 ? ["🥇", "🥈", "🥉"][h.rank - 1] : `${h.rank}위` }}</td>
+              <td><b>{{ h.name }}</b><span v-if="h.clearedTick" class="stage legend">전설</span></td>
+              <td :class="h.returnPct >= 0 ? 'up' : 'down'">{{ pct(h.returnPct) }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="empty">{{ hallSeason ? `S${hallSeason}에는 전설이 없습니다.` : "아직 끝난 시즌이 없습니다." }} 시즌 중 100배(총자산 $1,000만)를 달성하면 전설로 여기에 남습니다.</p>
+      </div>
+      <div v-if="hallSeasons.length" class="tabs hall-seasons" role="tablist" aria-label="시즌">
+        <button v-for="sid in hallSeasons" :key="sid" role="tab" :data-hs="sid" :aria-selected="hallSeason === sid" @click="hallSeason = sid">S{{ sid }}</button>
+      </div>
     </div>
     <div v-else class="chat-wrap" :class="{ 'is-folded': chatFolded }">
       <button type="button" class="chat-fold-bar" :aria-expanded="!chatFolded" @click="chatFolded = !chatFolded; if (!chatFolded) scrollToBottom()">

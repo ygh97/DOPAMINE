@@ -97,9 +97,6 @@ export interface MarketOptions {
   ticksPerBar: number;
   ticksPerDay: number;
   prevResetDays: number;
-  whaleChance: number;
-  /** 돌파 때 엔진이 추세·가짜 돌파를 만드는 확률 (0이면 끔) */
-  breakChance: number;
   /** 시즌 동안 적정가가 오르는 배수 [최소, 최대]. 시즌마다 이 안에서 하나를 뽑는다 */
   seasonGrowth: [number, number];
   /** 시즌 길이(틱). 서버가 시즌 설정에서 넣는다 */
@@ -126,7 +123,6 @@ export interface MarketOptions {
   impactK: number;
   impactCap: Record<MarketKind, number>;
   impactTempShare: number;
-  impactRevertTicks: number;
   gradCooldown: number;
   splitPrice: number;
   delistCap: number;

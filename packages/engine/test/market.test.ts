@@ -116,27 +116,18 @@ test("가격이 너무 낮으면 주식병합: 가격 ×ratio, 시총 그대로,
   assert.fail("주식병합이 일어나지 않음");
 });
 
-test("주문 충격: 제곱근 크기, 상한, 체결가는 충격의 절반, 70%는 되돌아간다", () => {
-  const a = make(11), b = make(11); // 같은 seed: 주문만 다르다
-  const pre = a.quote("NVDA")!.price;
-  const small = a.applyFlow("NVDA", 1e6)!;
-  const big = make(11).applyFlow("NVDA", 4e6)!;
-  assert.ok(Math.abs(big.impact / small.impact - 2) < 1e-9, "4배 금액 → 2배 충격");
-  assert.ok(Math.abs(small.price / (pre * Math.exp(small.impact / 2)) - 1) < 1e-12, "체결가 = 충격 절반 지점");
-  assert.ok(a.quote("NVDA")!.price > small.price && small.price > pre, "매수는 가격을 올린다");
-  assert.equal(make(11).applyFlow("LMQ", 1e12)!.impact, 0.15, "신흥주 상한 15%");
-  assert.ok(make(11).applyFlow("NVDA", -1e6)!.price < pre, "매도는 가격을 내린다");
-  // 같은 seed에서 주문한 쪽과 안 한 쪽을 비교: 바로는 충격만큼 벌어진다
-  assert.ok(Math.abs(Math.log(a.quote("NVDA")!.price / b.quote("NVDA")!.price) - small.impact) < 1e-9);
-  // 되돌림이 끝난 뒤(61틱)에는 약 30%만 남는다. 가격이 달라지면 돌파 이벤트 등으로 경로가 갈라져서 여러 seed의 중앙값으로 본다
-  const left: number[] = [];
-  for (let s = 20; s < 35; s++) {
-    const x = make(s), y = make(s), f = x.applyFlow("NVDA", 3e7)!;
-    run(x, 61); run(y, 61);
-    left.push(Math.log(x.quote("NVDA")!.price / y.quote("NVDA")!.price) / f.impact);
-  }
-  const median = left.sort((p, q) => p - q)[7];
-  assert.ok(median > 0.15 && median < 0.45, `남은 충격 비율 중앙값 ${median.toFixed(2)}`);
+test("호가창 순매수의 영구 몫(absorbFlow): 제곱근 크기, 상한, 30%만 기준가에 남는다", () => {
+  const move = (sym: string, notional: number) => { const m = make(11), pre = m.quote(sym)!.price; m.absorbFlow(sym, notional); return Math.log(m.quote(sym)!.price / pre); };
+  const small = move("NVDA", 1e6), big = move("NVDA", 4e6);
+  assert.ok(small > 0 && Math.abs(big / small - 2) < 1e-9, "4배 금액 → 2배");
+  assert.ok(move("NVDA", -1e6) < 0, "순매도는 내린다");
+  assert.ok(Math.abs(move("LMQ", 1e12) - 0.15 * 0.3) < 1e-12, "신흥주 상한 15%의 30%");
+  // 같은 seed에서 흡수한 쪽과 안 한 쪽은 그만큼 벌어진 채로 같은 경로를 간다 (적정가도 같이 옮겨서 되돌아가지 않는다)
+  const x = make(20), y = make(20);
+  x.absorbFlow("NVDA", 3e7);
+  const gap = Math.log(x.quote("NVDA")!.price / y.quote("NVDA")!.price);
+  run(x, 61); run(y, 61);
+  assert.ok(Math.abs(Math.log(x.quote("NVDA")!.price / y.quote("NVDA")!.price) - gap) < gap * 0.5, "61틱 뒤에도 대부분 남음");
 });
 
 test("검증 성공 + 시총 기준이면 주식으로 승격한다", () => {
@@ -156,7 +147,7 @@ test("검증 성공 + 시총 기준이면 주식으로 승격한다", () => {
 test("스냅샷에서 이어 돌리면 끊김 없이 같은 경로", () => {
   const a = make(12);
   run(a, 3000);
-  a.applyFlow("NVDA", 5e6);
+  a.absorbFlow("NVDA", 5e6);
   const snap = a.snapshot();
   const b = createMarket({ assets: ASSETS, sectors: SECTORS, spares: SPARES, seed: 12, now: NOW, options: FAST, snapshot: snap });
   assert.equal(b.tick, a.tick);

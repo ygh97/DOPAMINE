@@ -1,9 +1,10 @@
 // 도파민 센터 시세 엔진. 서버 GameLoop가 1초마다 step()을 부른다.
 //
-// 틱 수익률 r = 시장 요인 × 베타 + 업종 요인 × 업종 베타 + 개별 노이즈 × 변동성 군집
-//             + 뉴스·세력 반응(즉시 → 따라붙음 → 과열 되돌림 / 개미털기 / 설거지 / 스퀴즈)
-//             + 적정가 회귀 + RSI 기울기(국면에 따라 역추세/추세) + 지지·저항 + 스탑헌팅 + 점프
-// 숨은 상태(대기 충격, 국면, 앵커, EPS, 세력 페이즈)는 이 모듈 밖으로 나가지 않는다. 밖으로는 Quote·Bar·NewsItem만.
+// 엔진 가격은 화면에 안 나오는 기준가다. 호가창(exchange.ts)의 호가 봇이 이 근처에 호가를 깔고, 화면 가격은 체결가다.
+// 틱 수익률 r = 시즌 성장 + 시장 요인 × 베타 + 업종 요인 × 업종 베타 + 개별 노이즈 × 변동성 군집
+//             + 뉴스 반응(즉시 → 따라붙음 → 과열 되돌림) + 적정가 회귀 + RSI 기울기(국면에 따라 역추세/추세) + 지지·저항 + 점프
+// 세력 패턴(개미털기·스퀴즈·설거지·스탑헌팅)은 엔진이 아니라 🏦 세력 계좌가 실제 주문으로 만든다 (apps/server/src/bots.ts).
+// 숨은 상태(대기 충격, 국면, 앵커, EPS)는 이 모듈 밖으로 나가지 않는다. 밖으로는 Quote·Bar·NewsItem만.
 import { NEWS, type Template } from "./news-templates.ts";
 import type { AssetDef, Bar, CorporateAction, GameDate, MarketKind, MarketOptions, NewsItem, Quote, SpareDef, StepResult } from "./types.ts";
 
@@ -11,8 +12,6 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   ticksPerBar: 60,        // 1분봉 = 60틱(1초 tick)
   ticksPerDay: 80,        // 게임 하루
   prevResetDays: 1,       // 등락률 기준가(prev) 초기화 주기 = 게임 하루(80틱)
-  whaleChance: 0,         // 숨은 세력 움직임(개미털기·설거지·숏스퀴즈) 발동 비율. M8부터 0: 🏦 세력·🐋 고래 계좌가 실제 주문으로 대신한다 (A13)
-  breakChance: 0,         // 전고점·전저점 돌파 때 엔진이 추세(65%)·가짜 돌파(35%)를 만드는 확률. M8부터 0 (모멘텀·청산사냥 세력이 대신)
   seasonGrowth: [1.5, 3], // 우상향은 여기서만 만든다: 시즌 동안 적정가가 1.5~3배 (시즌마다 하나를 뽑음)
   seasonTicks: 28_800,    // 시즌 = 게임 1년 (360일 × 80틱 = 실제 8시간)
   barMs: 60_000,
@@ -43,11 +42,10 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   ventureSuccess: 0.66,   // 신흥주 검증 성공 확률 (졸업률 보정용, tools/sim-bots.ts. M8 보정: 20배 약 11%, 100배 약 3%)
   epsHalfLife: 172_800,   // EPS가 기준값으로 돌아가는 반감기(틱, 2일)
   epsBand: [0.4, 3],      // EPS(= 적정가)는 기준의 0.4~3배 안에서만 움직인다
-  // 플레이어 주문 충격: 충격 = impactK × σ_일 × √(명목 금액 / 가상 유동성)
+  // 호가창 두께와 순매수의 영구 몫: 충격 = impactK × σ_일 × √(명목 금액 / 가상 유동성). 호가 봇이 같은 크기로 호가를 깐다
   impactK: 2,
   impactCap: { stock: 0.03, coin: 0.05, venture: 0.15 }, // tick당 충격 상한
-  impactTempShare: 0.7,   // 충격 중 사라지는 몫. 나머지 30%는 적정가에 남는다
-  impactRevertTicks: 60,  // 사라지는 몫이 되돌아가는 기간
+  impactTempShare: 0.7,   // 충격 중 사라지는 몫(호가 봇 재고 헤지가 맡음). 나머지 30%는 기준가·적정가에 남는다
 };
 
 const KIND: Record<MarketKind, { sigma: number; betaM: number; betaS: number; jump: number }> = {
@@ -80,7 +78,6 @@ interface AssetState extends AssetDef {
   lastClose: number;
   hi: number | null;
   lo: number | null;
-  breakBar: number;
   volBoost: number;
   successes: number;
   stage: string | null;
@@ -114,11 +111,6 @@ export interface Market {
   liquidity(sym: string): number | null;
   /** 종목의 틱당 기본 변동성 σ (호가창 스프레드·간격 계산용) */
   sigma(sym: string): number | null;
-  /**
-   * 이번 tick에 모인 순매수(+)·순매도(-) 명목 금액을 가격에 반영하고 체결 기준가를 돌려준다.
-   * step() 전에 종목마다 한 번 부른다. 같은 tick 주문은 모두 이 가격에 체결된다.
-   */
-  applyFlow(sym: string, notional: number): { price: number; impact: number } | null;
   /**
    * 호가창(Exchange)에서 실제 체결된 순매수 금액을 기준가에 남긴다. 충격 중 영구 몫(30%)만 기준가와 적정가를 옮긴다.
    * 사라지는 몫은 호가 봇 재고 헤지가 맡는다. tick이 끝날 때(다음 step() 전) 종목마다 한 번 부른다.
@@ -179,7 +171,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       shares: def.cap ? def.cap / def.price : null,
       variance: 1, regime: rand() < 0.5 ? "range" : "trend",
       pending: [], bars: [], rsi: 50, avgGain: 0, avgLoss: 0, lastClose: def.price,
-      hi: null, lo: null, breakBar: -1, volBoost: 0, successes: 0, stage: null, watchUntil: null,
+      hi: null, lo: null, volBoost: 0, successes: 0, stage: null, watchUntil: null,
       par: def.parValue ?? null, splitFactor: 1,
     };
     assetsVersion++;
@@ -244,39 +236,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   }
   const fillOf = (a: AssetState) => (s: string) => s.replaceAll("{name}", a.name).replaceAll("{sym}", a.sym)
     .replaceAll("{product}", a.product || "주력 제품").replaceAll("{tech}", a.tech || "핵심 기술");
-
-  // ---------- 숨은 세력(Whale / Market Maker) 차트 패턴 ----------
-  // 뉴스나 알림을 전혀 띄우지 않고 차트 수급으로만 개미털기(Shakeout)·설거지(Pump & Dump)·숏스퀴즈(Short Squeeze)를 발생시킨다.
-  // 매집 후 상승(개미털기·숏스퀴즈) 비중 78%. 수급일 뿐이라 적정가는 건드리지 않는다 (적정가 회귀가 천천히 되돌린다).
-  function whaleOperation() {
-    const candidates = live().filter(x => x.watchUntil == null && !venturesBusy.has(x.sym));
-    if (!candidates.length) return;
-    const a = pick(candidates);
-    const scale = a.market === "venture" ? 2.0 : a.market === "coin" ? 1.4 : 1.0;
-    const modeRoll = rand();
-    a.volBoost = Math.max(a.volBoost, 14);
-
-    if (modeRoll < 0.42) {
-      // 개미털기 (Shakeout): 초반 짧은 눌림 후 강한 V자 매집 돌파
-      const dip = -uni(0.015, 0.035) * scale;
-      const rip = uni(0.045, 0.10) * scale;
-      impulse(a.pending, dip, Math.round(uni(4, 7)), 0);
-      impulse(a.pending, rip, Math.round(uni(18, 36)), Math.round(uni(5, 9)));
-    } else if (modeRoll < 0.78) {
-      // 숏스퀴즈 (Short Squeeze): 1차 매집 + 2차 연쇄 상방 분출
-      const wave1 = uni(0.03, 0.06) * scale;
-      const wave2 = uni(0.045, 0.095) * scale;
-      impulse(a.pending, wave1, Math.round(uni(5, 10)), 0);
-      impulse(a.pending, wave2, Math.round(uni(15, 30)), Math.round(uni(6, 12)));
-      impulse(a.pending, -wave2 * 0.25, Math.round(uni(30, 50)), Math.round(uni(35, 55)));
-    } else {
-      // 설거지 (Pump & Dump): 단기 슈팅 후 조정
-      const pump = uni(0.03, 0.065) * scale;
-      const dump = -uni(0.04, 0.085) * scale;
-      impulse(a.pending, pump, Math.round(uni(7, 13)), 0);
-      impulse(a.pending, dump, Math.round(uni(22, 45)), Math.round(uni(10, 16)));
-    }
-  }
 
   // 적정가 이동: 뉴스·세력은 기준(baseEps·anchor)이 아니라 이탈분(eps·dev)만 움직인다.
   // 이탈분은 epsBand 안에서만 움직이고 epsHalfLife로 기준에 돌아간다. 기준을 올리는 건 drift뿐 (안 그러면 복리로 폭주)
@@ -373,7 +332,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     publish({ kind: "잡담", headline: tpl.h, body: tpl.b, symbols: [] });
   }
   function makeNews() {
-    if (rand() < cfg.whaleChance) whaleOperation();
     const r = rand();
     // 과거 차트 구간 앞 80%에서는 신흥주 검증을 생략해 시작가 맞추기(rebase) 때 비율이 극단적이지 않게
     const ventureOk = !warm || tick > cfg.warmupBars * cfg.ticksPerBar * 0.8;
@@ -509,24 +467,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     }
     return Math.max(-1, Math.min(1, t)) * cfg.srWeight * a.sigma;
   }
-  // 전고점 돌파·전저점 이탈: 65%는 진짜 추세 돌파(스퀴즈), 35%는 세력의 스탑헌팅(가짜 돌파 후 반대 방향 급반전휩쏘)
-  function checkBreak(a: AssetState, before: number, barIndex: number) {
-    if (!cfg.breakChance || a.hi == null || a.lo == null || a.breakBar === barIndex) return;
-    const up = before <= a.hi && a.price > a.hi * (1 + cfg.srBand / 2);
-    const down = before >= a.lo && a.price < a.lo * (1 - cfg.srBand / 2);
-    if (!up && !down) return;
-    const dir = up ? 1 : -1;
-    a.volBoost = 10; a.breakBar = barIndex;
-    if (rand() >= cfg.breakChance) return;
-    if (rand() < 0.35) {
-      // 세력 스탑헌팅(Fakeout): 돌파 방향으로 살짝 더 찌른 뒤 반대 방향으로 강하게 되돌림
-      impulse(a.pending, dir * a.sigma * uni(1.5, 3), 3, 0);
-      impulse(a.pending, -dir * a.sigma * uni(6, 12), Math.round(uni(12, 25)), 3);
-    } else {
-      react(a.pending, dir * a.sigma * uni(4, 9));
-    }
-  }
-
   const prevResetTicks = Math.max(1, cfg.ticksPerDay * Math.max(1, cfg.prevResetDays));
 
   function step(): StepResult {
@@ -539,7 +479,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const m = gauss() * cfg.marketSigma + drain(marketPending);
     const sec: Record<string, number> = {};
     for (const k in sectorPending) sec[k] = gauss() * cfg.sectorSigma + drain(sectorPending[k]);
-    const barIndex = Math.floor((tick - 1) / cfg.ticksPerBar);
     const barStart = (tick - 1) % cfg.ticksPerBar === 0, barEnd = tick % cfg.ticksPerBar === 0;
     const growth = Math.exp(drift), devDecay = Math.exp(-Math.LN2 / cfg.epsHalfLife);
 
@@ -566,7 +505,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       a.price = Math.max(0.01, a.price * Math.exp(r));
       const z = noise / a.sigma;
       a.variance = Math.min(4, Math.max(0.5, 0.97 * a.variance + 0.03 * (z * z + (shock / a.sigma) ** 2)));
-      checkBreak(a, open, barIndex);
 
       const vol = Math.round(uni(40, 160) * (1 + Math.abs(r) / a.sigma) * (a.volBoost-- > 0 ? 3 : 1));
       const last = a.bars[a.bars.length - 1];
@@ -668,23 +606,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     if (a.market === "coin") return a.def.liquidity ?? 2e7;
     return Math.max(5e5, cap * 2e-3);
   }
-  // 제곱근 충격: 4배 큰 주문은 2배만 더 움직인다. 체결가는 충격의 절반 지점(주문하는 사람도 자기 충격을 맞는다)
-  function applyFlow(sym: string, notional: number) {
-    const a = state[sym];
-    if (!a) return null;
-    if (!notional) return { price: a.price, impact: 0 };
-    const sign = Math.sign(notional);
-    const sigmaDay = a.sigma * Math.sqrt(cfg.ticksPerDay);
-    const impact = Math.min(cfg.impactK * sigmaDay * Math.sqrt(Math.abs(notional) / liquidity(a)), cfg.impactCap[a.market]);
-    const pre = a.price;
-    a.price = pre * Math.exp(sign * impact);
-    const permanent = sign * impact * (1 - cfg.impactTempShare);
-    if (a.eps && a.baseEps) a.eps *= Math.exp(permanent); else a.anchor *= Math.exp(permanent);
-    impulse(a.pending, -sign * impact * cfg.impactTempShare, cfg.impactRevertTicks); // n을 넘겨 난수를 쓰지 않는다 (재현성)
-    const last = a.bars[a.bars.length - 1];
-    if (last) { last.high = Math.max(last.high, a.price); last.low = Math.min(last.low, a.price); last.close = a.price; }
-    return { price: pre * Math.exp((sign * impact) / 2), impact };
-  }
   // 호가창 체결의 영구 몫만 기준가·적정가에 남긴다 (사라지는 몫은 호가 봇 재고 헤지가 맡는다)
   function absorbFlow(sym: string, notional: number) {
     const a = state[sym];
@@ -714,7 +635,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     liquidity: sym => (state[sym] ? liquidity(state[sym]) : null),
     sigma: sym => state[sym]?.sigma ?? null,
     snapshot: takeSnapshot,
-    applyFlow,
     absorbFlow,
   };
 }

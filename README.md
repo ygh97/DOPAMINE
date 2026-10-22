@@ -12,10 +12,19 @@ $100,000로 시작해 20배면 **졸업**, 100배면 **전설**. 시즌은 8시�
 
 | 문서 | 내용 |
 |---|---|
-| [DEPLOY.md](DEPLOY.md) | **서버 배포·업데이트·새 시즌·백업·문제 해결** (운영자는 이것만 보면 된다) |
+| [DEPLOY.md](DEPLOY.md) | **서버 배포·업데이트·새 시즌·새로 시작·백업·문제 해결** (운영자는 이것만 보면 된다) |
 | [SPEC.md](SPEC.md) | 기획 원본: 게임 규칙·수치·엔진·API. 규칙을 바꾸면 여기부터 고친다 |
 | [CLAUDE.md](CLAUDE.md) | 개발 규칙·코드 구조·명령 (AI 작업자와 개발자용) |
 | [docs/](docs/) | 지난 설계·작업 기록 (M8 호가창 설계서, 2026-10-22 수정 계획). 구현 완료, 참고용 |
+
+## 배포 (이 PC + Cloudflare 터널)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1          # 코드 받기 → 빌드 → 서버 재시작 (엔진이 바뀌었으면 새 시즌)
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel  # 터널이 꺼져 있으면 켜고 접속 주소 출력
+```
+
+자세한 건 [DEPLOY.md](DEPLOY.md).
 
 ## 빠른 시작 (개발)
 
@@ -35,6 +44,6 @@ Node 24 이상. 빌드 없이 TypeScript를 바로 실행한다.
 packages/engine   시세 엔진 + 호가창(Exchange). 순수 TS
 apps/server       Fastify 서버: 게임 루프, SSE, 계좌·주문(Broker), 봇·세력, SQLite
 apps/web          Vue 3 화면 (KLineChart)
-tools/            시뮬레이션, 종단 테스트, 배포 스크립트(deploy.ps1)
+tools/            시뮬레이션, 종단 테스트, 배포(deploy.ps1)·새로 시작(fresh-start.ts)
 docs/             지난 설계·작업 기록
 ```

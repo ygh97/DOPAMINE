@@ -8,7 +8,6 @@
 - 배포·운영 방법은 `DEPLOY.md`. 지난 설계·작업 기록은 `docs/`
 - 참고 분석: `C:\Users\유건희\trading-arena-redesign\ANALYSIS.md` (원본 "단타 아레나" REA 분석)
 - 원본 코드·문구·브랜딩은 복사하지 않는다. 규칙 수치와 구조만 참고한다.
-- 시안(동작하는 프로토타입): `design/mockup.html` + `design/market-sim.js` + `design/news-templates.js` + `design/drawing-tools.js`
 
 ---
 
@@ -56,7 +55,8 @@
 - 시즌 우상향: 시즌마다 1.5~3배 중 하나를 뽑아(`seasonGrowth`) 적정가(주식은 기준 EPS, 그 외 앵커)를 매 tick 조금씩 올린다. 우상향은 이것만 만든다. 뉴스·세력은 적정가의 이탈분(0.4~3배, 반감기로 복귀)만 움직인다.
 - 시즌 길이 설정(`SEASON_MS`)을 바꾸면 진행 중 시즌에도 바로 적용된다. 이미 지난 길이면 다음 tick에 시즌이 끝난다.
 - 시즌 종료: 100배 전설을 달성한 사람만 명예의 전당에 기록 (S1처럼 예전 규칙으로 남은 1~3위 기록은 그대로 둔다) → 다음 시즌은 이전 시즌이 끝난 시각에 이어서 시작 (서버가 한 시즌 넘게 꺼져 있었으면 지금부터). 계좌는 시즌마다 $100,000으로 새로 생기고 로그인은 유지. 차트에 그린 선은 지운다.
-- 화면: 상단에 `S{시즌}`과 남은 시간, 랭킹 옆 "명예의 전당" 탭.
+- 화면: 상단에 `S{시즌}`과 남은 시간, 랭킹 옆 "명예의 전당" 탭. 명예의 전당은 아래쪽 시즌 탭(S1, S2 …)으로 시즌을 고른다 (처음엔 가장 최근에 끝난 시즌). 전설이 없던 시즌도 탭은 있다.
+- 새로 시작(`tools/fresh-start.ts`, `deploy.ps1 -FreshStart`): 계정과 명예의 전당만 남기고 지운 뒤, 명예의 전당 마지막 시즌의 다음 번호로 새 시즌을 연다.
 - 접속자가 없어도 서버는 계속 돈다.
 
 ### 계좌
@@ -268,7 +268,7 @@ L = 가상 유동성 (게임 하루 거래대금. 주식 시총 × 1e-5, 최소 
 | `POST /api/cancel` (Bearer) | `{id}` 하나 또는 `{all: true}` 전체 취소 → `{count, me}` |
 | `GET /api/book?sym=` | 호가창: `{tickSize, asks:[[가격,수량]×10], bids, trades:[[가격,수량,±1(매수/매도),tick]×20]}`. 화면은 보고 있는 종목만 1초마다 |
 | `POST /api/reset` (Bearer) | `{confirm: true}` → $100,000으로 다시 시작 |
-| `POST /api/logout`, `GET /api/ranking`, `GET /api/hall` (명예의 전당 최근 10시즌) | |
+| `POST /api/logout`, `GET /api/ranking`, `GET /api/hall` (명예의 전당: `{seasons: 끝난 시즌 번호 최근 30개, rows}`) | |
 | SSE `season` | 시즌이 바뀜 → 스냅샷·계좌·차트를 다시 받는다 |
 | SSE 추가 | `ranking`: 상위 20명 + 참가자 수 (5 tick마다) / `settled`: 병합·폐지로 정산된 종목 (보유자는 계좌 다시 받기) |
 | `POST /api/futures/open` (Bearer) | `{sym, side: long\|short, lev, pct}` 시장가 → 바로 체결 → `{fill, me}` |

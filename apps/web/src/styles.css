@@ -1086,3 +1086,8 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
   .book-asks .lvl:nth-child(-n+5), .book-bids .lvl:nth-child(n+6) { display: none; }
   .book-note { display: none; }
 }
+
+/* 명예의 전당: 시즌 탭은 아래 */
+.hall-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.hall-seasons { margin: 6px 8px 8px; overflow-x: auto; flex: none; }
+.hall-seasons button { flex: none; }

@@ -36,8 +36,11 @@
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1            # 배포 (새 시즌이 필요한지는 알아서 판단)
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel    # 터널이 꺼져 있으면 켜고 새 주소 출력
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -FreshStart  # 계정·명예의 전당만 남기고 전부 지운 뒤 새 시즌 (아래 "새로 시작")
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만 끄기 (끄기 전 스냅샷·백업)
 ```
+
+옵션은 같이 쓸 수 있다. 예: 재부팅 뒤 같은 PC에서 → `deploy.ps1 -SkipPull -Tunnel`.
 
 스크립트가 하는 일:
 1. `git pull` (최신 코드. `-SkipPull`이면 건너뜀)
@@ -53,6 +56,13 @@ powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만
 - 엔진(`packages/engine/src`: 시세 엔진·호가창·종목·뉴스 문구)이 바뀐 배포면 스크립트가 알아서 새 시즌을 연다. 시즌 중간에 규칙이 바뀌면 재시작 재생이 어긋나기 때문이다.
 - 화면·서버·채팅만 바뀐 배포는 시즌이 그대로 이어진다.
 - 엔진이 같아도 시즌을 새로 시작하고 싶으면 `-NewSeason`을 붙인다.
+
+### 새로 시작 (계정·명예의 전당만 남기기): `-FreshStart`
+- 남는 것: 계정(닉네임·비밀번호·로그인 상태·채팅 정지), 명예의 전당, 명예의 전당 기록이 있는 시즌 번호.
+- 지우는 것: 진행 중·지난 시즌의 계좌·보유·선물·지정가·체결, 채팅, 차트 그림, 엔진 스냅샷, 봇·세력 계정.
+- 새 시즌 번호는 명예의 전당에 기록이 있는 마지막 시즌 다음 번호다 (예: S1에만 전설이 있으면 S2로 시작).
+- 지우기 전에 `data\backups\…-fresh-start.db`로 백업한다. 되돌리려면 아래 "백업과 복구".
+- 서버 없이 DB만 정리하려면: 서버를 끄고 `node --disable-warning=ExperimentalWarning tools/fresh-start.ts`.
 - 새 시즌을 열면: 백업 → 100배 전설만 명예의 전당 기록 → 모든 계좌 $100,000로 새로 시작. 접속 중인 화면은 알아서 새 시즌으로 바뀐다.
 
 ### 직접 하는 방법 (스크립트 없이)

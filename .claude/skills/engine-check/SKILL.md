@@ -48,4 +48,4 @@ npm run sim:quick    # 1일, 수치를 여러 번 바꿔 볼 때 (약 3초)
 
 - 파라미터는 `packages/engine/src/market.ts`의 `DEFAULT_OPTIONS`와 `KIND`에 있다.
 - 바꾼 값과 이유를 `SPEC.md` 5·6장에 반영한다.
-- 원인을 모르면 `design/` 프로토타입 말고 `tools/sim-week.ts`에 측정을 추가해서 본다.
+- 원인을 모르면 `tools/sim-week.ts`(엔진만)나 `tools/sim-bots.ts`(호가창·봇까지)에 측정을 추가해서 본다.
