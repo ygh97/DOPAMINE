@@ -1,10 +1,9 @@
 // M2 종단 테스트: 두 사람이 참가해서 현물을 사고팔고, 보유종목·체결 내역·랭킹·다시 시작·새로고침 유지를 확인한다.
 // 실행: node tools/e2e-m2.cjs [스크린샷 폴더]
 const path = require("node:path");
-const { startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
+const { API, APP, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
 
 const OUT = outDir();
-const APP = "http://127.0.0.1:5173/";
 
 (async () => {
   const log = {};

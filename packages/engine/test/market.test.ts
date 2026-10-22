@@ -166,26 +166,33 @@ test("스냅샷에서 이어 돌리면 끊김 없이 같은 경로", () => {
   assert.deepEqual(b.bars("LMQ").slice(-50), a.bars("LMQ").slice(-50));
 });
 
-test("등락률 기준가(prev)는 게임 1주일(7일) 주기로만 초기화된다", () => {
-  const m = make(15, { ticksPerDay: 80, prevResetDays: 7 });
-  // warmupBars=200 * ticksPerBar=10 = 2000틱에서 시작. 다음 560배수는 2240틱.
+test("등락률 기준가(prev)는 게임 하루(80틱)마다 초기화된다", () => {
+  const m = make(15);
+  // warmupBars=200 * ticksPerBar=10 = 2000틱에서 시작. 다음 하루 경계는 2080틱.
   const initialPrev = m.quote("NVDA")!.prev;
-  // 하루(80틱)가 지나도 2080틱은 560의 배수가 아니므로 prev가 바뀌지 않는다
-  run(m, 80);
-  assert.equal(m.quote("NVDA")!.prev, initialPrev, "하루(80틱) 뒤에도 기준가 유지");
-  // 2240틱(게임 주간 경계)에 도달하면 prev가 그 시점 가격으로 갱신된다
-  run(m, 160);
-  assert.equal(m.tick, 2240);
-  assert.equal(m.quote("NVDA")!.prev, m.quote("NVDA")!.price, "게임 1주일(560틱) 주기마다 기준가 갱신");
+  run(m, 40);
+  assert.equal(m.quote("NVDA")!.prev, initialPrev, "하루 중간에는 기준가 유지");
+  run(m, 40);
+  assert.equal(m.tick, 2080);
+  assert.equal(m.quote("NVDA")!.prev, m.quote("NVDA")!.price, "게임 하루마다 기준가 갱신");
 });
 
-test("우상향 추세·코인 섹터 동조화·개별 기업 뉴스 단독 반응", () => {
+test("시즌 우상향은 seasonGrowth 범위 안 (폭주 없음)", () => {
+  // 시즌 6,000틱에 1.5~3배. 뉴스·세력 쏠림이 남아 있으면 중앙값이 범위를 크게 벗어난다
+  for (const seed of [21, 22, 23]) {
+    const m = make(seed, { seasonTicks: 6000 });
+    run(m, 6000);
+    const mult = m.quotes().filter(q => q.market === "stock" && ASSETS.some(a => a.sym === q.sym && a.market === "stock"))
+      .map(q => q.price / ASSETS.find(a => a.sym === q.sym)!.price).sort((a, b) => a - b);
+    const median = mult[Math.floor(mult.length / 2)];
+    assert.ok(median > 1.2 && median < 4, `seed ${seed} 주식 중앙 배수 ${median.toFixed(2)}x`);
+    assert.ok(mult.at(-1)! < 15, `seed ${seed} 최고 배수 ${mult.at(-1)!.toFixed(2)}x`);
+  }
+});
+
+test("코인 섹터 동조화·개별 기업 뉴스 단독 반응", () => {
   const m = make(21);
-  const startAvg = m.quotes().filter(q => q.market !== "venture").reduce((s, q) => s + q.price, 0);
   run(m, 6000);
-  const endQuotes = m.quotes().filter(q => q.market !== "venture");
-  const upRatio = endQuotes.reduce((s, q) => s + q.price / ASSETS.find(a => a.sym === q.sym)!.price, 0) / endQuotes.length;
-  assert.ok(upRatio > 1.05 && startAvg > 0, `전체 평균 수익 배수 우상향 (${upRatio.toFixed(2)}x)`);
 
   // 코인 섹터 동조화 확인 (BTC - ETH 상관관계)
   const ret = (s: string) => { const c = m.bars(s).map(b => b.close); return c.slice(1).map((x, i) => Math.log(x / c[i])); };

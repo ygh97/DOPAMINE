@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Auth, AuthError } from "../src/auth.ts";
 import { Broker, GOAL, OrderError, START_CASH, liqPrice } from "../src/broker.ts";
+import { BotRunner } from "../src/bots.ts";
 import { Chat, ChatError } from "../src/chat.ts";
 import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { backupDb, openDb } from "../src/db.ts";
 import { bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot } from "../src/season.ts";
 
@@ -386,17 +387,18 @@ test("타인 포트폴리오 스캔(portfolioByName): 현물 및 선물 청산�
 });
 
 
-test("SQLite 무중단 온라인 백업 및 순환 슬롯 유지", async () => {
+test("SQLite 무중단 온라인 백업: 시각이 붙은 파일, 최근 keep개만 유지", async () => {
   const s = setup();
   s.user("backup_user");
   const dir = mkdtempSync(join(tmpdir(), "dc-bak-"));
-  const f1 = await backupDb(s.db, dir, 2);
-  const f2 = await backupDb(s.db, dir, 2);
-  const f3 = await backupDb(s.db, dir, 2);
+  const f1 = await backupDb(s.db, dir, "test", 2);
+  const f2 = await backupDb(s.db, dir, "test", 2);
+  const f3 = await backupDb(s.db, dir, "season-end", 2);
   assert.notEqual(f1, f2);
-  assert.equal(f1, f3, "2개 슬롯 순환 덮어쓰기");
-  const list = readdirSync(dir).filter(f => f.endsWith(".db"));
-  assert.equal(list.length, 2, "최근 2개 슬롯만 유지");
+  assert.notEqual(f2, f3);
+  const list = readdirSync(dir).filter(f => f.endsWith(".db")).sort();
+  assert.equal(list.length, 2, "최근 2개만 유지");
+  assert.ok(!list.includes(basename(f1)), "가장 오래된 것부터 지운다");
   const restored = openDb(f3);
   const u = restored.prepare("SELECT name FROM users WHERE name = 'backup_user'").get() as { name: string } | undefined;
   restored.close();
@@ -439,4 +441,46 @@ test("익절(TP): 설정 검증 및 목표가 도달 시 자동 익절 체결", 
   assert.equal(me.futures.length, 0);
   assert.equal(me.fills[0].side, "tp");
   assert.ok((me.fills[0].pnl ?? 0) > 0, "익절 실현손익 양수");
+});
+
+test("티배깅·묵념: 강제청산 알림 1건당 처음 누른 한 명만, 시스템 말머리 사칭 차단", () => {
+  const s = setup(), chat = new Chat(s.db);
+  const victim = s.user("피해자"), a = s.user("구경꾼A"), b = s.user("구경꾼B");
+  const liq = chat.system("[강제청산] 💥 피해자님 $NVDA 10x 롱 (증거금 $1,000) 강제청산!");
+  assert.throws(() => chat.react(victim, liq.id, "teabag"), /본인 청산/);
+  const msg = chat.react(a, liq.id, "teabag", T0);
+  assert.ok(msg.text.startsWith("[티배깅]") && msg.text.includes("$NVDA"), msg.text);
+  assert.throws(() => chat.react(b, liq.id, "rip", T0 + 5000), /이미 누군가/);
+  assert.equal(chat.recent(50).find(m => m.id === liq.id)?.reacted, true, "새로 들어온 화면도 버튼을 숨긴다");
+  for (const fake of ["[티배깅] 가짜", "[강제청산] 가짜", "[100배졸업] 가짜", "[공유] 총자산 $999,999,999"])
+    assert.throws(() => chat.post(b, fake, T0 + 10_000), /버튼으로만/, fake);
+  assert.throws(() => chat.react(a, msg.id, "teabag", T0 + 20_000), /강제청산 알림/, "일반 메시지에는 반응 불가");
+});
+
+test("수익인증 공유 문구는 서버가 실제 계좌로 만든다", async () => {
+  const s = setup();
+  const u = s.user("자랑꾼");
+  await order(s, u, "NVDA", "buy", 50);
+  assert.match(s.broker.shareText(u, { type: "spot", sym: "NVDA" }), /^\[공유\] \$NVDA 현물 평단 \$[\d,.]+ → 현재 \$[\d,.]+ \([+-][\d.]+%\)$/);
+  assert.match(s.broker.shareText(u, { type: "summary" }), /^\[공유\] 총자산 \$[\d,.]+ \([+-][\d.]+%\) · \$NVDA 현물/);
+  assert.throws(() => s.broker.shareText(u, { type: "spot", sym: "AMD" }), /보유하지 않은/);
+});
+
+test("봇·세력: 같은 주문 경로로 매매하고, 세력은 랭킹 밖, 명예의 전당은 사람만", () => {
+  const s = setup();
+  const human = s.user("사람1");
+  const bots = new BotRunner(s.db, () => s.broker, () => s.market, { bots: 12, marketMakers: true, seed: 3 });
+  assert.equal(bots.size, 12 + 8);
+  for (let i = 0; i < 1500; i++) { const r = s.tick(); bots.tick(r.news); }
+  const rows = s.broker.ranking(Infinity), mm = s.broker.mmRanking();
+  assert.equal(rows.length, 13, "사람 1 + 봇 12");
+  assert.ok(rows.every(r => r.kind !== "mm") && mm.length === 8 && mm.every(r => r.kind === "mm"));
+  assert.equal(s.broker.players, 13);
+  const fills = s.db.prepare("SELECT COUNT(*) AS c FROM fills f JOIN users u ON u.id = f.user_id WHERE u.kind != 'user'").get() as { c: number };
+  assert.ok(fills.c > 20, `봇·세력이 실제로 체결 (${fills.c}건)`);
+  assert.throws(() => s.auth.join(rows.find(r => r.kind === "bot")!.name, "secret1"), /봇·세력 계정 이름/);
+  finishSeason(s.db, s.season, rows, T0 + s.season.lengthMs + 1000);
+  const hall = hallOfFame(s.db) as { name: string }[];
+  assert.deepEqual(hall.map(h => h.name), ["사람1"], "명예의 전당은 사람만");
+  void human;
 });

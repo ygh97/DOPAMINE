@@ -11,6 +11,7 @@ import { tx, type Db } from "./db.ts";
 import type { Season } from "./season.ts";
 
 export const START_CASH = 100_000;
+export const MM_CASH = 2_000_000; // 🏦 세력 계정 시작 자금
 export const GOAL = 10_000_000;
 const FEE = 0.0005;
 const SLIP = 0.0005;
@@ -24,17 +25,22 @@ export class OrderError extends Error {}
 
 export interface Position { qty: number; avg: number }
 export interface Future { id: number; sym: string; side: "long" | "short"; lev: number; qty: number; entry: number; margin: number; stop: number | null; tp: number | null; closing: boolean }
-interface Account {
-  userId: number; name: string; cash: number; positions: Map<string, Position>; futures: Map<number, Future>;
+/** user: 사람, bot: 🤖 봇, mm: 🏦 세력. 봇·세력은 졸업·명예의 전당에서 빠지고, 세력은 랭킹도 따로 */
+export type AccountKind = "user" | "bot" | "mm";
+export interface Account {
+  userId: number; name: string; kind: AccountKind; cash: number; positions: Map<string, Position>; futures: Map<number, Future>;
   clearedTick: number | null; resetAt: number | null;
 }
+const startCash = (kind: AccountKind) => (kind === "mm" ? MM_CASH : START_CASH);
 export interface Fill { id: number; tick: number; at: number; sym: string; side: string; qty: number; price: number; fee: number; pnl?: number }
 type Settle = { resolve: (f: Fill) => void; reject: (e: Error) => void };
 type Pending =
   | ({ kind: "spot"; userId: number; sym: string; side: "buy" | "sell"; pct: number } & Settle)
   | ({ kind: "open"; userId: number; sym: string; side: "long" | "short"; lev: number; pct: number } & Settle)
   | ({ kind: "close"; userId: number; sym: string; posId: number; pct: number; reason: "user" | "liquidation" | "stop" | "tp" } & Partial<Settle>);
-export interface RankRow { rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }
+export interface RankRow { rank: number; name: string; kind: AccountKind; equity: number; returnPct: number; clearedTick: number | null }
+/** 세력 전략이 보는 종목별 쏠림: 사람·봇의 현물 평가액, 선물 롱·숏 명목, 청산가 목록 */
+export interface Exposure { spot: number; long: number; short: number; liqs: { price: number; notional: number; side: "long" | "short" }[] }
 
 /** 주식·신흥주는 1주 단위, 코인은 0.000001 단위 */
 const step = (market: MarketKind) => (market === "coin" ? 1e-6 : 1);
@@ -52,19 +58,22 @@ export class Broker {
   private pending: Pending[] = [];
   private broadcasts: string[] = [];
   private recent = new Map<number, { tick: number; count: number }>(); // 주문 속도 제한
-  private rankCache: { tick: number; rows: RankRow[]; rankByUser: Map<string, number> } | null = null;
+  private rankCache: { tick: number; rows: RankRow[]; mm: RankRow[]; rankByUser: Map<string, number> } | null = null;
+  /** 직전 정산의 종목별 순매수 명목 (세력 계정 주문 제외). 유동성 공급 세력이 반대편을 받는 데 쓴다 */
+  lastFlows = new Map<string, number>();
   private stmts;
 
   constructor(db: Db, season: Season, market: Market) {
     this.db = db; this.season = season; this.market = market;
     this.stmts = {
-      selUser: db.prepare("SELECT name FROM users WHERE id = ?"),
+      selUser: db.prepare("SELECT name, kind FROM users WHERE id = ?"),
       selAcc: db.prepare("SELECT cash, reset_at, cleared_tick FROM accounts WHERE user_id = ? AND season_id = ?"),
       insAcc: db.prepare("INSERT INTO accounts (user_id, season_id, cash) VALUES (?, ?, ?)"),
       selPos: db.prepare("SELECT sym, qty, avg FROM positions WHERE user_id = ? AND season_id = ?"),
       selFut: db.prepare("SELECT id, sym, side, lev, qty, entry, margin, stop, tp FROM futures WHERE user_id = ? AND season_id = ?"),
       selSeasonUsers: db.prepare("SELECT user_id FROM accounts WHERE season_id = ?"),
       selFills: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE user_id = ? AND season_id = ? ORDER BY id DESC LIMIT 50"),
+      selFill: db.prepare("SELECT id, tick, at, sym, side, qty, price, fee, pnl FROM fills WHERE id = ? AND user_id = ? AND season_id = ?"),
       delPosAll: db.prepare("DELETE FROM positions WHERE user_id = ? AND season_id = ?"),
       delFutAll: db.prepare("DELETE FROM futures WHERE user_id = ? AND season_id = ?"),
       resetAcc: db.prepare("UPDATE accounts SET cash = ?, reset_at = ? WHERE user_id = ? AND season_id = ?"),
@@ -92,12 +101,12 @@ export class Broker {
     const hit = this.accounts.get(userId);
     if (hit) return hit;
     const sid = this.season.id;
-    const user = this.stmts.selUser.get(userId) as { name: string };
+    const user = this.stmts.selUser.get(userId) as { name: string; kind: AccountKind };
     let row = this.stmts.selAcc.get(userId, sid) as
       { cash: number; reset_at: number | null; cleared_tick: number | null } | undefined;
     if (!row) {
-      this.stmts.insAcc.run(userId, sid, START_CASH);
-      row = { cash: START_CASH, reset_at: null, cleared_tick: null };
+      this.stmts.insAcc.run(userId, sid, startCash(user.kind));
+      row = { cash: startCash(user.kind), reset_at: null, cleared_tick: null };
     }
     const positions = new Map<string, Position>();
     for (const p of this.stmts.selPos.all(userId, sid) as { sym: string; qty: number; avg: number }[])
@@ -105,7 +114,7 @@ export class Broker {
     const futures = new Map<number, Future>();
     for (const f of this.stmts.selFut.all(userId, sid) as unknown as Future[])
       futures.set(f.id, { ...f, tp: f.tp ?? null, closing: false });
-    const acc: Account = { userId, name: user.name, cash: row.cash, positions, futures, clearedTick: row.cleared_tick, resetAt: row.reset_at };
+    const acc: Account = { userId, name: user.name, kind: user.kind, cash: row.cash, positions, futures, clearedTick: row.cleared_tick, resetAt: row.reset_at };
     this.accounts.set(userId, acc);
     this.rankCache = null;
     return acc;
@@ -114,7 +123,24 @@ export class Broker {
   loadAll() {
     for (const r of this.stmts.selSeasonUsers.all(this.season.id) as { user_id: number }[]) this.account(r.user_id);
   }
-  get players() { return this.accounts.size; }
+  /** 랭킹에 나오는 참가자 수 (사람 + 봇, 세력 제외) */
+  get players() { let n = 0; for (const a of this.accounts.values()) if (a.kind !== "mm") n++; return n; }
+
+  /** 종목별 사람·봇의 쏠림 (세력 전략용). 계좌 수 × 포지션 수만큼 돌므로 매 tick이 아니라 가끔 부른다 */
+  exposure(): Map<string, Exposure> {
+    const out = new Map<string, Exposure>();
+    const get = (sym: string) => { let e = out.get(sym); if (!e) { e = { spot: 0, long: 0, short: 0, liqs: [] }; out.set(sym, e); } return e; };
+    for (const acc of this.accounts.values()) {
+      if (acc.kind === "mm") continue;
+      for (const [sym, p] of acc.positions) get(sym).spot += p.qty * this.price(sym);
+      for (const f of acc.futures.values()) {
+        const e = get(f.sym), notional = f.qty * this.price(f.sym);
+        if (f.side === "long") e.long += notional; else e.short += notional;
+        e.liqs.push({ price: liqPrice(f), notional, side: f.side });
+      }
+    }
+    return out;
+  }
 
   private price(sym: string) { return this.market.quote(sym)?.price ?? 0; }
   /** 선물 평가액: 증거금 + 미실현 손익 (0 아래로는 안 내려감, 격리) */
@@ -133,7 +159,7 @@ export class Broker {
     const equity = this.equity(acc);
     this.ensureRankCache();
     return {
-      name: acc.name, cash: acc.cash, equity, returnPct: (equity / START_CASH - 1) * 100, goal: GOAL,
+      name: acc.name, cash: acc.cash, equity, returnPct: (equity / startCash(acc.kind) - 1) * 100, goal: GOAL,
       clearedTick: acc.clearedTick, resetAt: acc.resetAt, tick: this.market.tick,
       positions: [...acc.positions].map(([sym, p]) => ({ sym, qty: p.qty, avg: p.avg })),
       futures: [...acc.futures.values()].map(f => ({ id: f.id, sym: f.sym, side: f.side, lev: f.lev, qty: f.qty, entry: f.entry, margin: f.margin, stop: f.stop, tp: f.tp, liq: liqPrice(f) })),
@@ -161,14 +187,54 @@ export class Broker {
     });
     return {
       name: acc.name,
+      kind: acc.kind,
       rank: this.rankCache?.rankByUser.get(acc.name) ?? null,
       cash: acc.cash,
       equity,
-      returnPct: (equity / START_CASH - 1) * 100,
+      returnPct: (equity / startCash(acc.kind) - 1) * 100,
       clearedTick: acc.clearedTick,
       positions,
       futures,
     };
+  }
+
+  /** 채팅 "[공유]" 문구를 실제 계좌 값으로 만든다 (화면이 만든 숫자를 믿지 않는다) */
+  shareText(userId: number, req: { type: "spot" | "fut" | "fill" | "summary"; sym?: string; id?: number }): string {
+    const acc = this.account(userId);
+    const money = (v: number) => "$" + (v >= 1000 ? v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : v.toFixed(v < 1 ? 4 : 2));
+    const pct = (v: number) => (v >= 0 ? "+" : "") + v.toFixed(2) + "%";
+    const side = (s: "long" | "short") => (s === "long" ? "롱" : "숏");
+    const futPct = (f: Future) => (f.margin ? (pnlOf(f, this.price(f.sym)) / f.margin) * 100 : 0);
+    if (req.type === "spot") {
+      const p = acc.positions.get(req.sym ?? "");
+      if (!p) throw new OrderError("보유하지 않은 종목입니다.");
+      const price = this.price(req.sym!);
+      return `[공유] $${req.sym} 현물 평단 ${money(p.avg)} → 현재 ${money(price)} (${pct((price / p.avg - 1) * 100)})`;
+    }
+    if (req.type === "fut") {
+      const f = acc.futures.get(req.id ?? -1);
+      if (!f) throw new OrderError("선물 포지션을 찾을 수 없습니다.");
+      return `[공유] $${f.sym} ${f.lev}x ${side(f.side)} 진입 ${money(f.entry)} → 현재 ${money(this.price(f.sym))} (${pct(futPct(f))})`;
+    }
+    if (req.type === "fill") {
+      const f = this.stmts.selFill.get(req.id ?? -1, userId, this.season.id) as unknown as Fill | undefined;
+      if (!f) throw new OrderError("체결 내역을 찾을 수 없습니다.");
+      const SIDE: Record<string, string> = {
+        buy: "매수", sell: "매도", "long-open": "롱 진입", "short-open": "숏 진입", "long-close": "롱 종료", "short-close": "숏 종료",
+        liquidation: "강제 청산", stop: "스탑로스", tp: "익절", delist: "상장폐지 정산", "split-cash": "병합 단주 정산",
+      };
+      const spot = f.side === "buy" || f.side === "sell" || f.side === "split-cash";
+      const coin = this.market.quote(f.sym)?.market === "coin";
+      const qty = coin || !Number.isInteger(f.qty) ? String(+f.qty.toFixed(6)) : f.qty.toLocaleString();
+      const pnl = f.pnl != null ? ` · 실현손익 ${f.pnl >= 0 ? "+" : "-"}${money(Math.abs(f.pnl))}` : "";
+      return `[공유] $${f.sym} [${spot ? "현물" : f.side === "delist" ? "정산" : "선물"}] ${SIDE[f.side] ?? f.side} ${qty}${coin ? "" : "주"} @ ${money(f.price)}${pnl}`;
+    }
+    const equity = this.equity(acc);
+    const f = acc.futures.values().next().value as Future | undefined;
+    const p = acc.positions.entries().next().value as [string, Position] | undefined;
+    const part = f ? ` · $${f.sym} ${f.lev}x ${side(f.side)} ${pct(futPct(f))}`
+      : p ? ` · $${p[0]} 현물 ${pct((this.price(p[0]) / p[1].avg - 1) * 100)}` : "";
+    return `[공유] 총자산 ${money(equity)} (${pct((equity / startCash(acc.kind) - 1) * 100)})${part}`;
   }
 
   reset(userId: number) {
@@ -176,20 +242,22 @@ export class Broker {
     tx(this.db, () => {
       this.stmts.delPosAll.run(userId, this.season.id);
       this.stmts.delFutAll.run(userId, this.season.id);
-      this.stmts.resetAcc.run(START_CASH, this.market.tick, userId, this.season.id);
+      this.stmts.resetAcc.run(startCash(acc.kind), this.market.tick, userId, this.season.id);
     });
-    acc.cash = START_CASH; acc.positions.clear(); acc.futures.clear(); acc.resetAt = this.market.tick;
+    acc.cash = startCash(acc.kind); acc.positions.clear(); acc.futures.clear(); acc.resetAt = this.market.tick;
     this.rankCache = null;
   }
 
   // ---------- 주문 접수 (다음 tick 정산 때 체결되며 Promise가 풀린다) ----------
   private admit(userId: number, sym: string): Account {
     if (!this.market.quote(sym)) throw new OrderError("거래할 수 없는 종목입니다.");
+    const acc = this.account(userId);
+    if (acc.kind === "mm") return acc; // 세력은 여러 종목을 한 tick에 다뤄서 속도 제한을 받지 않는다
     const r = this.recent.get(userId);
     const count = r && r.tick === this.market.tick ? r.count : 0;
     if (count >= ORDERS_PER_TICK) throw new OrderError("주문이 너무 빠릅니다. 잠시 후 다시 시도하세요.");
     this.recent.set(userId, { tick: this.market.tick, count: count + 1 });
-    return this.account(userId);
+    return acc;
   }
   private checkPct(pct: number) {
     if (!Number.isFinite(pct) || pct <= 0 || pct > 100) throw new OrderError("비중은 0~100% 사이여야 합니다.");
@@ -281,6 +349,7 @@ export class Broker {
   // ---------- tick 정산 ----------
   /** 종목별 순매수로 충격을 반영하고 이번 tick 주문을 체결한다. market.step() 전에 부른다 */
   settle(): { type: string; sym: string }[] {
+    this.lastFlows.clear();
     if (!this.pending.length) return [];
     const orders = this.pending; this.pending = [];
     this.rankCache = null;
@@ -295,7 +364,14 @@ export class Broker {
 
     for (const [sym, group] of bySym) {
       const q = this.market.quote(sym);
-      if (!q) { for (const o of group) o.reject?.(new OrderError("거래가 중지된 종목입니다.")); continue; }
+      if (!q) {
+        for (const o of group) {
+          // 종료 주문이 거절되면 "청산 중" 표시를 풀어야 다시 닫거나 강제 청산 검사를 받을 수 있다
+          if (o.kind === "close") { const f = this.account(o.userId).futures.get(o.posId); if (f) f.closing = false; }
+          o.reject?.(new OrderError("거래가 중지된 종목입니다."));
+        }
+        continue;
+      }
       // 1) 주문별 명목 금액(+ 매수 방향, - 매도 방향)을 지금 가격으로 어림해 순매수를 낸다
       const notional = (o: Pending): number => {
         const acc = this.account(o.userId);
@@ -308,7 +384,9 @@ export class Broker {
         const f = acc.futures.get(o.posId);
         return f ? -dirOf(f) * f.qty * Math.min(1, o.pct / 100) * q.price : 0;
       };
-      const net = group.reduce((s, o) => s + notional(o), 0);
+      let net = 0, crowd = 0;
+      for (const o of group) { const n = notional(o); net += n; if (this.account(o.userId).kind !== "mm") crowd += n; }
+      if (crowd) this.lastFlows.set(sym, crowd);
       const flow = this.market.applyFlow(sym, net)!;
       const done: { o: Pending; fill: Fill }[] = [], failed: { o: Pending; err: OrderError }[] = [];
       try {
@@ -477,24 +555,32 @@ export class Broker {
     if (this.rankCache && this.rankCache.tick === this.market.tick) return this.rankCache;
     const raw = [...this.accounts.values()].map(acc => {
       const equity = this.equity(acc);
-      if (equity >= GOAL && acc.clearedTick == null) {
+      // 100배 졸업은 봇도 기록한다 (졸업률 확인용). 전광판 알림은 사람만
+      if (acc.kind !== "mm" && equity >= GOAL && acc.clearedTick == null) {
         acc.clearedTick = this.market.tick;
         this.stmts.updCleared.run(acc.clearedTick, acc.userId, this.season.id);
-        this.broadcasts.push(`[100배졸업] 🏆 ${acc.name}님이 총자산 $${Math.round(equity).toLocaleString()} 달성으로 100배 졸업에 성공했습니다!`);
+        if (acc.kind === "user") this.broadcasts.push(`[100배졸업] 🏆 ${acc.name}님이 총자산 $${Math.round(equity).toLocaleString()} 달성으로 100배 졸업에 성공했습니다!`);
       }
-      return { name: acc.name, equity, returnPct: (equity / START_CASH - 1) * 100, clearedTick: acc.clearedTick };
+      return { name: acc.name, kind: acc.kind, equity, returnPct: (equity / startCash(acc.kind) - 1) * 100, clearedTick: acc.clearedTick };
     });
-    raw.sort((a, b) => b.equity - a.equity || (a.clearedTick ?? Infinity) - (b.clearedTick ?? Infinity));
-    const rows = raw.map((r, i) => ({ rank: i + 1, ...r }));
+    const order = (a: { equity: number; clearedTick: number | null }, b: { equity: number; clearedTick: number | null }) =>
+      b.equity - a.equity || (a.clearedTick ?? Infinity) - (b.clearedTick ?? Infinity);
+    // 세력은 자금 규모가 달라 같은 줄에 세우지 않는다. 수익률 순으로 따로
+    const rows = raw.filter(r => r.kind !== "mm").sort(order).map((r, i) => ({ rank: i + 1, ...r }));
+    const mm = raw.filter(r => r.kind === "mm").sort((a, b) => b.returnPct - a.returnPct).map((r, i) => ({ rank: i + 1, ...r }));
     const rankByUser = new Map<string, number>();
     for (const r of rows) rankByUser.set(r.name, r.rank);
-    this.rankCache = { tick: this.market.tick, rows, rankByUser };
+    this.rankCache = { tick: this.market.tick, rows, mm, rankByUser };
     return this.rankCache;
   }
 
-  /** 총자산 순. 같으면 100배를 먼저 달성한 사람이 위. 100배 달성 시점도 여기서 기록한다 */
+  /** 총자산 순(사람 + 🤖 봇). 같으면 100배를 먼저 달성한 사람이 위. 100배 달성 시점도 여기서 기록한다 */
   ranking(limit = 50): RankRow[] {
     return this.ensureRankCache().rows.slice(0, limit);
+  }
+  /** 🏦 세력 계정 (수익률 순) */
+  mmRanking(): RankRow[] {
+    return this.ensureRankCache().mm;
   }
 
   /** 이번 tick에 발생한 전광판 알림(100배 졸업·강제청산)을 꺼낸다 */

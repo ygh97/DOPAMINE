@@ -4,8 +4,12 @@ import type { GameDate, MarketKind, NewsItem, Quote } from "@dopamine/engine";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 
-export interface RankRow { rank: number; name: string; equity: number; returnPct: number; clearedTick: number | null }
-export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null }
+/** user: 사람, bot: 🤖 봇, mm: 🏦 세력 */
+export type AccountKind = "user" | "bot" | "mm";
+export interface RankRow { rank: number; name: string; kind?: AccountKind; equity: number; returnPct: number; clearedTick: number | null }
+/** reacted: 강제청산 알림에 누군가 이미 티배깅·묵념을 했다 (버튼을 숨긴다) */
+export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean }
+export const kindBadge = (k?: AccountKind) => (k === "bot" ? "🤖" : k === "mm" ? "🏦" : "");
 export interface OrderPreset { mode: "spot" | "fut"; side: "buy" | "sell"; lev?: number; seq: number }
 /** 서버가 보내는 압축 봉: [timestamp, open, high, low, close, volume] */
 export type PackedBar = [number, number, number, number, number, number];
@@ -27,6 +31,8 @@ export const useMarket = defineStore("market", () => {
   /** 시즌 랭킹 (5 tick마다) */
   const ranking = ref<RankRow[]>([]);
   const players = ref(0);
+  /** 🏦 세력 계정 (수익률 순, 랭킹과 따로) */
+  const mmRanking = ref<RankRow[]>([]);
   /** 진행 중 시즌. 시즌이 바뀌면 seasonEpoch가 올라가고 차트·계좌가 새로 받는다 */
   const season = ref<{ id: number; startedAt: number; endsAt: number } | null>(null);
   const seasonEpoch = ref(0);
@@ -49,7 +55,7 @@ export const useMarket = defineStore("market", () => {
         setTimeout(() => { if (whisperAlert.value?.id === msg.id) whisperAlert.value = null; }, 8000);
       }
     }
-    if (msg.name !== "⚡전광판" || msg.id <= lastBannerId) return;
+    if (msg.name !== "⚡전광판" || msg.id <= lastBannerId || msg.reacted) return;
     lastBannerId = msg.id;
     const kind: "clear" | "liq" = msg.text.startsWith("[100배졸업]") ? "clear" : "liq";
     const text = msg.text.replace(/^\[(100배졸업|강제청산)\]\s*/, "");
@@ -119,6 +125,22 @@ export const useMarket = defineStore("market", () => {
     await loadRanking();
   }
 
+  // 귓속말은 SSE에 내용이 안 실린다. 신호가 오면 로그인한 사람만 본인 몫을 받아 온다
+  async function loadWhispers() {
+    const tok = (() => { try { return localStorage.getItem("dc-token") ?? ""; } catch { return ""; } })();
+    if (!tok) return;
+    try {
+      const r = await fetch("/api/chat", { headers: { Authorization: `Bearer ${tok}` } });
+      if (!r.ok) return;
+      for (const c of (await r.json()).messages as ChatMsg[]) {
+        if (!c.to || chat.value.some(x => x.id === c.id)) continue;
+        chat.value.push(c);
+        checkBanner(c);
+      }
+      chat.value.sort((a, b) => a.id - b.id);
+    } catch { /* 다음 신호 때 다시 */ }
+  }
+
   let source: EventSource | null = null;
   let lastMessageAt = 0, watchdog = 0, pollTimer = 0;
 
@@ -152,6 +174,7 @@ export const useMarket = defineStore("market", () => {
         if (Array.isArray(d.chat)) {
           for (const c of d.chat as ChatMsg[]) {
             if (!chat.value.some(x => x.id === c.id)) chat.value.push(c);
+            else if (c.reacted) markReacted(c.id); // 폴링에는 chat-react 신호가 없어 표시로 맞춘다
             checkBanner(c);
           }
         }
@@ -197,6 +220,8 @@ export const useMarket = defineStore("market", () => {
       checkBanner(msg);
       if (chat.value.length > 300) chat.value.shift();
     });
+    source.addEventListener("whisper", () => { void loadWhispers(); });
+    source.addEventListener("chat-react", e => markReacted((JSON.parse((e as MessageEvent).data) as { id: number }).id));
     source.addEventListener("chat-hide", e => {
       const { id } = JSON.parse((e as MessageEvent).data) as { id: number };
       chat.value = chat.value.filter(c => c.id !== id);
@@ -212,7 +237,13 @@ export const useMarket = defineStore("market", () => {
     });
   }
 
-  function applyRanking(d: { rows: RankRow[]; players: number }) { ranking.value = d.rows; players.value = d.players; }
+  function applyRanking(d: { rows: RankRow[]; players: number; mm?: RankRow[] }) { ranking.value = d.rows; players.value = d.players; mmRanking.value = d.mm ?? []; }
+  /** 강제청산 알림에 누군가 반응함 → 버튼 숨김 (전광판 배너도) */
+  function markReacted(id: number) {
+    const c = chat.value.find(x => x.id === id);
+    if (c) c.reacted = true;
+    if (banner.value?.id === id) banner.value = null;
+  }
   async function loadRanking() { applyRanking(await (await fetch("/api/ranking")).json()); }
 
   async function fetchBars(sym: string): Promise<PackedBar[]> {
@@ -236,6 +267,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, list, current,
+  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

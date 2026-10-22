@@ -11,7 +11,8 @@ function hash(password: string): string {
   return `scrypt$${salt.toString("base64")}$${scryptSync(password, salt, 32).toString("base64")}`;
 }
 function verify(password: string, stored: string): boolean {
-  const [, salt, digest] = stored.split("$");
+  const [scheme, salt, digest] = stored.split("$");
+  if (scheme !== "scrypt" || !salt || !digest) return false; // 봇·시스템 계정은 비밀번호가 없다
   const expected = Buffer.from(digest, "base64");
   const actual = scryptSync(password, Buffer.from(salt, "base64"), expected.length);
   return timingSafeEqual(actual, expected);
@@ -25,7 +26,7 @@ export class Auth {
   constructor(db: Db) {
     this.db = db;
     this.stmts = {
-      selUser: db.prepare("SELECT id, name, pass FROM users WHERE name = ?"),
+      selUser: db.prepare("SELECT id, name, pass, kind FROM users WHERE name = ?"),
       insUser: db.prepare("INSERT INTO users (name, pass, created_at) VALUES (?, ?, ?)"),
       insSession: db.prepare("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)"),
       selSession: db.prepare("SELECT user_id FROM sessions WHERE token = ?"),
@@ -38,8 +39,9 @@ export class Auth {
     const name = String(rawName ?? "").trim();
     if (!NAME.test(name)) throw new AuthError("이름은 2~12자의 한글·영문·숫자·_만 쓸 수 있습니다.");
     if (typeof password !== "string" || password.length < 6 || password.length > 64) throw new AuthError("비밀번호는 6~64자입니다.");
-    const row = this.stmts.selUser.get(name) as { id: number; name: string; pass: string } | undefined;
+    const row = this.stmts.selUser.get(name) as { id: number; name: string; pass: string; kind: string } | undefined;
     let userId: number, created = false, shown = name;
+    if (row && row.kind !== "user") throw new AuthError("봇·세력 계정 이름이라 쓸 수 없습니다. 다른 이름을 골라 주세요.");
     if (row) {
       if (!verify(password, row.pass)) throw new AuthError("이미 있는 이름이고 비밀번호가 다릅니다. 비밀번호는 복구할 수 없어요.");
       userId = row.id; shown = row.name;

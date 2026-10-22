@@ -157,12 +157,21 @@ export const useAccount = defineStore("account", () => {
     void api("/api/drawings", p).catch(() => {});
   }
 
-  async function sendChat(text: string): Promise<boolean> {
+  async function postChat(path: string, body: unknown): Promise<boolean> {
     try {
-      const r = await api<{ msg: { id: number; name: string; text: string; at: number } }>("/api/chat", { text });
+      const r = await api<{ msg: { id: number; name: string; text: string; at: number } }>(path, body);
       if (!m.chat.some(c => c.id === r.msg.id)) m.chat.push(r.msg);
       return true;
     } catch (e) { notify((e as Error).message, "error"); return false; }
+  }
+  const sendChat = (text: string) => postChat("/api/chat", { text });
+  /** "[공유]" 수익인증. 문구는 서버가 실제 계좌 값으로 만든다 */
+  const share = (req: { type: "spot" | "fut" | "fill" | "summary"; sym?: string; id?: number }) => postChat("/api/chat/share", req);
+  /** 강제청산 알림에 티배깅·묵념 (알림 1건당 처음 누른 한 명만) */
+  async function react(liqId: number, mode: "teabag" | "rip") {
+    const ok = await postChat("/api/chat/react", { liqId, mode });
+    m.markReacted(liqId); // 성공이든 "이미 누군가 반응"이든 버튼은 내린다
+    return ok;
   }
 
   async function reportChat(id: number) {
@@ -222,5 +231,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, closeAll, setStop, setTp, reset, fetchDrawings, syncDrawing, sendChat, reportChat, adminChat, adminBan, adminHide };
+  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, closeFuture, closeAll, setStop, setTp, reset, fetchDrawings, syncDrawing, sendChat, share, react, reportChat, adminChat, adminBan, adminHide };
 });

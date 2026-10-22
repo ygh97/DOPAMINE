@@ -1,12 +1,12 @@
-// M7 종단 테스트: 웹 프로덕션 빌드 → 단일 포트(4810) 서빙 확인, 단축키(B/S/1~4), 채팅 $종목 태그·수익인증 공유, 개인정보·투자 고지 모달, SQLite 온라인 백업 API.
+// M7 종단 테스트: 웹 프로덕션 빌드 → 단일 포트 서빙 확인, 단축키(B/S/1~4), 채팅 $종목 태그·수익인증 공유, 개인정보·투자 고지 모달, SQLite 온라인 백업 API.
 // 실행: node tools/e2e-m7.cjs [스크린샷 폴더]
 const fs = require("node:fs");
 const path = require("node:path");
 const { execSync } = require("node:child_process");
-const { ROOT, startServer, waitServer, killAll, openApp, outDir } = require("./e2e-lib.cjs");
+const { API, ROOT, startServer, waitServer, killAll, openApp, outDir } = require("./e2e-lib.cjs");
 
 const OUT = outDir();
-const PROD_URL = "http://127.0.0.1:4810/";
+const PROD_URL = `${API}/`;
 
 (async () => {
   const log = {};
@@ -16,8 +16,8 @@ const PROD_URL = "http://127.0.0.1:4810/";
     execSync("npm run build --workspace @dopamine/web", { cwd: ROOT, stdio: "pipe" });
     log.webBuilt = fs.existsSync(path.join(ROOT, "apps/web/dist/index.html"));
 
-    // 2) Vite 없이 서버(4810) 단독 기동 → 정적 파일 + API + SSE 단일 포트 서빙 확인
-    startServer({ TICK_MS: "80", ADMIN_KEY: "prod-admin-key", ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120 }) });
+    // 2) Vite 없이 서버 단독 기동 → 정적 파일 + API + SSE 단일 포트 서빙 확인
+    startServer({ TICK_MS: "80", ADMIN_KEY: "prod-admin-key-0123456789", ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120 }) });
     await waitServer();
 
     const app = await openApp(() => false, PROD_URL);
@@ -71,9 +71,9 @@ const PROD_URL = "http://127.0.0.1:4810/";
     log.policyClosedByEsc = true;
 
     // 6) 운영자 SQLite 온라인 백업 API 확인
-    const bak = await fetch("http://127.0.0.1:4810/api/admin/backup", {
+    const bak = await fetch(`${API}/api/admin/backup`, {
       method: "POST",
-      headers: { "x-admin-key": "prod-admin-key" },
+      headers: { "x-admin-key": "prod-admin-key-0123456789" },
     }).then(r => r.json());
     log.backup = { ok: bak.ok, exists: Boolean(bak.file && fs.existsSync(bak.file)) };
 

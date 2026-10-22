@@ -1,7 +1,7 @@
 // M1 종단 테스트: 서버 + Vite를 띄우고 실제 브라우저로 시세·차트·뉴스·그리기·재연결을 확인한다.
 // 실행: node tools/e2e-m1.cjs [스크린샷 폴더] [--quick]
 const path = require("node:path");
-const { sleep, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
+const { API, APP, sleep, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
 
 const QUICK = process.argv.includes("--quick"); // 서버 재시작·재연결 확인을 건너뛴다 (약 10초 절약)
 const OUT = outDir();
@@ -43,7 +43,7 @@ const OUT = outDir();
     await page.click(".newsline .headline");
     log.newsDetail = await page.locator("#newsDlg h2").innerText();
     await page.click("#newsDlg .dlg-close");
-    await page.click(".newsline .icon-btn");
+    await page.click(".newsline [data-act=news-list]");
     await page.waitForSelector(".news-list li");
     log.newsListCount = await page.locator(".news-list li").count();
     await page.locator(".news-list button").first().click();
@@ -52,7 +52,7 @@ const OUT = outDir();
 
     // 5) 지표 토글 + 다크 모드
     await page.click('[data-i="MACD"]');
-    await page.click(".topbar .icon-btn");
+    await page.click(".topbar [data-act=theme]");
     log.theme = await page.evaluate(() => document.documentElement.dataset.theme);
     await page.screenshot({ path: path.join(OUT, "m1-2-dark-btc.png") });
 

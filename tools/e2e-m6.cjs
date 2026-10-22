@@ -1,16 +1,15 @@
-// M6 종단 테스트: 실시간 채팅(SSE 방송), 3초 속도 제한, 금칙어 차단, 3인 신고 누적 자동 숨김, 운영자 차단(기존 메시지 즉시 삭제).
+// M6 종단 테스트: 실시간 채팅(SSE 방송), 1초 속도 제한, 금칙어 차단, 3인 신고 누적 자동 숨김, 운영자 차단(기존 메시지 즉시 삭제).
 // 실행: node tools/e2e-m6.cjs [스크린샷 폴더]
 const path = require("node:path");
-const { startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
+const { API, APP, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
 
 const OUT = outDir();
-const APP = "http://127.0.0.1:5173/";
 
 (async () => {
   const log = {};
   let errors = [];
   try {
-    startServer({ TICK_MS: "80", ADMIN_KEY: "test-admin-key", ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120 }) });
+    startServer({ TICK_MS: "80", ADMIN_KEY: "test-admin-key-0123456789", ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120 }) });
     startWeb();
     await waitServer();
     await waitWeb();
@@ -42,10 +41,10 @@ const APP = "http://127.0.0.1:5173/";
     await page2.waitForSelector('#chatLog .msg:has-text("NVDA 가즈아!")');
     log.receivedByPeer = true;
 
-    // 2) 3초 쿨타임 거절 토스트 확인
+    // 2) 1초 쿨타임 거절 토스트 확인
     await page.fill("#chatForm input", "도배 테스트");
     await page.click('#chatForm button[type="submit"]');
-    await page.waitForSelector('.toast.error:has-text("3초")');
+    await page.waitForSelector('.toast.error:has-text("1초")');
     log.cooldownBlocked = true;
 
     // 3) 금칙어 차단 토스트 확인 (B가 전송)
@@ -58,12 +57,12 @@ const APP = "http://127.0.0.1:5173/";
     const msgId = Number(await page2.locator("#chatLog .msg").first().getAttribute("data-msg-id"));
     await page2.click('#chatLog .msg [data-act="report"]'); // 1번째 신고 (단타신)
     for (const n of ["신고자2", "신고자3"]) {
-      const r = await fetch("http://127.0.0.1:4810/api/join", {
+      const r = await fetch(`${API}/api/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: n, password: "secret1" }),
       }).then(x => x.json());
-      await fetch("http://127.0.0.1:4810/api/chat/report", {
+      await fetch(`${API}/api/chat/report`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${r.token}` },
         body: JSON.stringify({ id: msgId }),
@@ -79,7 +78,7 @@ const APP = "http://127.0.0.1:5173/";
     await page.screenshot({ path: path.join(OUT, "m6-1-chat.png") });
 
     await page.click('[data-act="admin-toggle"]');
-    await page.fill('#adminPanel input[aria-label="운영자 키"]', "test-admin-key");
+    await page.fill('#adminPanel input[aria-label="운영자 키"]', "test-admin-key-0123456789");
     await page.click('[data-act="admin-load"]');
     await page.waitForSelector('#adminPanel [data-ban-user="단타신"]');
     await page.click('#adminPanel [data-ban-user="단타신"]');

@@ -50,7 +50,7 @@ function symMove(n: NewsItem, sym: string): number | null {
       <button id="newsExpandBtn" type="button" class="icon-btn news-act-btn" :aria-expanded="expanded" @click.stop="expanded = !expanded">
         {{ expanded ? "접기 ▴" : "최근 5개 펼치기 ▾" }}
       </button>
-      <button type="button" class="icon-btn news-act-btn" @click.stop="m.newsDialog = { mode: 'list' }">전체 뉴스</button>
+      <button type="button" class="icon-btn news-act-btn" data-act="news-list" @click.stop="m.newsDialog = { mode: 'list' }">전체 뉴스</button>
     </div>
     <ul v-if="expanded" id="newsRecent5" class="news-recent5">
       <li v-for="(n, idx) in recent5" :key="n.id" class="recent5-item" :class="{ 'is-latest': idx === 0 }" @click="openDetail(n.id)">

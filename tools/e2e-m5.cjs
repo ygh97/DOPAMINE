@@ -1,10 +1,9 @@
 // M5 종단 테스트: 차트 포지션 선, 그리기 서버 동기화(새 기기 로그인 시 복원), 모바일(390×844) 탭 전환·가로 스크롤 없음을 확인한다.
 // 실행: node tools/e2e-m5.cjs [스크린샷 폴더]
 const path = require("node:path");
-const { startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
+const { API, APP, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
 
 const OUT = outDir();
-const APP = "http://127.0.0.1:5173/";
 
 (async () => {
   const log = {};

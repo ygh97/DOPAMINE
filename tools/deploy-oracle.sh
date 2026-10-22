@@ -4,7 +4,7 @@
 set -euo pipefail
 
 DOMAIN="${DOMAIN:-:80}"
-ADMIN_KEY="${ADMIN_KEY:-dopamine-admin}"
+ADMIN_KEY="${ADMIN_KEY:?ADMIN_KEY를 16자 이상으로 정하세요 (예: openssl rand -hex 16)}"
 
 echo "[1/4] Docker 확인 및 설치..."
 if ! command -v docker >/dev/null 2>&1; then

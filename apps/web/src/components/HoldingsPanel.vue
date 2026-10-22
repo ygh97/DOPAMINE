@@ -70,21 +70,18 @@ async function clearTp(id: number) {
   await a.setTp(id, null);
   tps[id] = "";
 }
-async function shareSpot(p: { sym: string; avg: number; price: number; pnl: number; pnlPct: number }) {
+// "자랑" 공유: 문구는 서버가 실제 계좌 값으로 만든다 (화면에서 숫자를 꾸밀 수 없게)
+async function shareSpot(p: { sym: string }) {
   m.socialTab = "chat";
-  await a.sendChat(`[공유] $${p.sym} 현물 평단 ${money(p.avg)} → 현재 ${money(p.price)} (${pct(p.pnlPct)})`);
+  await a.share({ type: "spot", sym: p.sym });
 }
-async function shareFut(f: { sym: string; side: "long" | "short"; lev: number; entry: number; price: number; pnlPct: number }) {
+async function shareFut(f: { id: number }) {
   m.socialTab = "chat";
-  await a.sendChat(`[공유] $${f.sym} ${f.lev}x ${f.side === "long" ? "롱" : "숏"} 진입 ${money(f.entry)} → 현재 ${money(f.price)} (${pct(f.pnlPct)})`);
+  await a.share({ type: "fut", id: f.id });
 }
 async function shareFill(f: Fill) {
   m.socialTab = "chat";
-  const mkt = fillMarketLabel(f.side);
-  const act = SIDE[f.side] ?? f.side;
-  const unit = m.quotes[f.sym]?.market === "coin" ? "" : "주";
-  const pnlPart = f.pnl != null ? ` · 실현손익 ${signedMoney(f.pnl)}` : "";
-  await a.sendChat(`[공유] $${f.sym} [${mkt}] ${act} ${qtyText(f.sym, f.qty)}${unit} @ ${money(f.price)}${pnlPart}`);
+  await a.share({ type: "fill", id: f.id });
 }
 </script>
 

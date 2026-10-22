@@ -938,3 +938,108 @@ dialog#spyDlg::backdrop, dialog#guideDlg::backdrop { background: rgba(0,0,0,.55)
   .dlg-head h2 { font-size: 15.5px; }
   .dlg-act-btn { height: 30px; padding: 0 9px; font-size: 11.5px; }
 }
+
+/* 트레이딩뷰 스타일 차트 전체화면·전체봉·상단 OHLC 바·사용자 설정 패널 */
+.chart-panel { position: relative; }
+.chart-panel.is-fullscreen {
+  position: fixed !important; inset: 0 !important; z-index: 165 !important;
+  width: 100vw !important; height: 100vh !important; max-height: 100vh !important;
+  border-radius: 0 !important; margin: 0 !important;
+  background: var(--panel);
+}
+.fs-quote-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 3px 10px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line);
+  font-size: 13px;
+}
+.period-tabs { overflow-x: auto; max-width: 100%; }
+.period-tabs button { padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+.chart-view-tools {
+  display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap;
+}
+.chart-ctrl-btn {
+  border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  border-radius: 5px; padding: 3px 8px; font-size: 11.5px; font-weight: 700;
+  white-space: nowrap; cursor: pointer;
+}
+.chart-ctrl-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.chart-ctrl-btn[aria-pressed="true"], .chart-ctrl-btn.fs-btn[aria-pressed="true"] {
+  border-color: var(--accent); background: var(--accent); color: #fff;
+}
+
+.chart-ohlc-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 4px 10px; border-bottom: 1px solid var(--line);
+  background: var(--panel-2); font-size: 11.5px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ohlc-item { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.ohlc-item b { font-weight: 700; color: var(--text); }
+.ohlc-item.ma-summary { margin-left: auto; color: var(--accent); font-weight: 700; }
+
+.chart-settings-pop {
+  position: absolute; top: 44px; right: 10px; z-index: 80;
+  width: min(440px, calc(100vw - 24px));
+  max-height: calc(100% - 54px); overflow-y: auto;
+  padding: 12px 14px; border-radius: 10px;
+  background: var(--panel); border: 2px solid var(--accent);
+  box-shadow: 0 14px 36px rgba(0,0,0,.32);
+}
+.cs-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 8px; margin-bottom: 10px; border-bottom: 1px solid var(--line);
+  font-size: 13.5px;
+}
+.cs-grid { display: flex; flex-direction: column; gap: 10px; }
+.cs-group { display: flex; flex-direction: column; gap: 5px; }
+.cs-label { font-size: 11.5px; font-weight: 700; color: var(--muted); }
+.cs-seg { display: grid; grid-template-columns: repeat(auto-fit, minmax(84px, 1fr)); gap: 4px; }
+.cs-seg button {
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+  border-radius: 5px; padding: 5px 6px; font-size: 11.5px; font-weight: 700;
+}
+.cs-seg button[aria-pressed="true"] {
+  border-color: var(--accent); background: var(--accent-soft); color: var(--accent);
+}
+.cs-ma-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; }
+.cs-ma-item {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 7px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line);
+  font-size: 12px; font-weight: 700;
+}
+.cs-ma-item input[type="number"] {
+  width: 54px; margin-left: auto; border: 1px solid var(--line); border-radius: 4px;
+  padding: 2px 5px; background: var(--panel); color: var(--text); font: inherit; text-align: right;
+}
+.cs-checks {
+  display: grid; grid-template-columns: 1fr; gap: 5px;
+  padding: 8px; border-radius: 6px; background: var(--panel-2); border: 1px solid var(--line);
+  font-size: 12px;
+}
+.cs-checks label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+@media (max-width: 760px) {
+  .chart-head { padding: 6px 8px; gap: 5px; }
+  .ind-chips { margin-left: 0; width: 100%; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 2px; }
+  .ind-chips button { flex-shrink: 0; font-size: 11px; padding: 2px 6px; }
+  .chart-view-tools { width: 100%; justify-content: space-between; }
+  .chart-ctrl-btn { padding: 3px 6px; font-size: 11px; }
+  .chart-ohlc-bar { padding: 3px 8px; gap: 6px 8px; font-size: 10.5px; }
+  .ohlc-item.ma-summary { display: none; }
+}
+
+/* ---------- 스크롤바: 사이트 테마 (얇게, 패널 색 트랙 + 테두리 색 손잡이, 올리면 강조색) ---------- */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+*:hover { scrollbar-color: var(--muted) transparent; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--accent); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* ---------- 커서: cursors-4u Azure Aura Busy가 모든 요소를 덮는다. 글자 입력칸만 I자 커서로 되돌린다 ---------- */
+html input:not([type]), html input[type="text"], html input[type="password"], html input[type="number"],
+html input[type="search"], html input[inputmode], html textarea { cursor: text !important; }
+
+/* ---------- 🤖 봇 · 🏦 세력 배지 ---------- */
+.kind-badge { display: inline-block; margin-right: 3px; font-size: 12px; line-height: 1; }

@@ -2,7 +2,7 @@
 // 서버를 빠른 tick(40ms)과 높은 병합 기준($1,000)으로 띄워 첫 게임 하루(80 tick ≈ 3초) 끝에 신흥주가 병합되게 한다.
 // 실행: node tools/e2e-split.cjs [스크린샷 폴더]
 const path = require("node:path");
-const { startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
+const { API, APP, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
 
 const OUT = outDir();
 const STORE = "dc-drawings-v1";

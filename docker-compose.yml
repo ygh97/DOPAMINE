@@ -6,7 +6,7 @@ services:
       HOST: "0.0.0.0"
       PORT: "4810"
       DB_FILE: "/app/data/dopamine.db"
-      ADMIN_KEY: "${ADMIN_KEY:-dopamine-admin}"
+      ADMIN_KEY: "${ADMIN_KEY:?ADMIN_KEY를 16자 이상으로 정하세요}"
       SEED: "${SEED:-20261021}"
     volumes:
       - ./data:/app/data

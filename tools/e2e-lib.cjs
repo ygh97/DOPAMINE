@@ -8,7 +8,10 @@ const ROOT = path.resolve(__dirname, "..");
 const PW = process.env.PW || path.join(process.env.APPDATA || "", "npm/node_modules/rea-agents/node_modules/playwright-core");
 const CHROME = process.env.CHROME || "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const VITE = path.join(ROOT, "node_modules/vite/bin/vite.js");
-const APP = "http://127.0.0.1:5173/";
+// 개발 서버(4810·5173)와 겹치지 않게 테스트는 다른 포트를 쓴다
+const API_PORT = Number(process.env.E2E_PORT ?? 4910), WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5273);
+const API = `http://127.0.0.1:${API_PORT}`;
+const APP = `http://127.0.0.1:${WEB_PORT}/`;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const procs = [];
@@ -22,22 +25,29 @@ function startNode(name, args, cwd, env = {}) {
 }
 // 테스트마다 새 DB를 쓴다 (기존 계좌·시즌과 섞이지 않게)
 const startServer = (env = {}) => startNode("server", ["--disable-warning=ExperimentalWarning", "src/index.ts"], path.join(ROOT, "apps/server"),
-  { DB_FILE: path.join(require("node:os").tmpdir(), `dc-e2e-${process.pid}.db`), ...env });
-const startWeb = () => startNode("web", [VITE, "--strictPort"], path.join(ROOT, "apps/web"));
+  { PORT: String(API_PORT), DB_FILE: path.join(require("node:os").tmpdir(), `dc-e2e-${process.pid}.db`), ...env });
+const startWeb = () => startNode("web", [VITE, "--strictPort", "--port", String(WEB_PORT)], path.join(ROOT, "apps/web"), { API_ORIGIN: API });
 
 async function waitFor(url, ms = 30000) {
   const end = Date.now() + ms;
   while (Date.now() < end) { try { if ((await fetch(url)).ok) return; } catch {} await sleep(300); }
   throw new Error(`응답 없음: ${url}`);
 }
-const waitServer = () => waitFor("http://127.0.0.1:4810/api/health");
+const waitServer = () => waitFor(`${API}/api/health`);
 const waitWeb = () => waitFor(APP);
-const killAll = () => { for (const p of procs) p.kill(); };
+const browsers = [];
+/** 서버·Vite·브라우저를 모두 끝낸다. 실패 경로에서도 프로세스가 남아 멈추지 않게 5초 뒤 강제 종료 */
+const killAll = () => {
+  for (const p of procs) p.kill();
+  for (const b of browsers) b.close().catch(() => {});
+  setTimeout(() => process.exit(process.exitCode ?? 0), 5000).unref();
+};
 
 /** 브라우저를 열고 오류를 모은다. ignore()가 true인 동안의 콘솔 오류는 무시 */
 async function openApp(ignore = () => false, url = APP) {
   const { chromium } = require(PW);
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+  browsers.push(browser);
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   page.setDefaultTimeout(10000);
   const errors = [];
@@ -56,4 +66,4 @@ function outDir() {
   return out;
 }
 
-module.exports = { ROOT, sleep, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir };
+module.exports = { ROOT, API, APP, sleep, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir };

@@ -66,6 +66,17 @@ export const SPARES: SpareDef[] = [
   { sym: "AGBT", name: "아그리봇", tech: "자율 농업 로봇" },
   { sym: "KRYM", name: "크라이오메드", tech: "장기 냉동 보존" },
   { sym: "LUMX", name: "루멕스", tech: "광 컴퓨팅 칩" },
+  // 시즌당 승격 10개를 채우려고 추가한 예비 가상 기업
+  { sym: "QBRN", name: "큐브레인", tech: "뉴로모픽 칩" },
+  { sym: "HYDX", name: "하이드록스", tech: "그린수소 전해조" },
+  { sym: "SLRW", name: "솔라윙", tech: "성층권 태양광 드론" },
+  { sym: "MCRF", name: "마이크로팜", tech: "수직 농장 자동화" },
+  { sym: "NRVX", name: "너브엑스", tech: "신경 재생 치료제" },
+  { sym: "ORCM", name: "오르카마린", tech: "해양 탄소 포집" },
+  { sym: "PLSM", name: "플라즈믹스", tech: "플라즈마 폐기물 처리" },
+  { sym: "VXLR", name: "복셀리얼", tech: "공중 홀로그램 디스플레이" },
+  { sym: "TRMX", name: "테라믹스", tech: "지하 열에너지 저장" },
+  { sym: "AERV", name: "에어로베일", tech: "대기 중 물 수확" },
 ];
 
 /** 선물 최대 레버리지와 선택지 (SPEC 3장) */

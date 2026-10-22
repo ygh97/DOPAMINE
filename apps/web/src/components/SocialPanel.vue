@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { clock, money, pct } from "../format";
 import { useAccount } from "../stores/account";
-import { useMarket, type ChatMsg } from "../stores/market";
+import { kindBadge, useMarket, type ChatMsg } from "../stores/market";
 
 const m = useMarket();
 const a = useAccount();
@@ -104,37 +104,18 @@ async function submitChat() {
   }
 }
 
+// 수익인증 문구는 서버가 실제 계좌 값으로 만든다 (화면에서 숫자를 꾸밀 수 없게)
 async function shareSummary() {
   if (!a.me) return;
-  const ret = ((a.equity / 100_000) - 1) * 100;
-  const f = a.futures[0];
-  const p = a.positions[0];
-  const posPart = f
-    ? ` · $${f.sym} ${f.lev}x ${f.side === "long" ? "롱" : "숏"} ${pct(f.pnlPct)}`
-    : p
-      ? ` · $${p.sym} 현물 ${pct(p.pnlPct)}`
-      : ` · 관심 $${m.selected}`;
-  if (await a.sendChat(`[공유] 총자산 ${money(a.equity)} (${pct(ret)})${posPart}`)) {
-    scrollToBottom();
-  }
+  if (await a.share({ type: "summary" })) scrollToBottom();
 }
 
-function parseLiqBroadcast(c: ChatMsg): { victim: string; sym: string } | null {
-  if (c.name !== "⚡전광판" || !c.text.startsWith("[강제청산]")) return null;
-  const match = /💥\s+(\S+)님\s+\$(\S+)/.exec(c.text);
-  return match ? { victim: match[1], sym: match[2] } : null;
-}
+/** 아직 아무도 반응하지 않은 강제청산 알림이면 true (버튼 표시) */
+const canReact = (c: ChatMsg) => c.name === "⚡전광판" && c.text.startsWith("[강제청산]") && !c.reacted;
 
 async function teabag(c: ChatMsg, mode: "mock" | "rip") {
-  if (!a.me) return;
-  const info = parseLiqBroadcast(c);
-  if (!info) return;
-  const msg = mode === "mock"
-    ? `[티배깅] 🤣 ${info.victim}님 $${info.sym} 청산 달달하네요~ 반대 포지션으로 감사히 먹습니다 ㅋㅋ`
-    : `[티배깅] 🕯️ ${info.victim}님의 $${info.sym} 장렬한 전사를 애도합니다... 성불하세요 (X키를 눌러 조의를 표하십시오)`;
-  if (await a.sendChat(msg)) {
-    scrollToBottom();
-  }
+  if (!a.me || !canReact(c)) return;
+  if (await a.react(c.id, mode === "mock" ? "teabag" : "rip")) scrollToBottom();
 }
 
 type Token = { kind: "text"; val: string } | { kind: "sym"; sym: string } | { kind: "badge"; val: string; cls?: string };
@@ -222,6 +203,7 @@ async function toggleBan(name: string, banned: boolean) {
           <tr v-for="r in m.ranking" :key="r.name" class="rank-row clickable" :class="{ mine: r.name === a.me?.name }" @click="m.spyTarget = r.name">
             <td>{{ r.rank }}</td>
             <td>
+              <span v-if="kindBadge(r.kind)" class="kind-badge" :title="r.kind === 'bot' ? '봇' : '세력'">{{ kindBadge(r.kind) }}</span>
               <b>{{ r.name }}</b>
               <span v-if="r.clearedTick" class="stage">100배</span>
               <span class="spy-chip">🔍포지션</span>
@@ -232,6 +214,19 @@ async function toggleBan(name: string, banned: boolean) {
         </tbody>
       </table>
       <p v-else class="empty">아직 참가자가 없습니다. 첫 번째로 참가해 보세요.</p>
+      <template v-if="m.mmRanking.length">
+        <div class="rank-hint muted">🏦 세력 현황 (자금 규모가 달라 수익률 순, 순위·졸업 제외)</div>
+        <table id="mmRanking" class="grid">
+          <tbody>
+            <tr v-for="r in m.mmRanking" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">
+              <td><span class="kind-badge">🏦</span></td>
+              <td><b>{{ r.name }}</b> <span class="spy-chip">🔍포지션</span></td>
+              <td>{{ money(r.equity) }}</td>
+              <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </template>
     </div>
     <div v-else-if="m.socialTab === 'hall'" class="table-scroll">
       <table v-if="hall.length" id="hall" class="grid">
@@ -326,7 +321,7 @@ async function toggleBan(name: string, banned: boolean) {
                 <template v-else>{{ tk.val }}</template>
               </template>
             </div>
-            <div v-if="a.me && parseLiqBroadcast(c)" class="teabag-bar">
+            <div v-if="a.me && canReact(c)" class="teabag-bar">
               <button type="button" class="mini-btn teabag-btn" data-act="teabag-mock" @click="teabag(c, 'mock')">🤣 티배깅 조롱</button>
               <button type="button" class="mini-btn teabag-btn" data-act="teabag-rip" @click="teabag(c, 'rip')">🕯️ 묵념 조의</button>
             </div>

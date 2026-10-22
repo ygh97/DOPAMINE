@@ -98,6 +98,10 @@ export interface MarketOptions {
   ticksPerDay: number;
   prevResetDays: number;
   whaleChance: number;
+  /** 시즌 동안 적정가가 오르는 배수 [최소, 최대]. 시즌마다 이 안에서 하나를 뽑는다 */
+  seasonGrowth: [number, number];
+  /** 시즌 길이(틱). 서버가 시즌 설정에서 넣는다 */
+  seasonTicks: number;
   barMs: number;
   warmupBars: number;
   maxBars: number;
@@ -109,6 +113,8 @@ export interface MarketOptions {
   rsiWeight: number;
   regimeSwitch: number;
   flipChance: number;
+  /** 뉴스 첫 반응 뒤 따라붙을 확률 (나머지는 되돌림) */
+  followChance: number;
   srLookback: number;
   srBand: number;
   srWeight: number;
@@ -125,7 +131,10 @@ export interface MarketOptions {
   watchTicks: number;
   rescueOdds: [number, number];
   maxNewGrowth: number;
-  epsStep: [number, number];
+  /** 신흥주 소프트 상한 (시작가 대비 배수) */
+  ventureCap: number;
+  /** 신흥주 검증 성공 확률 */
+  ventureSuccess: number;
   epsHalfLife: number;
   epsBand: [number, number];
 }

@@ -28,7 +28,9 @@
     "e2e:m5": "node tools/e2e-m5.cjs",
     "e2e:m6": "node tools/e2e-m6.cjs",
     "e2e:m7": "node tools/e2e-m7.cjs",
-    "loadtest": "node --disable-warning=ExperimentalWarning tools/load-test.ts"
+    "loadtest": "node --disable-warning=ExperimentalWarning tools/load-test.ts",
+    "dev:test": "node tools/dev-test.mjs",
+    "sim:bots": "node --disable-warning=ExperimentalWarning tools/sim-bots.ts 1 2 3 4 5 6"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

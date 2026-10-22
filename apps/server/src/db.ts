@@ -1,5 +1,5 @@
 // SQLite (Node 내장 node:sqlite). 네이티브 빌드가 없어 Windows·Docker 모두 그대로 돈다.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, backup } from "node:sqlite";
 
@@ -112,6 +112,12 @@ export function openDb(file: string): Db {
       user_id INTEGER NOT NULL REFERENCES users(id),
       PRIMARY KEY (msg_id, user_id)
     );
+    -- 강제청산 알림 1건당 티배깅·묵념은 한 명만
+    CREATE TABLE IF NOT EXISTS chat_reacts (
+      msg_id INTEGER PRIMARY KEY REFERENCES chat_messages(id),
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS hall_of_fame (
       season_id INTEGER NOT NULL,
       rank INTEGER NOT NULL,
@@ -130,6 +136,8 @@ export function openDb(file: string): Db {
     "ALTER TABLE fills ADD COLUMN pnl REAL",
     "ALTER TABLE futures ADD COLUMN tp REAL",
     "ALTER TABLE chat_messages ADD COLUMN to_name TEXT",
+    // user: 사람, bot: 🤖 봇, mm: 🏦 세력 계정 (봇·세력은 명예의 전당·졸업에서 빠진다)
+    "ALTER TABLE users ADD COLUMN kind TEXT NOT NULL DEFAULT 'user'",
   ]) {
     try { db.exec(sql); } catch { /* 이미 있음 */ }
   }
@@ -150,13 +158,16 @@ export function tx<T>(db: Db, fn: () => T): T {
 }
 
 
-/** 무중단 SQLite 일일 백업 (VACUUM INTO): 최근 keep개만 남긴다 (SPEC 10장) */
+/** 무중단 SQLite 온라인 백업 (node:sqlite backup API). 파일 이름에 시각을 넣고 최근 keep개만 남긴다 (SPEC 10장) */
 let backupSeq = 0;
-/** 무중단 SQLite 온라인 백업 (node:sqlite backup API): keep개 슬롯 순환 덮어쓰기 (SPEC 10장) */
-export async function backupDb(db: Db, dir: string, keep = 7): Promise<string> {
+export async function backupDb(db: Db, dir: string, reason = "auto", keep = 20): Promise<string> {
   mkdirSync(dir, { recursive: true });
-  const slot = backupSeq++ % Math.max(1, keep);
-  const out = join(dir, `dopamine-slot-${slot}.db`);
+  const d = new Date().toISOString().replace(/\D/g, ""); // yyyymmddhhmmssmmm (UTC)
+  const seq = String(backupSeq++ % 1000).padStart(3, "0"); // 같은 ms에 여러 번 불러도 이름이 겹치지 않게
+  const out = join(dir, `dopamine-${d.slice(0, 8)}-${d.slice(8, 17)}${seq}-${reason}.db`);
   await backup(db, out);
+  const old = readdirSync(dir).filter(n => /^dopamine-\d{8}-\d{12}-.+\.db$/.test(n)).sort(); // 이름 = 시각이라 정렬 = 시간순
+  // rmSync 대신 unlinkSync: Node 24.11.1의 rmSync는 한글이 든 Windows 경로에서 프로세스째 죽는다
+  for (const n of old.slice(0, Math.max(0, old.length - keep))) { try { unlinkSync(join(dir, n)); } catch { /* 이미 없음 */ } }
   return out;
 }

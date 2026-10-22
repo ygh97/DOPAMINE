@@ -1,10 +1,9 @@
 // M4 종단 테스트: 선물 진입(롱·숏·레버리지), 스탑로스 설정·유지, 50% 분할 종료, 강제 청산 자동 반영, 다시 시작 후 10배 제한을 실제 브라우저로 확인한다.
 // 실행: node tools/e2e-m4.cjs [스크린샷 폴더]
 const path = require("node:path");
-const { startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
+const { API, APP, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
 
 const OUT = outDir();
-const APP = "http://127.0.0.1:5173/";
 const ENV = {
   TICK_MS: "60",
   ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120, impactK: 400, impactCap: { stock: 0.25, coin: 0.25, venture: 0.25 } }),
@@ -43,16 +42,16 @@ const ENV = {
     log.opened = { toast: await toast(page), row: (await page.locator("#futures tr[data-sym=NVDA]").innerText()).split("\t").slice(0, 7) };
 
     // 2) 스탑로스 $150 설정 → 50% 분할 종료 → 스탑로스 유지 확인 후 해제
-    await page.fill("#futures .stop-input", "150");
+    await page.fill("#futures input[aria-label='스탑로스 가격']", "150");
     await page.click('#futures [data-act="stop-set"]');
     await page.waitForSelector('#futures [data-act="stop-clear"]');
-    log.stopSet = await page.locator("#futures .stop-input").getAttribute("placeholder");
+    log.stopSet = await page.locator("#futures input[aria-label='스탑로스 가격']").getAttribute("placeholder");
 
     await page.click('#futures [data-act="close-50"]');
     await page.waitForFunction(() => document.querySelector(".toast")?.textContent.includes("50% 종료"));
     log.partialClose = {
       toast: await toast(page),
-      stopKept: await page.locator("#futures .stop-input").getAttribute("placeholder"),
+      stopKept: await page.locator("#futures input[aria-label='스탑로스 가격']").getAttribute("placeholder"),
       marginAfter: await page.locator("#futures tr[data-sym=NVDA] td:nth-child(7)").innerText(),
     };
     await page.screenshot({ path: path.join(OUT, "m4-1-futures.png") });
@@ -79,6 +78,15 @@ const ENV = {
     await page.click('[data-t="fills"]');
     await page.waitForSelector("#fills tbody tr");
     log.fillsAfterLiq = (await page.locator("#fills tbody").innerText()).split("\n").map(r => r.split("\t").slice(1, 4).join(" "));
+
+    // 3-1) 티배깅: 강제청산 알림 1건당 한 명만. 고래B가 채팅의 버튼을 누르면 모두의 화면에서 버튼이 사라진다
+    for (const p of [page, pageB]) await p.click('[data-c="chat"]');
+    await pageB.waitForSelector('#chatLog [data-act="teabag-mock"]');
+    await pageB.click('#chatLog [data-act="teabag-mock"]');
+    await pageB.waitForSelector('#chatLog .share-badge.teabag');
+    await pageB.waitForSelector('#chatLog [data-act="teabag-mock"]', { state: "detached" });
+    await page.waitForSelector('#chatLog [data-act="teabag-mock"]', { state: "detached" });
+    log.teabag = await pageB.locator("#chatLog .share-badge.teabag").count();
 
     // 4) 다시 시작 직후 10배 진입 시도 → 5배 초과 제한 안내
     page.once("dialog", d => d.accept());

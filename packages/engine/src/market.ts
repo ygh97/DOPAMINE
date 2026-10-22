@@ -10,8 +10,10 @@ import type { AssetDef, Bar, CorporateAction, GameDate, MarketKind, MarketOption
 export const DEFAULT_OPTIONS: MarketOptions = {
   ticksPerBar: 60,        // 1분봉 = 60틱(1초 tick)
   ticksPerDay: 80,        // 게임 하루
-  prevResetDays: 7,       // 등락률 기준가(prev) 초기화 주기 = 게임 1주일(7일 = 560틱)
+  prevResetDays: 1,       // 등락률 기준가(prev) 초기화 주기 = 게임 하루(80틱)
   whaleChance: 0.08,      // 숨은 세력 움직임(개미털기·설거지·숏스퀴즈) 발동 비율 (뉴스 없이 차트 수급으로만 작동)
+  seasonGrowth: [1.5, 3], // 우상향은 여기서만 만든다: 시즌 동안 적정가가 1.5~3배 (시즌마다 하나를 뽑음)
+  seasonTicks: 28_800,    // 시즌 = 게임 1년 (360일 × 80틱 = 실제 8시간)
   barMs: 60_000,
   warmupBars: 720,        // 시작 전 과거 차트
   maxBars: 1500,
@@ -23,19 +25,21 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   rsiWeight: 0.25,        // RSI 기울기 최대치 = 개별 σ의 25%
   regimeSwitch: 1 / 400,  // 국면 전환 확률(틱당)
   flipChance: 0.08,       // 뉴스 반응이 반대로 나올 확률 (호재 반응 일관성 강화)
+  followChance: 0.6,      // 뉴스 첫 반응 뒤 같은 방향으로 따라붙을 확률. 나머지는 재료 소진으로 일부 되돌림
   srLookback: 60,         // 전고점·전저점을 볼 봉 수
   srBand: 0.004,          // 지지·저항이 작동하는 거리 (0.4%)
   srWeight: 0.35,         // 지지·저항 기울기 최대치 = 개별 σ의 35%
-  gradCap: 8e9,           // 신흥주 → 주식 승격: 검증 성공 gradSuccesses회 이상 + 시총 80억 달러
+  gradCap: 3e9,           // 신흥주 → 주식 승격: 검증 성공 gradSuccesses회 이상 + 시총 30억 달러
   gradSuccesses: 2,
-  gradCooldown: 108_000,  // 승격 사이 평균 간격(30시간 ±30%). 첫 승격은 시즌 시작 약 15시간 뒤 → 1주 동안 고르게 퍼진다
+  gradCooldown: 0,        // 승격 사이 평균 간격(±30%). 0이면 시즌 ÷ (maxNewGrowth + 1) → 시즌 동안 고르게 퍼진다. 첫 승격은 그 절반 뒤
   gradPER: 15,
   splitPrice: 0.1,        // 신흥주 가격이 $0.10 아래면 주식병합(10:1)
   delistCap: 5e7,         // 시총 5천만 달러 아래면 관리종목 → 유예 기간 뒤에도 미달이면 상장폐지
   watchTicks: 2400,       // 관리종목 유예 기간 (게임 30일 = 40분)
   rescueOdds: [0.3, 0.3], // 유예 중 회생 이벤트 확률: [인수 제안, 유상증자], 나머지는 소식 없음
-  maxNewGrowth: 5,        // 신성장(승격 종목) 최대 개수. 다 차면 더 승격하지 않는다
-  epsStep: [0.02, 0.05],  // 실적 뉴스 1건당 EPS 변화
+  maxNewGrowth: 10,       // 신성장(승격 종목) 최대 개수. 다 차면 더 승격하지 않는다
+  ventureCap: 100,        // 신흥주 소프트 상한: 시작가 대비 이 배수에 가까울수록 검증 성공 상승폭이 줄어든다
+  ventureSuccess: 0.6,    // 신흥주 검증 성공 확률 (졸업률 보정용, tools/sim-bots.ts)
   epsHalfLife: 172_800,   // EPS가 기준값으로 돌아가는 반감기(틱, 2일)
   epsBand: [0.4, 3],      // EPS(= 적정가)는 기준의 0.4~3배 안에서만 움직인다
   // 플레이어 주문 충격: 충격 = impactK × σ_일 × √(명목 금액 / 가상 유동성)
@@ -63,6 +67,7 @@ interface AssetState extends AssetDef {
   eps: number | null;
   baseEps: number | null;
   anchor: number;
+  dev: number; // 주식 외 종목의 적정가 이탈(로그). 뉴스·세력이 움직이고 EPS처럼 기준으로 돌아간다
   shares: number | null;
   variance: number;
   regime: "range" | "trend";
@@ -135,7 +140,8 @@ type Task =
 const SNAPSHOT_VERSION = 1;
 
 export function createMarket({ assets, sectors, spares = [], seed = 20261021, now = Date.now(), options = {}, snapshot }: CreateMarketInput): Market {
-  const cfg: MarketOptions = { ...DEFAULT_OPTIONS, ...options };
+  const merged: MarketOptions = { ...DEFAULT_OPTIONS, ...options };
+  const cfg: MarketOptions = { ...merged, gradCooldown: merged.gradCooldown || Math.round(merged.seasonTicks / (merged.maxNewGrowth + 1)) };
   const rng = mulberry32(seed), rand = rng.next;
   const uni = (a: number, b: number) => a + (b - a) * rand();
   const pick = <T>(arr: readonly T[]): T => arr[Math.floor(rand() * arr.length)];
@@ -161,7 +167,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       prev: def.price,
       eps: def.market === "stock" && def.fairPER ? def.price / def.fairPER : null,
       baseEps: def.market === "stock" && def.fairPER ? def.price / def.fairPER : null,
-      anchor: def.price,
+      anchor: def.price, dev: 0,
       shares: def.cap ? def.cap / def.price : null,
       variance: 1, regime: rand() < 0.5 ? "range" : "trend",
       pending: [], bars: [], rsi: 50, avgGain: 0, avgLoss: 0, lastClose: def.price,
@@ -172,6 +178,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   }
   assets.forEach(addAsset);
   for (const k in sectors) sectorPending[k] ??= [];
+  // 틱당 적정가 성장률 (로그). 시즌마다 seasonGrowth 안에서 하나
+  let drift = Math.log(uni(...cfg.seasonGrowth)) / cfg.seasonTicks;
 
   // ---------- 충격 ----------
   function impulse(list: Impulse[], total: number, n = Math.round(uni(15, 40)), delay = 0) {
@@ -189,12 +197,18 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     }
     return sum;
   }
-  // 뉴스 반응 모양: 즉시 45% → 따라붙어 (55% + 과열분) → 과열분만큼 되돌림. 합계는 total.
+  // 뉴스 반응 모양: 즉시 45~80% → followChance면 나머지가 따라붙고(+ 과열 후 되돌림), 아니면 재료 소진으로 일부 되돌린다.
+  // 첫 반응 뒤 방향을 알 수 없어야 "뉴스 보고 따라 타기"가 확정 수익이 되지 않는다 (tools/sim-bots.ts로 확인)
   function react(list: Impulse[], total: number) {
-    const over = rand() < 0.6 ? uni(0.1, 0.5) : 0;
-    impulse(list, total * 0.45, Math.round(uni(3, 8)));
-    impulse(list, total * (0.55 + over), Math.round(uni(20, 40)), 3);
-    if (over) impulse(list, -total * over, Math.round(uni(30, 60)), Math.round(uni(45, 75)));
+    const now = uni(0.45, 0.8);
+    impulse(list, total * now, Math.round(uni(3, 8)));
+    if (rand() < cfg.followChance) {
+      const over = rand() < 0.6 ? uni(0.1, 0.5) : 0;
+      impulse(list, total * (1 - now + over), Math.round(uni(20, 40)), 3);
+      if (over) impulse(list, -total * over, Math.round(uni(30, 60)), Math.round(uni(45, 75)));
+    } else {
+      impulse(list, -total * now * uni(0.15, 0.5), Math.round(uni(15, 35)), 3);
+    }
   }
   // 의도한 충격 → 실제 반영량 (0.3~1.5배, 가끔 반대)
   const realize = (intended: number, flip = cfg.flipChance) => intended * uni(0.3, 1.5) * (rand() < flip ? -1 : 1);
@@ -225,7 +239,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
 
   // ---------- 숨은 세력(Whale / Market Maker) 차트 패턴 ----------
   // 뉴스나 알림을 전혀 띄우지 않고 차트 수급으로만 개미털기(Shakeout)·설거지(Pump & Dump)·숏스퀴즈(Short Squeeze)를 발생시킨다.
-  // 우상향 기조에 맞춰 매집 후 상승(개미털기·숏스퀴즈) 비중을 78%로 높인다.
+  // 매집 후 상승(개미털기·숏스퀴즈) 비중 78%. 수급일 뿐이라 적정가는 건드리지 않는다 (적정가 회귀가 천천히 되돌린다).
   function whaleOperation() {
     const candidates = live().filter(x => x.watchUntil == null && !venturesBusy.has(x.sym));
     if (!candidates.length) return;
@@ -240,8 +254,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       const rip = uni(0.045, 0.10) * scale;
       impulse(a.pending, dip, Math.round(uni(4, 7)), 0);
       impulse(a.pending, rip, Math.round(uni(18, 36)), Math.round(uni(5, 9)));
-      if (a.eps && a.baseEps) { a.baseEps *= Math.exp(rip * 0.4); a.eps *= Math.exp(rip * 0.4); }
-      else a.anchor *= Math.exp(rip * 0.4);
     } else if (modeRoll < 0.78) {
       // 숏스퀴즈 (Short Squeeze): 1차 매집 + 2차 연쇄 상방 분출
       const wave1 = uni(0.03, 0.06) * scale;
@@ -249,8 +261,6 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       impulse(a.pending, wave1, Math.round(uni(5, 10)), 0);
       impulse(a.pending, wave2, Math.round(uni(15, 30)), Math.round(uni(6, 12)));
       impulse(a.pending, -wave2 * 0.25, Math.round(uni(30, 50)), Math.round(uni(35, 55)));
-      if (a.eps && a.baseEps) { a.baseEps *= Math.exp((wave1 + wave2) * 0.45); a.eps *= Math.exp((wave1 + wave2) * 0.45); }
-      else a.anchor *= Math.exp((wave1 + wave2) * 0.45);
     } else {
       // 설거지 (Pump & Dump): 단기 슈팅 후 조정
       const pump = uni(0.03, 0.065) * scale;
@@ -260,57 +270,59 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     }
   }
 
-  // 적정가(EPS·앵커) 이동 헬퍼: 호재나 성장으로 기업의 내재가치 자체가 계단식으로 우상향하도록 지원
+  // 적정가 이동: 뉴스·세력은 기준(baseEps·anchor)이 아니라 이탈분(eps·dev)만 움직인다.
+  // 이탈분은 epsBand 안에서만 움직이고 epsHalfLife로 기준에 돌아간다. 기준을 올리는 건 drift뿐 (안 그러면 복리로 폭주)
+  const devBand = [Math.log(cfg.epsBand[0]), Math.log(cfg.epsBand[1])];
   function shiftFair(a: AssetState, logMove: number) {
-    const mult = Math.exp(logMove);
     if (a.eps != null && a.baseEps != null) {
-      a.baseEps *= mult;
-      a.eps = Math.min(a.baseEps * cfg.epsBand[1], Math.max(a.baseEps * cfg.epsBand[0], a.eps * mult));
+      a.eps = Math.min(a.baseEps * cfg.epsBand[1], Math.max(a.baseEps * cfg.epsBand[0], a.eps * Math.exp(logMove)));
     } else {
-      a.anchor *= mult;
+      a.dev = Math.min(devBand[1], Math.max(devBand[0], a.dev + logMove));
     }
   }
 
-  // ---------- 뉴스 (호재 빈도 ~66% 우위 & 호재 시 큰 폭 상승 & 개별 기업 단독 반응) ----------
+  // ---------- 뉴스 (호재 ~80%, 그중 PRICED_IN은 선반영돼 오히려 하락 / 개별 기업·코인 단독 반응) ----------
+  // 호재 빈도 × 크기 × (1 - 2×선반영) ≈ 악재 빈도 × 크기라 뉴스의 기대값은 0 근처. 시즌 우상향은 drift가 만든다
+  const FAIR_SHARE = 0.3; // 뉴스 충격 중 적정가에 남는 몫 (호재·악재 같은 비율)
+  const PRICED_IN = 0.2;  // 호재인데 "재료 소멸"로 반대로 움직일 확률
   function marketNews() {
-    const good = rand() < 0.66, tpl = pick(good ? NEWS.market.good : NEWS.market.bad);
-    const move = good ? realize(uni(0.008, 0.022), 0.03) : realize(-uni(0.004, 0.010), 0.08);
+    const good = rand() < 0.80, tpl = pick(good ? NEWS.market.good : NEWS.market.bad);
+    const move = good ? realize(uni(0.006, 0.016), PRICED_IN) : realize(-uni(0.02, 0.043), 0.08);
     react(marketPending, move);
-    for (const a of live()) shiftFair(a, move * a.betaM * (good ? 0.65 : 0.35));
+    for (const a of live()) shiftFair(a, move * a.betaM * FAIR_SHARE);
     publish({ kind: "시장", headline: tpl.h, body: tpl.b, symbols: [] });
   }
   function sectorNews() {
     const members = (key: string) => live().filter(a => a.sector === key).map(a => a.sym);
     const key = pick(Object.keys(sectors).filter(k => k !== "venture" && members(k).length)), name = sectors[key];
-    const good = rand() < 0.66, tpl = pick(good ? NEWS.sector.good : NEWS.sector.bad);
-    const move = good ? realize(uni(0.015, 0.038), 0.03) : realize(-uni(0.006, 0.016), 0.08);
+    const good = rand() < 0.80, tpl = pick(good ? NEWS.sector.good : NEWS.sector.bad);
+    const move = good ? realize(uni(0.01, 0.026), PRICED_IN) : realize(-uni(0.033, 0.07), 0.08);
     react(sectorPending[key], move);
     for (const a of live()) {
-      if (a.sector === key) shiftFair(a, move * a.betaS * (good ? 0.65 : 0.35));
+      if (a.sector === key) shiftFair(a, move * a.betaS * FAIR_SHARE);
     }
     publish({ kind: "업종", sector: key, headline: `${name} 업종 · ${tpl.h}`, body: tpl.b.replaceAll("{sector}", name), symbols: members(key) });
   }
   function companyNews() {
     const a = pick(live().filter(x => x.market !== "venture"));
-    const good = rand() < 0.67, src = a.market === "coin" ? NEWS.coin : NEWS.company;
+    const good = rand() < 0.82, src = a.market === "coin" ? NEWS.coin : NEWS.company;
     const tpl: Template = pick(good ? src.good : src.bad);
-    // 개별 회사·코인 뉴스는 오직 해당 종목(a) 하나에만 강하게 반응한다 (호재 시 큰 폭 점프)
+    // 개별 회사·코인 뉴스는 오직 해당 종목(a) 하나에만 반응한다. 실적 뉴스는 적정가에 더 많이 남는다
     const rawMag = a.market === "coin"
-      ? (good ? uni(0.045, 0.115) : -uni(0.018, 0.05))
-      : (good ? uni(0.03, 0.08) : -uni(0.012, 0.035));
-    const move = realize(rawMag, good ? 0.02 : 0.08);
+      ? (good ? uni(0.035, 0.09) : -uni(0.12, 0.29))
+      : (good ? uni(0.02, 0.06) : -uni(0.08, 0.18));
+    const move = realize(rawMag, good ? PRICED_IN : 0.08);
     react(a.pending, move);
-    shiftFair(a, move * (good ? 0.75 : 0.45));
-    if (tpl.eps && a.eps) a.eps *= 1 + (good ? 1.4 : -0.8) * uni(...cfg.epsStep);
-    a.volBoost = Math.max(a.volBoost, good ? 12 : 8);
+    shiftFair(a, move * (tpl.eps ? 2 * FAIR_SHARE : FAIR_SHARE));
+    a.volBoost = Math.max(a.volBoost, good ? 14 : 8);
     const fill = fillOf(a);
     publish({ kind: a.market === "coin" ? "코인" : "기업", headline: `${a.name} · ${fill(tpl.h)}`, body: fill(tpl.b), symbols: [a.sym] });
   }
-  // 신흥주 3단계 검증: 최초 주장 → 재현 시험 → 성공/실패 (성공 확률도 우상향 기조에 맞춰 60%로 상향)
+  // 신흥주 3단계 검증: 최초 주장 → 재현 시험 → 성공/실패 (성공 확률 ventureSuccess)
   function ventureEvent() {
     const free = live().filter(a => a.market === "venture" && !venturesBusy.has(a.sym) && a.watchUntil == null);
     if (!free.length) return companyNews();
-    const a = pick(free), success = rand() < 0.60, eventId = nid();
+    const a = pick(free), success = rand() < cfg.ventureSuccess, eventId = nid();
     venturesBusy.add(a.sym);
     react(a.pending, realize(uni(0.06, 0.18), 0.03));
     a.stage = "기술검증";
@@ -338,8 +350,10 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     venturesBusy.delete(t.sym);
     const a = state[t.sym];
     if (!a) return;
-    // 결과는 로그 기준 대칭: 성공 +35%~+120%, 실패 -33%~-63%. 적정가(앵커)도 같은 만큼 이동
-    const move = t.success ? uni(0.3, 0.8) : -uni(0.4, 1.0);
+    // 결과: 성공 +35%~+120%(상한에 가까우면 줄어듦), 실패 -33%~-63%. 적정가(앵커)도 같은 만큼 이동
+    // 성공 폭은 상한에 가까울수록 줄어든다: 시작가 대비 배수 x에서 (1 - log x / log cap)배
+    const gain = Math.log(Math.max(1, a.anchor / (a.def.price * a.splitFactor))) / Math.log(cfg.ventureCap);
+    const move = t.success ? uni(0.3, 0.8) * Math.max(0, 1 - gain) : -uni(0.4, 1.0);
     a.anchor *= Math.exp(move);
     react(a.pending, move);
     if (t.success) a.successes++;
@@ -518,14 +532,19 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     for (const k in sectorPending) sec[k] = gauss() * cfg.sectorSigma + drain(sectorPending[k]);
     const barIndex = Math.floor((tick - 1) / cfg.ticksPerBar);
     const barStart = (tick - 1) % cfg.ticksPerBar === 0, barEnd = tick % cfg.ticksPerBar === 0;
+    const growth = Math.exp(drift), devDecay = Math.exp(-Math.LN2 / cfg.epsHalfLife);
 
     for (const a of live()) {
       if (rand() < cfg.regimeSwitch) a.regime = a.regime === "range" ? "trend" : "range";
       if (a.eps && a.baseEps) {
+        a.baseEps *= growth; a.eps *= growth;
         a.eps *= Math.exp((-Math.LN2 / cfg.epsHalfLife) * Math.log(a.eps / a.baseEps));
         a.eps = Math.min(a.baseEps * cfg.epsBand[1], Math.max(a.baseEps * cfg.epsBand[0], a.eps));
+      } else {
+        a.anchor *= growth;
+        a.dev *= devDecay;
       }
-      const fair = a.eps && a.fairPER ? a.eps * a.fairPER : a.anchor;
+      const fair = a.eps && a.fairPER ? a.eps * a.fairPER : a.anchor * Math.exp(a.dev);
       const pull = -cfg.kappa * (a.market === "coin" ? 0.3 : 1) * Math.log(a.price / fair);
       // 박스권: 과매수면 하락 쪽으로, 추세장: 강한 쪽으로 약하게
       const rsiTilt = ((a.rsi - 50) / 50) * cfg.rsiWeight * a.sigma * (a.regime === "range" ? -1 : 0.5);
@@ -571,7 +590,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       if (a.hi != null) a.hi *= k;
       if (a.lo != null) a.lo *= k;
       for (const n of news) if (n.priceAt[a.sym]) n.priceAt[a.sym] *= k;
-      if (a.market === "stock" && a.fairPER) a.eps = a.baseEps = a.price / a.fairPER; else a.anchor = a.price;
+      if (a.market === "stock" && a.fairPER) a.eps = a.baseEps = a.price / a.fairPER; else { a.anchor = a.price; a.dev = 0; }
       a.successes = 0;
       if (!venturesBusy.has(a.sym)) a.stage = null;
     }
@@ -584,7 +603,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     return JSON.stringify({
       v: SNAPSHOT_VERSION, rng: rng.get(), tick, nextNewsAt, warm, assetsVersion,
       nextGradAt: Number.isFinite(nextGradAt) ? nextGradAt : null, startTime, news, scheduled,
-      marketPending, sectorPending, venturesBusy: [...venturesBusy], sparePool, state,
+      marketPending, sectorPending, venturesBusy: [...venturesBusy], sparePool, state, drift,
     });
   }
   function restore(json: string) {
@@ -594,6 +613,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     nextGradAt = d.nextGradAt ?? Infinity; startTime = d.startTime; news = d.news; scheduled = d.scheduled;
     marketPending = d.marketPending; sectorPending = d.sectorPending; venturesBusy = new Set(d.venturesBusy);
     sparePool = d.sparePool; state = d.state;
+    drift = d.drift ?? drift; // drift가 없던 스냅샷은 새로 뽑은 값으로
+    for (const a of Object.values(state)) a.dev ??= 0;
     for (const k in sectors) sectorPending[k] ??= [];
     news = news.filter(n => n.kind !== "세력");
     const lastBarTs = Object.values(state)[0]?.bars.at(-1)?.timestamp ?? barTime(Math.max(1, tick));
@@ -606,14 +627,18 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
         continue;
       }
       if (def.market === "coin") {
+        Object.assign(a, KIND.coin);
         a.eps = null;
         a.baseEps = null;
         a.fairPER = undefined;
-      } else if (def.fairPER && !a.fairPER) {
-        a.fairPER = def.fairPER;
-        const refPrice = a.anchor || a.price;
-        a.eps = refPrice / def.fairPER;
-        a.baseEps = def.price / def.fairPER;
+      } else if (def.market === "stock") {
+        Object.assign(a, KIND.stock);
+        if (def.fairPER && !a.fairPER) {
+          a.fairPER = def.fairPER;
+          const refPrice = a.anchor || a.price;
+          a.eps = refPrice / def.fairPER;
+          a.baseEps = def.price / def.fairPER;
+        }
       }
       if (def.cap && !a.shares) {
         a.shares = def.cap / def.price;

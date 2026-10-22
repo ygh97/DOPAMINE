@@ -1,20 +1,22 @@
 // 도파민 센터 서버: 벽시계 기준 GameLoop + SSE 시세 방송 + 참가·현물·선물 주문.
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import { timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { dirname, extname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SECTORS, type Bar, type NewsItem, type Quote } from "@dopamine/engine";
 import { Auth, AuthError } from "./auth.ts";
+import { BotRunner } from "./bots.ts";
 import { Broker, OrderError } from "./broker.ts";
 import { Chat, ChatError } from "./chat.ts";
 import { backupDb, openDb } from "./db.ts";
-import { bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, targetTick } from "./season.ts";
+import { bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, seasonStats, targetTick } from "./season.ts";
 
 const PORT = Number(process.env.PORT ?? 4810);
 const HOST = process.env.HOST ?? "127.0.0.1";
 const SEED = Number(process.env.SEED ?? 20261021);
 const TICK_MS = Number(process.env.TICK_MS ?? 1000);
-const SEASON_MS = Number(process.env.SEASON_MS ?? 7 * 24 * 3600 * 1000); // 시즌 길이 (새 시즌부터 적용)
+const SEASON_MS = Number(process.env.SEASON_MS ?? 360 * 80 * TICK_MS); // 시즌 = 게임 1년 (360일 × 80틱, 1초 tick이면 8시간). 진행 중 시즌에도 바로 적용
 const SNAPSHOT_EVERY = 600; // tick마다 엔진 스냅샷 저장 (10분)
 const DB_FILE = process.env.DB_FILE ?? fileURLToPath(new URL("../../../data/dopamine.db", import.meta.url));
 const BACKUP_DIR = process.env.BACKUP_DIR ?? join(dirname(DB_FILE), "backups");
@@ -23,7 +25,8 @@ const WEB_DIST = process.env.WEB_DIST ?? fileURLToPath(new URL("../../web/dist",
 const ENGINE_OPTIONS = JSON.parse(process.env.ENGINE_OPTIONS ?? "{}");
 
 const db = openDb(DB_FILE);
-const ADMIN_KEY = process.env.ADMIN_KEY ?? "dopamine-admin";
+// 운영자 키. 없거나 짧으면 운영자 기능을 끈다 (기본값을 두면 공개 주소에서 누구나 밴·백업을 할 수 있다)
+const ADMIN_KEY = (process.env.ADMIN_KEY ?? "").length >= 16 ? Buffer.from(process.env.ADMIN_KEY!) : null;
 const auth = new Auth(db);
 const chat = new Chat(db);
 // 시즌이 바뀌면 아래 넷을 통째로 갈아 끼운다
@@ -34,10 +37,20 @@ let broker = new Broker(db, season, market);
 broker.loadAll();
 saveSnapshot(db, season, market); // 다음 재시작은 여기서부터
 const bootMs = Math.round(performance.now() - bootStart);
+// 켤 때마다 백업 (시즌이 8시간이라 하루 1회 백업만으로는 부족하다)
+backupDb(db, BACKUP_DIR, "boot").catch(e => console.error("백업 실패", e));
 
-/** 시즌 종료: 명예의 전당 기록 → 새 시즌 시작 → 모두에게 알림 */
+// 🤖 봇·🏦 세력: BOTS=100, MARKET_MAKERS=1로 켠다 (테스트 서버용. 기본은 꺼짐)
+const BOTS = Number(process.env.BOTS ?? 0), MARKET_MAKERS = process.env.MARKET_MAKERS === "1";
+const bots = BOTS > 0 || MARKET_MAKERS
+  ? new BotRunner(db, () => broker, () => market, { bots: BOTS, marketMakers: MARKET_MAKERS, seed: SEED, tuning: JSON.parse(process.env.MM_TUNING ?? '{"strength":{}}') })
+  : null;
+
+/** 시즌 종료: 백업 → 통계 로그 → 명예의 전당 기록 → 새 시즌 시작 → 모두에게 알림 */
 function rollover() {
   const prev = season.id;
+  backupDb(db, BACKUP_DIR, `season${prev}-end`).catch(e => app.log.error(e)); // 명예의 전당 기록 전 상태
+  app.log.info({ season: prev, ...seasonStats(broker.ranking(Infinity)) }, "시즌 통계");
   season = finishSeason(db, season, broker.ranking(Infinity));
   ({ market, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS));
   broker = new Broker(db, season, market);
@@ -47,6 +60,8 @@ function rollover() {
   send("season", seasonInfo());
 }
 const seasonInfo = () => ({ id: season.id, startedAt: season.startedAt, endsAt: season.startedAt + season.lengthMs });
+/** 랭킹(사람 + 🤖) 상위 20명, 참가자 수, 🏦 세력 */
+const rankingInfo = (rows = broker.ranking(20)) => ({ rows, players: broker.players, mm: broker.mmRanking() });
 
 // JSON 크기를 줄이려고 유효숫자 7자리로 자른다 ($94,880.10, $0.3121 모두 충분)
 const r7 = (v: number) => Number(v.toPrecision(7));
@@ -103,6 +118,7 @@ const loop = setInterval(() => {
     if (broker.applyActions(result.actions).length)
       for (const a of result.actions) if (a.type === "split" || a.type === "delist") settled.push({ type: a.type, sym: a.sym });
     broker.checkTriggers();
+    bots?.tick(result.news);
     news.push(...[...result.news].reverse());
     for (const a of result.actions) if (a.type === "split") reload.push(a.sym);
     assetsChanged ||= result.assetsChanged;
@@ -127,7 +143,7 @@ const loop = setInterval(() => {
   for (const text of broker.drainBroadcasts()) send("chat", chat.system(text));
   if (!clients.size) return;
   send("tick", { tick: market.tick, date: market.gameDate(), bars: cachedBars });
-  if (rankRows) send("ranking", { rows: rankRows, players: broker.players });
+  if (rankRows) send("ranking", rankingInfo(rankRows));
 }, Math.max(10, Math.min(250, TICK_MS / 2)));
 
 // ---------- HTTP ----------
@@ -144,6 +160,17 @@ function userOf(req: FastifyRequest, reply: FastifyReply): number | null {
   const id = auth.userOf(req.headers.authorization);
   if (!id) void reply.code(401).send({ error: "참가가 필요합니다." });
   return id;
+}
+
+/**
+ * 요청한 사람의 IP. Cloudflare 터널(cloudflared)은 같은 PC에서 접속하므로 모두 127.0.0.1로 보인다.
+ * 그때만 cloudflared가 넣는 CF-Connecting-IP를 믿는다. 밖에서 직접 온 요청은 이 헤더를 꾸밀 수 있어 무시한다
+ */
+function clientIp(req: FastifyRequest): string {
+  const peer = req.socket.remoteAddress ?? "";
+  const cf = req.headers["cf-connecting-ip"];
+  const loopback = peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
+  return loopback && typeof cf === "string" && cf ? cf : req.ip;
 }
 
 // 참가 시도 속도 제한: IP당 1분에 10번
@@ -173,7 +200,7 @@ app.get<{ Querystring: { tick?: string } }>("/api/poll", async req => {
     bars: cachedBars,
     news: market.news.filter(n => n.tick > since).slice(0, 30).reverse(),
     chat: chat.recent(50, viewerOf(req)),
-    ranking: { rows: broker.ranking(20), players: broker.players },
+    ranking: rankingInfo(),
     settled: settled.length ? settled : undefined,
     assets: lastAssetsTick > since ? { quotes: cachedQuotes, reload } : undefined,
   };
@@ -198,12 +225,12 @@ app.get<{ Querystring: { before?: string; limit?: string } }>("/api/news", async
 
 app.get("/api/hall", async () => ({ rows: hallOfFame(db) }));
 
-app.get("/api/ranking", async () => ({ rows: broker.ranking(20), players: broker.players }));
+app.get("/api/ranking", async () => rankingInfo());
 
 app.post<{ Body: { name: string; password: string } }>("/api/join", {
   schema: { body: { type: "object", required: ["name", "password"], properties: { name: { type: "string", maxLength: 40 }, password: { type: "string", maxLength: 64 } } } },
 }, async (req, reply) => {
-  if (!joinAllowed(req.ip)) return reply.code(429).send({ error: "참가 시도가 너무 많습니다. 1분 뒤에 다시 시도하세요." });
+  if (!joinAllowed(clientIp(req))) return reply.code(429).send({ error: "참가 시도가 너무 많습니다. 1분 뒤에 다시 시도하세요." });
   const { token, userId, name, created } = auth.join(req.body.name, req.body.password);
   return { token, name, created, me: broker.me(userId) };
 });
@@ -294,8 +321,9 @@ app.post<{ Body: { sym?: string; factor?: number; items?: unknown[]; clear?: boo
 });
 
 function adminOk(req: FastifyRequest, reply: FastifyReply) {
-  if (req.headers["x-admin-key"] === ADMIN_KEY) return true;
-  void reply.code(403).send({ error: "운영자 키가 올바르지 않습니다." });
+  const given = Buffer.from(String(req.headers["x-admin-key"] ?? ""));
+  if (ADMIN_KEY && given.length === ADMIN_KEY.length && timingSafeEqual(given, ADMIN_KEY)) return true;
+  void reply.code(403).send({ error: ADMIN_KEY ? "운영자 키가 올바르지 않습니다." : "운영자 키(ADMIN_KEY)가 설정되지 않아 운영자 기능이 꺼져 있습니다." });
   return false;
 }
 
@@ -307,6 +335,31 @@ app.post<{ Body: { text: string } }>("/api/chat", {
   const id = userOf(req, reply);
   if (!id) return;
   const msg = chat.post(id, req.body.text);
+  // SSE는 누구나 받으니 귓속말 내용은 싣지 않는다. 신호만 보내면 로그인한 화면이 /api/chat(본인 것만 걸러 줌)으로 받아 간다
+  if (msg.to) send("whisper", {});
+  else send("chat", msg);
+  return { msg };
+});
+
+// 강제청산 알림에 티배깅·묵념: 알림 1건당 처음 누른 한 명만. 성공하면 모두의 화면에서 버튼이 사라진다
+app.post<{ Body: { liqId: number; mode: "teabag" | "rip" } }>("/api/chat/react", {
+  schema: { body: { type: "object", required: ["liqId", "mode"], properties: { liqId: { type: "integer" }, mode: { type: "string", enum: ["teabag", "rip"] } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const msg = chat.react(id, req.body.liqId, req.body.mode);
+  send("chat", msg);
+  send("chat-react", { id: req.body.liqId });
+  return { msg };
+});
+
+// "[공유]" 수익인증: 문구는 서버가 실제 계좌 값으로 만든다
+app.post<{ Body: { type: "spot" | "fut" | "fill" | "summary"; sym?: string; id?: number } }>("/api/chat/share", {
+  schema: { body: { type: "object", required: ["type"], properties: { type: { type: "string", enum: ["spot", "fut", "fill", "summary"] }, sym: { type: "string", maxLength: 12 }, id: { type: "integer" } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const msg = chat.post(id, broker.shareText(id, req.body), Date.now(), true);
   send("chat", msg);
   return { msg };
 });
@@ -352,7 +405,7 @@ app.post("/api/admin/backup", async (req, reply) => {
 
 // 하루 1회 자동 SQLite 백업 (SPEC 10장)
 const backupTimer = setInterval(() => {
-  try { saveSnapshot(db, season, market); void backupDb(db, BACKUP_DIR); }
+  try { saveSnapshot(db, season, market); backupDb(db, BACKUP_DIR).catch(e => app.log.error(e)); }
   catch (e) { app.log.error(e); }
 }, 24 * 3600 * 1000);
 backupTimer.unref();
@@ -392,7 +445,7 @@ if (existsSync(join(WEB_DIST, "index.html"))) {
     if (req.url.startsWith("/api/") || req.method !== "GET") return reply.code(404).send({ error: "찾을 수 없습니다." });
     const reqPath = req.url.split("?")[0];
     const target = resolve(root, `.${reqPath}`);
-    const file = target.startsWith(root) && existsSync(target) && statSync(target).isFile() ? target : join(root, "index.html");
+    const file = (target === root || target.startsWith(root + sep)) && existsSync(target) && statSync(target).isFile() ? target : join(root, "index.html");
     const st = statSync(file);
     let hit = staticCache.get(file);
     if (!hit || hit.mtimeMs !== st.mtimeMs) {

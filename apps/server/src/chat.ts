@@ -9,7 +9,11 @@ const BAD_WORDS = ["시발", "씨발", "병신", "개새끼", "좆", "꺼져", "
 
 export class ChatError extends Error {}
 
-export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null }
+export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean }
+
+// 시스템·서버가 만드는 표시. 일반 채팅으로는 이 말머리로 시작할 수 없다 (사칭 방지)
+const RESERVED = ["[티배깅]", "[강제청산]", "[100배졸업]", "[공유]"];
+const LIQ_RE = /^\[강제청산\] 💥 (\S+)님 \$(\S+) /;
 export interface ChatAdminMsg extends ChatMsg { reports: number; hidden: boolean }
 
 export class Chat {
@@ -25,7 +29,11 @@ export class Chat {
       insMsg: db.prepare("INSERT INTO chat_messages (user_id, name, text, at, to_name) VALUES (?, ?, ?, ?, ?)"),
       selUser: db.prepare("SELECT name, banned FROM users WHERE id = ?"),
       selTarget: db.prepare("SELECT name FROM users WHERE name = ? COLLATE NOCASE"),
-      selRecent: db.prepare('SELECT id, name, text, at, to_name AS "to" FROM chat_messages WHERE hidden = 0 ORDER BY id DESC LIMIT ?'),
+      // 공개 메시지만 캐시한다 (귓속말이 많아도 공개 메시지 수가 줄지 않게). reacted = 강제청산 알림에 누가 이미 반응했는지
+      selRecent: db.prepare('SELECT m.id, m.name, m.text, m.at, NULL AS "to", r.msg_id IS NOT NULL AS reacted FROM chat_messages m LEFT JOIN chat_reacts r ON r.msg_id = m.id WHERE m.hidden = 0 AND m.to_name IS NULL ORDER BY m.id DESC LIMIT ?'),
+      selWhispers: db.prepare('SELECT id, name, text, at, to_name AS "to" FROM chat_messages WHERE hidden = 0 AND to_name IS NOT NULL AND (name = ?1 COLLATE NOCASE OR to_name = ?1 COLLATE NOCASE) ORDER BY id DESC LIMIT ?2'),
+      selSysMsg: db.prepare("SELECT text FROM chat_messages WHERE id = ? AND user_id = 0"),
+      insReact: db.prepare("INSERT OR IGNORE INTO chat_reacts (msg_id, user_id, at) VALUES (?, ?, ?)"),
       selMsg: db.prepare("SELECT id, user_id, hidden FROM chat_messages WHERE id = ?"),
       insReport: db.prepare("INSERT OR IGNORE INTO chat_reports (msg_id, user_id) VALUES (?, ?)"),
       cntReport: db.prepare("SELECT COUNT(*) AS c FROM chat_reports WHERE msg_id = ?"),
@@ -46,7 +54,8 @@ export class Chat {
     return { id, name: "⚡전광판", text, at: now, to: null };
   }
 
-  post(userId: number, rawText: string, now = Date.now()): ChatMsg {
+  /** trusted = 서버가 만든 문구(공유·티배깅). 말머리 사칭 검사를 건너뛴다 */
+  post(userId: number, rawText: string, now = Date.now(), trusted = false): ChatMsg {
     const user = this.stmts.selUser.get(userId) as { name: string; banned: number } | undefined;
     if (!user) throw new ChatError("참가가 필요합니다.");
     if (user.banned) throw new ChatError("채팅이 정지된 계정입니다.");
@@ -68,6 +77,8 @@ export class Chat {
       toName = target.name;
     }
 
+    if (!trusted && RESERVED.some(p => text.startsWith(p))) throw new ChatError("이 말머리는 버튼으로만 쓸 수 있습니다.");
+
     const compact = text.replace(/[\s._\-*!@#$%^&()]+/g, "").toLowerCase();
     for (const w of BAD_WORDS) {
       if (compact.includes(w)) throw new ChatError("금칙어가 포함되어 있습니다.");
@@ -82,13 +93,31 @@ export class Chat {
   /** 전체 최근 메시지 (귓속말은 발신자·수신자에게만 필터링해서 내보낼 수 있게 viewerName 지원) */
   recent(limit = 50, viewerName?: string | null): ChatMsg[] {
     if (!this.recentCache) {
-      const rows = this.stmts.selRecent.all(120) as unknown as ChatMsg[];
-      this.recentCache = rows.reverse();
+      const rows = this.stmts.selRecent.all(120) as unknown as (Omit<ChatMsg, "reacted"> & { reacted: number })[];
+      this.recentCache = rows.reverse().map(r => ({ ...r, reacted: Boolean(r.reacted) }));
     }
-    const viewer = viewerName?.toLowerCase() ?? "";
-    return this.recentCache
-      .filter(m => !m.to || (viewer && (m.name.toLowerCase() === viewer || m.to.toLowerCase() === viewer)))
-      .slice(-limit);
+    if (!viewerName) return this.recentCache.slice(-limit);
+    const whispers = this.stmts.selWhispers.all(viewerName, limit) as unknown as ChatMsg[];
+    return [...this.recentCache, ...whispers].sort((a, b) => a.id - b.id).slice(-limit);
+  }
+
+  /** 강제청산 알림에 티배깅·묵념. 알림 1건당 처음 누른 한 명만 성공한다 */
+  react(userId: number, liqId: number, mode: "teabag" | "rip", now = Date.now()): ChatMsg {
+    const sys = this.stmts.selSysMsg.get(liqId) as { text: string } | undefined;
+    const m = sys && LIQ_RE.exec(sys.text);
+    if (!m) throw new ChatError("강제청산 알림을 찾을 수 없습니다.");
+    const [, victim, sym] = m;
+    // 쿨타임·밴 검사를 먼저 통과해야 반응 자리를 차지한다 (실패한 시도가 자리를 막지 않게)
+    const user = this.stmts.selUser.get(userId) as { name: string; banned: number } | undefined;
+    if (!user) throw new ChatError("참가가 필요합니다.");
+    if (user.banned) throw new ChatError("채팅이 정지된 계정입니다.");
+    if (user.name.toLowerCase() === victim.toLowerCase()) throw new ChatError("본인 청산에는 반응할 수 없습니다.");
+    const text = mode === "teabag"
+      ? `[티배깅] 🤣 ${victim}님 $${sym} 청산 달달하네요~ 반대 포지션으로 감사히 먹습니다 ㅋㅋ`
+      : `[티배깅] 🕯️ ${victim}님의 $${sym} 장렬한 전사를 애도합니다... 성불하세요`;
+    if (now - (this.lastSent.get(userId) ?? 0) < COOLDOWN_MS) throw new ChatError("메시지가 너무 빠릅니다. 1초 뒤에 다시 보내세요.");
+    if (!this.stmts.insReact.run(liqId, userId, now).changes) throw new ChatError("이미 누군가 반응했습니다.");
+    return this.post(userId, text, now, true);
   }
 
   report(userId: number, msgId: number): { id: number; reports: number; hidden: boolean } {

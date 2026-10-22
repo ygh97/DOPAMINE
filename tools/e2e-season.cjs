@@ -2,11 +2,11 @@
 // 서버를 빠른 tick(40ms)과 짧은 시즌(15초)으로 띄운다.
 // 실행: node tools/e2e-season.cjs [스크린샷 폴더]
 const path = require("node:path");
-const { sleep, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
+const { API, APP, sleep, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir } = require("./e2e-lib.cjs");
 
 const OUT = outDir();
 const ENV = { TICK_MS: "40", SEASON_MS: "15000", ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120 }) };
-const health = async () => (await fetch("http://127.0.0.1:4810/api/health")).json();
+const health = async () => (await fetch(`${API}/api/health`)).json();
 
 (async () => {
   const log = {};

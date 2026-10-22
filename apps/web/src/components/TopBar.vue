@@ -52,14 +52,14 @@ function restart() {
       <div class="kv goal"><span>100배 목표 · {{ goalPct.toFixed(2) }}%</span><div class="bar"><i :style="{ width: `${goalPct}%` }"></i></div></div>
       <button class="icon-btn" title="계좌를 $100,000으로 다시 시작" @click="restart">다시 시작</button>
       <button class="icon-btn" @click="a.logout()">나가기</button>
-      <button class="icon-btn" @click="ui.toggleTheme()">{{ ui.theme === "dark" ? "라이트" : "다크" }}</button>
+      <button class="icon-btn" data-act="theme" @click="ui.toggleTheme()">{{ ui.theme === "dark" ? "라이트" : "다크" }}</button>
     </div>
     <form v-else class="account join" @submit.prevent="submit">
       <span class="muted join-hint">$100,000 → $10,000,000 · 100배 도전</span>
       <input v-model="name" name="name" placeholder="이름 (2~12자)" maxlength="12" autocomplete="username" required>
       <input v-model="password" name="password" type="password" placeholder="비밀번호 6자 이상" minlength="6" maxlength="64" autocomplete="current-password" required>
       <button class="join-btn" :disabled="a.busy">참가하기</button>
-      <button type="button" class="icon-btn" @click="ui.toggleTheme()">{{ ui.theme === "dark" ? "라이트" : "다크" }}</button>
+      <button type="button" class="icon-btn" data-act="theme" @click="ui.toggleTheme()">{{ ui.theme === "dark" ? "라이트" : "다크" }}</button>
     </form>
   </header>
 </template>

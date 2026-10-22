@@ -11,9 +11,13 @@ export interface Season { id: number; seed: number; startedAt: number; tickMs: n
 interface SeasonRow { id: number; seed: number; started_at: number; tick_ms: number; length_ms: number }
 const toSeason = (r: SeasonRow): Season => ({ id: r.id, seed: r.seed, startedAt: r.started_at, tickMs: r.tick_ms, lengthMs: r.length_ms });
 
-/** 진행 중인 시즌. 없으면 지금 시작한다 */
+/** 진행 중인 시즌. 없으면 지금 시작한다. 시즌 길이 설정이 바뀌었으면 진행 중 시즌에도 맞춘다 (이미 지났으면 다음 tick에 종료) */
 export function currentSeason(db: Db, seed: number, tickMs: number, lengthMs: number, now = Date.now()): Season {
   const row = db.prepare("SELECT id, seed, started_at, tick_ms, length_ms FROM seasons WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1").get() as SeasonRow | undefined;
+  if (row && row.length_ms !== lengthMs) {
+    db.prepare("UPDATE seasons SET length_ms = ? WHERE id = ?").run(lengthMs, row.id);
+    row.length_ms = lengthMs;
+  }
   if (row) return toSeason(row);
   const id = Number(db.prepare("INSERT INTO seasons (seed, started_at, tick_ms, length_ms) VALUES (?, ?, ?, ?)").run(seed, now, tickMs, lengthMs).lastInsertRowid);
   return { id, seed, startedAt: now, tickMs, lengthMs };
@@ -21,7 +25,8 @@ export function currentSeason(db: Db, seed: number, tickMs: number, lengthMs: nu
 
 export function bootMarket(db: Db, season: Season, options: Partial<MarketOptions>, now = Date.now()) {
   const snap = db.prepare("SELECT tick, data FROM snapshots WHERE season_id = ?").get(season.id) as { tick: number; data: string } | undefined;
-  const market = createMarket({ assets: ASSETS, sectors: SECTORS, spares: SPARES, seed: season.seed, now: season.startedAt, options, snapshot: snap?.data });
+  const seasonTicks = Math.max(1, Math.floor(season.lengthMs / season.tickMs)); // 시즌 성장(drift)을 시즌 길이에 맞춘다
+  const market = createMarket({ assets: ASSETS, sectors: SECTORS, spares: SPARES, seed: season.seed, now: season.startedAt, options: { seasonTicks, ...options }, snapshot: snap?.data });
   const warmTicks = market.options.warmupBars * market.options.ticksPerBar;
   const target = Math.min(targetTick(season, warmTicks, now), endTick(season, warmTicks));
   const flows = db.prepare("SELECT tick, sym, notional FROM flows WHERE season_id = ? AND tick > ? ORDER BY tick").all(season.id, market.tick) as
@@ -57,12 +62,25 @@ export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = D
   const seed = randomInt(1, 2 ** 31);
   return tx(db, () => {
     const add = db.prepare("INSERT OR IGNORE INTO hall_of_fame (season_id, rank, name, equity, return_pct, cleared_tick) VALUES (?, ?, ?, ?, ?, ?)");
-    for (const r of ranking) if (r.rank <= 3 || r.clearedTick != null) add.run(season.id, r.rank, r.name, r.equity, r.returnPct, r.clearedTick);
+    // 명예의 전당은 사람만. 봇(🤖)을 빼고 순위를 다시 매긴다
+    const people = ranking.filter(r => r.kind === "user").map((r, i) => ({ ...r, rank: i + 1 }));
+    for (const r of people) if (r.rank <= 3 || r.clearedTick != null) add.run(season.id, r.rank, r.name, r.equity, r.returnPct, r.clearedTick);
     db.prepare("UPDATE seasons SET ended_at = ? WHERE id = ?").run(now, season.id);
     db.prepare("DELETE FROM snapshots WHERE season_id = ?").run(season.id);
     const id = Number(db.prepare("INSERT INTO seasons (seed, started_at, tick_ms, length_ms) VALUES (?, ?, ?, ?)").run(seed, start, season.tickMs, season.lengthMs).lastInsertRowid);
     return { id, seed, startedAt: start, tickMs: season.tickMs, lengthMs: season.lengthMs };
   });
+}
+
+/** 시즌 끝 통계 (졸업률 보정용 로그): 종류별 참가자·졸업자 수, 사람 상위 10명 수익률 */
+export function seasonStats(ranking: RankRow[]) {
+  const by = (kind: string) => ranking.filter(r => r.kind === kind);
+  const people = by("user"), bots = by("bot");
+  return {
+    people: people.length, peopleCleared: people.filter(r => r.clearedTick != null).length,
+    bots: bots.length, botsCleared: bots.filter(r => r.clearedTick != null).length,
+    top10ReturnPct: people.slice(0, 10).map(r => Math.round(r.returnPct)),
+  };
 }
 
 export function hallOfFame(db: Db, seasons = 10) {

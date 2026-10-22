@@ -98,12 +98,10 @@ function snipePosition(sym: string, mode: "spot" | "fut", side: "buy" | "sell", 
   if (mView.value !== "all") mView.value = "trade";
 }
 
-async function sendBannerTeabag(text: string, type: "teabag" | "rip") {
-  const m1 = /💥\s+(\S+)님\s+\$(\S+)/.exec(text);
-  const tag = type === "teabag"
-    ? (m1 ? `[티배깅] 🤣 ${m1[1]}님 $${m1[2]} 청산 달달하네요~ 반대 포지션으로 감사히 먹습니다 ㅋㅋ` : `[티배깅] 🤣 전광판 강제청산 달달하네요 ㅋㅋㅋ`)
-    : (m1 ? `[티배깅] 🕯️ ${m1[1]}님의 $${m1[2]} 장렬한 전사를 애도합니다... 성불하세요` : `[티배깅] 🕯️ 전광판 청산자에 깊은 조의를 표합니다`);
-  await a.sendChat(tag);
+// 강제청산 알림 1건당 처음 누른 한 명만 성공한다. 문구는 서버가 만든다
+async function sendBannerTeabag(liqId: number, type: "teabag" | "rip") {
+  if (!a.me) { a.notify("참가해야 반응할 수 있습니다.", "error"); return; }
+  await a.react(liqId, type);
 }
 
 function replyWhisper(from: string) {
@@ -122,8 +120,8 @@ onMounted(() => { m.connect(); void a.refresh(); }); // 연결되면 스냅샷�
     <b>⚡ 실시간 전광판</b>
     <span>{{ m.banner.text }}</span>
     <span v-if="m.banner.kind === 'liq'" class="banner-actions" @click.stop>
-      <button type="button" class="teabag-btn" @click="sendBannerTeabag(m.banner.text, 'teabag')">🤣 티배깅 조롱</button>
-      <button type="button" class="teabag-btn rip" @click="sendBannerTeabag(m.banner.text, 'rip')">🕯️ 묵념</button>
+      <button type="button" class="teabag-btn" data-act="banner-teabag" @click="sendBannerTeabag(m.banner.id, 'teabag')">🤣 티배깅 조롱</button>
+      <button type="button" class="teabag-btn rip" data-act="banner-rip" @click="sendBannerTeabag(m.banner.id, 'rip')">🕯️ 묵념</button>
     </span>
   </div>
   <div v-if="m.whisperAlert" id="whisperAlertBanner" class="whisper-alert" role="alert">
