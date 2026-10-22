@@ -40,7 +40,7 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   rescueOdds: [0.3, 0.3], // 유예 중 회생 이벤트 확률: [인수 제안, 유상증자], 나머지는 소식 없음
   maxNewGrowth: 10,       // 신성장(승격 종목) 최대 개수. 다 차면 더 승격하지 않는다
   ventureCap: 300,        // 신흥주 소프트 상한: 시작가 대비 이 배수에 가까울수록 검증 성공 상승폭이 줄어든다 (100배 전설 보정으로 100 → 300)
-  ventureSuccess: 0.72,   // 신흥주 검증 성공 확률 (졸업률 보정용, tools/sim-bots.ts. 2026-10-22 보정: 20배 약 10.7%, 100배 약 2.9%)
+  ventureSuccess: 0.85,   // 신흥주 검증 성공 확률 (졸업률 보정용, tools/sim-bots.ts. 2026-10-22 보정: 100배 전설 평균 3% 이상 → 약 3.5%)
   epsHalfLife: 172_800,   // EPS가 기준값으로 돌아가는 반감기(틱, 2일)
   epsBand: [0.4, 3],      // EPS(= 적정가)는 기준의 0.4~3배 안에서만 움직인다
   // 호가창 두께와 순매수의 영구 몫: 충격 = impactK × σ_일 × √(명목 금액 / 가상 유동성). 호가 봇이 같은 크기로 호가를 깐다
@@ -741,7 +741,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       const z = noise / a.sigma;
       a.variance = Math.min(4, Math.max(0.5, 0.97 * a.variance + 0.03 * (z * z + (shock / a.sigma) ** 2)));
 
-      const vol = Math.round(uni(40, 160) * (1 + Math.abs(r) / a.sigma) * (a.volBoost-- > 0 ? 3 : 1));
+      const vol = Math.round(uni(40, 160) * (1 + Math.abs(r) / a.sigma) * (a.volBoost-- > 0 ? 3 : 1) * (a.market === "venture" ? 2.5 : 1)); // 신흥주는 손바뀜이 많다
       const last = a.bars[a.bars.length - 1];
       if (barStart || !last) {
         a.bars.push({ timestamp: barTime(), open, high: Math.max(open, a.price), low: Math.min(open, a.price), close: a.price, volume: vol });

@@ -8,7 +8,7 @@ import { ASSETS, LEVERAGE, type NewsItem, type Quote } from "@dopamine/engine";
 /** 봇이 보는 시장: 호가창(Exchange)의 체결가·유동성 */
 export interface MarketView { readonly tick: number; quotes(): Quote[]; quote(sym: string): Quote | null; liquidity(sym: string): number | null; best(sym: string): { bid: number | null; ask: number | null } }
 type Market = MarketView;
-import type { AccountKind, Broker } from "./broker.ts";
+import { START_CASH, type AccountKind, type Broker } from "./broker.ts";
 import type { Db } from "./db.ts";
 
 function mulberry32(seed: number) {
@@ -211,9 +211,9 @@ class Bot extends Agent {
   }
   act(c: Ctx) {
     const r = this.rand, acc = c.broker.account(this.userId);
-    if (c.tick >= this.nextSwitch) { // 성향 교대: 정리가 끝나면 새로 뽑는다
-      if (this.flatten(c)) this.reroll(c.tick);
-      return;
+    if (c.tick >= this.nextSwitch) { // 성향 교대: 정리가 끝나면 새로 뽑는다. 잘 나가는 봇(총자산 2배 이상)은 그 성향을 계속 탄다
+      if (c.broker.equity(acc) >= 2 * START_CASH) { this.nextSwitch = c.tick + Math.round(uni(r, ...BOT_PERIOD)); }
+      else { if (this.flatten(c)) this.reroll(c.tick); return; }
     }
     switch (this.style) {
       case "holder": {
@@ -321,7 +321,7 @@ export const MM_STRATEGIES = (Object.keys(MM_NAMES) as MmStyle[]).filter(s => s 
 /** 한 전략을 쓰는 시간 (tick): 20~40분. 갈아탈 때 지정가를 취소하고 포지션을 정리한다 */
 const MM_PERIOD: [number, number] = [1200, 2400];
 /** 회전매매 세력이 도는 시장 */
-const DESK: Partial<Record<MmStyle, string[]>> = { rotation: ["stock"], coinDesk: ["coin"], ventureDesk: ["venture"] };
+const DESK: Partial<Record<MmStyle, string[]>> = { rotation: ["stock", "venture"], coinDesk: ["coin"], ventureDesk: ["venture"] }; // 신흥주 거래량을 채우려고 회전매매도 신흥주를 돈다
 /** 유동성 세력이 지정가를 거는 거리 (현재가 대비) */
 const LIQ_GAP: Record<string, number> = { stock: 0.004, coin: 0.008, venture: 0.03 };
 /** 세력 세기 (테스트 서버에서 조절). 1 = 기본 */
@@ -484,7 +484,7 @@ class MarketMaker extends Agent {
         }
         if (c.tick % 10) break;
         this.cancelAll(c);
-        const syms = liveSyms(c, ["stock", "coin"]);
+        const syms = liveSyms(c, ["stock", "coin", "venture"]);
         for (let i = 0; i < 8; i++) {
           const sym = pick(r, syms), b = c.market.best(sym);
           if (b.bid == null || b.ask == null) continue;
@@ -495,7 +495,7 @@ class MarketMaker extends Agent {
       }
       case "trend": { // 추세 매매: 5틱마다 4종목을 보고 30틱 동안 0.3% 넘게 움직인 쪽으로 작게 탄다 (30~90틱)
         if (c.tick % 5 === 0) for (let i = 0; i < 4; i++) {
-          const sym = pick(r, liveSyms(c, ["stock", "coin"]));
+          const sym = pick(r, liveSyms(c, ["stock", "coin", "venture"]));
           if (this.meta.has(sym)) continue;
           const q = c.market.quote(sym)!, then = c.hist.ago(sym, 30);
           if (!then) continue;
