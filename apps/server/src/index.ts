@@ -170,6 +170,8 @@ const app = Fastify({ logger: { level: process.env.LOG_LEVEL ?? "info" } });
 app.setErrorHandler((err, _req, reply) => {
   if (err instanceof AuthError || err instanceof OrderError || err instanceof ChatError) return reply.code(400).send({ error: err.message });
   if ((err as { validation?: unknown }).validation) return reply.code(400).send({ error: "요청 형식이 올바르지 않습니다." });
+  const status = (err as { statusCode?: number }).statusCode ?? 500;
+  if (status >= 400 && status < 500) return reply.code(status).send({ error: "요청 형식이 올바르지 않습니다." }); // 예: 본문 없는 POST의 Content-Type (415)
   app.log.error(err);
   return reply.code(500).send({ error: "서버 오류가 났습니다." });
 });

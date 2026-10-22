@@ -14,9 +14,22 @@ New-Item -ItemType Directory -Force (Join-Path $Root "data") | Out-Null
 
 function Step($text) { Write-Host "`n== $text" -ForegroundColor Cyan }
 function AdminKey {
-  $line = Get-Content (Join-Path $Root ".env") -ErrorAction SilentlyContinue | Where-Object { $_ -match "^ADMIN_KEY=" } | Select-Object -First 1
+  # -Encoding UTF8: PowerShell 5.1 기본(ANSI)으로 읽으면 한글 주석 끝의 줄바꿈이 깨져 다음 줄과 붙는다
+  $line = Get-Content (Join-Path $Root ".env") -Encoding UTF8 -ErrorAction SilentlyContinue | Where-Object { $_ -match "^ADMIN_KEY=" } | Select-Object -First 1
   if (-not $line) { return $null }
   return $line.Substring(10).Trim()
+}
+# 창 없이, 이 PowerShell 창과 완전히 분리해서 띄운다 (WMI). 이 창을 닫거나 Ctrl+C를 눌러도 서버·터널이 안 꺼진다
+function Detached($commandLine) {
+  $si = New-CimInstance -ClassName Win32_ProcessStartup -Property @{ ShowWindow = [uint16]0 } -ClientOnly
+  $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $Root; ProcessStartupInformation = $si }
+  if ($r.ReturnValue -ne 0) { throw "프로세스를 띄우지 못했습니다 (코드 $($r.ReturnValue)): $commandLine" }
+}
+function TunnelUrl($log) {
+  if (-not (Test-Path $log)) { return $null }
+  $m = Select-String -Path $log -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | Select-Object -Last 1
+  if ($m) { return $m.Matches[0].Value }
+  return $null
 }
 function ServerPid {
   $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -29,7 +42,7 @@ function StopServer {
   $key = AdminKey
   if ($key) {
     # 끄기 전에 엔진 스냅샷 + DB 백업 (다시 켤 때 재생이 짧아진다)
-    try { Invoke-RestMethod -Method Post -Uri "$Api/api/admin/backup" -Headers @{ "x-admin-key" = $key } -TimeoutSec 30 | Out-Null; Write-Host "스냅샷·백업 저장" }
+    try { Invoke-RestMethod -Method Post -Uri "$Api/api/admin/backup" -Headers @{ "x-admin-key" = $key } -ContentType "application/json" -Body "{}" -TimeoutSec 30 | Out-Null; Write-Host "스냅샷·백업 저장" }
     catch { Write-Host "백업 요청 실패 (계속 진행): $($_.Exception.Message)" -ForegroundColor Yellow }
   }
   Stop-Process -Id $id -Force
@@ -58,7 +71,7 @@ if ($LASTEXITCODE -ne 0) { throw "화면 빌드 실패. 서버는 꺼진 상태�
 
 Step "서버 켜기 (로그: data\server.log)"
 $log = Join-Path $Root "data\server.log"
-Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "npm start --workspace @dopamine/server >> `"$log`" 2>&1" -WorkingDirectory $Root -WindowStyle Minimized
+Detached "cmd.exe /c npm start --workspace @dopamine/server >> `"$log`" 2>&1"
 $health = $null
 for ($i = 0; $i -lt 120 -and -not $health; $i++) {
   Start-Sleep -Seconds 1
@@ -71,7 +84,7 @@ if ($NewSeason) {
   Step "새 시즌 시작"
   $key = AdminKey
   if (-not $key -or $key.Length -lt 16) { throw ".env에 ADMIN_KEY(16자 이상)가 없어 새 시즌을 시작할 수 없습니다." }
-  $r = Invoke-RestMethod -Method Post -Uri "$Api/api/admin/new-season" -Headers @{ "x-admin-key" = $key } -TimeoutSec 60
+  $r = Invoke-RestMethod -Method Post -Uri "$Api/api/admin/new-season" -Headers @{ "x-admin-key" = $key } -ContentType "application/json" -Body "{}" -TimeoutSec 60
   Write-Host "시즌 $($r.ended) 종료 → 시즌 $($r.season) 시작"
 }
 
@@ -79,15 +92,14 @@ Step "터널 (cloudflared)"
 $cf = Get-Process cloudflared -ErrorAction SilentlyContinue
 $tlog = Join-Path $Root "data\tunnel.log"
 if ($cf) {
-  Write-Host "터널 켜져 있음 (서버만 다시 켰으니 주소는 그대로)"
+  $url = TunnelUrl $tlog
+  if ($url) { Write-Host "터널 켜져 있음, 주소 그대로: $url" -ForegroundColor Green } else { Write-Host "터널 켜져 있음 (서버만 다시 켰으니 주소는 그대로)" }
 } elseif ($Tunnel) {
   if (Test-Path $tlog) { Remove-Item $tlog }
-  Start-Process -FilePath "cloudflared" -ArgumentList "tunnel", "--url", $Api, "--logfile", $tlog -WindowStyle Minimized
+  $exe = (Get-Command cloudflared -ErrorAction Stop).Source
+  Detached "`"$exe`" tunnel --url $Api --logfile `"$tlog`"" # 경로에 공백·한글이 있어 따옴표
   $url = $null
-  for ($i = 0; $i -lt 60 -and -not $url; $i++) {
-    Start-Sleep -Seconds 1
-    if (Test-Path $tlog) { $m = Select-String -Path $tlog -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | Select-Object -First 1; if ($m) { $url = $m.Matches[0].Value } }
-  }
+  for ($i = 0; $i -lt 60 -and -not $url; $i++) { Start-Sleep -Seconds 1; $url = TunnelUrl $tlog }
   if ($url) { Write-Host "새 주소: $url" -ForegroundColor Green } else { Write-Host "주소를 아직 못 찾았습니다. data\tunnel.log를 보세요." -ForegroundColor Yellow }
 } else {
   Write-Host "터널이 꺼져 있습니다. -Tunnel을 붙여 다시 실행하거나 직접: cloudflared tunnel --url $Api" -ForegroundColor Yellow

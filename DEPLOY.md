@@ -45,10 +45,10 @@ powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만
 2. `npm install`
 3. 켜져 있는 서버에 백업을 요청한 뒤 끈다 (포트 4810을 쓰는 프로세스)
 4. `npm run build` (화면을 `apps/web/dist`로 빌드. 서버가 이 폴더를 같이 서빙한다)
-5. 서버를 최소화된 창으로 켠다. 로그는 `data\server.log`
+5. 서버를 창 없이 켠다 (이 창을 닫아도 안 꺼진다). 로그는 `data\server.log`. 끌 때는 `-Stop`
 6. `/api/health`가 응답할 때까지 기다린다 (재생 때문에 몇 초 걸릴 수 있다)
 7. `-NewSeason`이면 지금 시즌을 끝내고 새 시즌을 연다
-8. 터널 상태를 알려 준다. 터널은 서버만 다시 켜면 그대로라 주소도 안 바뀐다
+8. 터널 상태와 주소를 알려 준다. 터널은 서버만 다시 켜면 그대로라 주소도 안 바뀐다. `-Tunnel`로 켠 터널도 창 없이 돌고, 주소·로그는 `data\tunnel.log`. 터널만 끄려면 `Stop-Process -Name cloudflared`
 
 ### 새 시즌이 필요한 배포
 - 엔진(`packages/engine`) 수치나 호가창 규칙을 바꾼 배포는 `-NewSeason`을 붙인다. 시즌 중간에 규칙이 바뀌면 재시작 재생이 어긋난다.
@@ -68,8 +68,8 @@ cloudflared tunnel --url http://127.0.0.1:4810  # 출력에 나오는 https://�
 새 시즌을 직접 열 때 (PowerShell):
 
 ```powershell
-$key = (Get-Content .env | Select-String '^ADMIN_KEY=').Line.Substring(10)
-Invoke-RestMethod -Method Post http://127.0.0.1:4810/api/admin/new-season -Headers @{ 'x-admin-key' = $key }
+$key = (Get-Content .env -Encoding UTF8 | Select-String '^ADMIN_KEY=').Line.Substring(10)
+Invoke-RestMethod -Method Post http://127.0.0.1:4810/api/admin/new-season -Headers @{ 'x-admin-key' = $key } -ContentType 'application/json' -Body '{}'
 ```
 
 ### 알아 둘 것
@@ -103,7 +103,7 @@ curl -X POST -H "x-admin-key: 키" http://127.0.0.1:4810/api/admin/new-season
 ## 백업과 복구
 
 - 자동 백업: 서버를 켤 때, 시즌이 끝날 때, 하루 1회 → `data\backups\dopamine-날짜-…db`. 최근 20개만 남는다.
-- 수동 백업: `Invoke-RestMethod -Method Post http://127.0.0.1:4810/api/admin/backup -Headers @{ 'x-admin-key' = $key }`
+- 수동 백업: `Invoke-RestMethod -Method Post http://127.0.0.1:4810/api/admin/backup -Headers @{ 'x-admin-key' = $key } -ContentType 'application/json' -Body '{}'`
 - 복구: 서버를 끄고(`deploy.ps1 -Stop`) `data\dopamine.db`, `dopamine.db-wal`, `dopamine.db-shm`을 다른 곳으로 옮긴 뒤, 원하는 백업 파일을 `data\dopamine.db`로 복사하고 다시 켠다 (`deploy.ps1 -SkipPull`).
 
 ---
@@ -128,7 +128,7 @@ curl -X POST -H "x-admin-key: 키" http://127.0.0.1:4810/api/admin/new-season
 | 증상 | 확인·해결 |
 |---|---|
 | 접속이 안 됨 | `curl http://127.0.0.1:4810/api/health`. 응답이 없으면 서버가 꺼진 것 → `deploy.ps1 -SkipPull`. 응답이 있으면 터널 문제 → `cloudflared` 창 확인, 필요하면 끄고 `deploy.ps1 -SkipPull -Tunnel` |
-| 서버가 안 켜짐 | `data\server.log` 끝부분. 포트를 다른 프로그램이 쓰면 `Get-NetTCPConnection -LocalPort 4810`으로 누가 쓰는지 본다 |
+| 서버가 안 켜짐 | `data\server.log` 끝부분 (`Get-Content data\server.log -Tail 30 -Encoding UTF8`). 포트를 다른 프로그램이 쓰면 `Get-NetTCPConnection -LocalPort 4810`으로 누가 쓰는지 본다 |
 | 시세가 멈춤 | `/api/health`의 `tick`이 1초마다 오르는지 본다. 안 오르면 서버를 다시 켠다 |
 | `npm install`·빌드 실패 | Node 버전(24 이상) 확인. 이 PC는 한글 사용자 경로라 Node의 `fs.rmSync`가 죽는 문제가 있다: `node_modules`를 지울 때는 탐색기나 `Remove-Item -Recurse -Force`를 쓴다 |
 | 배포 뒤 가격이 이상함 | 엔진을 바꾸고 `-NewSeason` 없이 배포했을 수 있다 → `deploy.ps1 -SkipPull -NewSeason` |
