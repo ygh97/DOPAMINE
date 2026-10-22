@@ -24,11 +24,11 @@ if (seeds.length > 1) {
     p.stdout.on("data", d => (out += d)); p.stderr.on("data", d => (out += d)); p.on("close", () => resolve(out));
   })));
   process.stdout.write(outs.join(""));
-  const totals = outs.map(o => /졸업 (\d+) · 전설 (\d+) \/ (\d+)명/.exec(o)).filter(Boolean).map(m => [Number(m![1]), Number(m![2]), Number(m![3])]);
+  const totals = outs.map(o => /졸업 (\d+) · 전설 (\d+) \/ (\d+)명 · 100배 도달 (\d+)/.exec(o)).filter(Boolean).map(m => [Number(m![1]), Number(m![2]), Number(m![3]), Number(m![4])]);
   const nums = (re: RegExp) => outs.map(o => re.exec(o)).filter(Boolean).map(m => Number(m![1]));
   const med = (a: number[]) => a.sort((x, y) => x - y)[Math.floor(a.length / 2)];
   const sum = (k: number) => totals.reduce((s, t) => s + t[k], 0), n = Math.max(1, sum(2));
-  console.log(`== 전체 ${sum(2)}명: 20배 졸업 ${sum(0)} (${((sum(0) / n) * 100).toFixed(1)}%) · 100배 전설 ${sum(1)} (${((sum(1) / n) * 100).toFixed(1)}%)`
+  console.log(`== 전체 ${sum(2)}명: 20배 졸업 ${sum(0)} (${((sum(0) / n) * 100).toFixed(1)}%) · 100배 전설(시즌 끝 유지) ${sum(1)} (${((sum(1) / n) * 100).toFixed(1)}%) · 100배 도달 ${sum(3)} (${((sum(3) / n) * 100).toFixed(1)}%)`
     + ` · 주식 중앙 ${med(nums(/주식 중앙 ([\d.]+)배/))}배 · 거품 최대 ${Math.max(...nums(/거품 주식 \+([\d.]+)%/))}% · tick 최대 ${Math.max(...nums(/tick 평균 [\d.]+ms · 최대 ([\d.]+)ms/))}ms`);
 } else {
   run(seeds[0] ?? 1);
@@ -77,7 +77,8 @@ function run(seed: number) {
   broker.endTick();
   const who = new Map(bots.describe().map(d => [broker.account(d.userId).name, d]));
   const rows = broker.ranking(Infinity), mm = [...broker.mmRanking(), ...broker.whaleRanking()];
-  const graduated = { length: everGrad.size }, cleared = { length: everLegend.size }; // 봇 자리 100개 기준 (교체된 봇 포함)
+  const graduated = { length: everGrad.size }; // 봇 자리 100개 기준 (교체된 봇 포함)
+  const cleared = rows.filter(r => r.clearedTick != null); // 전설 = 시즌 끝에 100배 이상 (100배를 유지해야 전설)
   const byStyle = new Map<string, { n: number; cleared: number; best: number }>();
   for (const r of rows) {
     const s = who.get(r.name)?.label ?? "?", e = byStyle.get(s) ?? { n: 0, cleared: 0, best: 0 };
@@ -87,7 +88,7 @@ function run(seed: number) {
   const mult = rows.map(r => r.equity / 100_000).sort((a, b) => a - b);
   const stockMult = exchange.quotes().filter(q => q.market === "stock" && start[q.sym]).map(q => q.price / start[q.sym]).sort((a, b) => a - b);
   const ventMax = Math.max(...exchange.quotes().filter(q => q.market === "venture" && start[q.sym]).map(q => q.price / (start[q.sym] * (q.splitFactor ?? 1)))); // 병합하면 가격이 ×ratio 되므로 나눠서 비교
-  console.log(`seed ${seed} (${((performance.now() - t0) / 1000).toFixed(0)}초): 졸업 ${graduated.length} · 전설 ${cleared.length} / ${rows.length}명 · 최종 중앙 ${mult[Math.floor(mult.length / 2)].toFixed(2)}배 · 1위 ${(mult.at(-1)! ).toFixed(1)}배 · 강제청산 ${liqs}회 · 승격 ${grads} · 주식 중앙 ${stockMult[Math.floor(stockMult.length / 2)].toFixed(2)}배 · 신흥주 최고 ${ventMax.toFixed(1)}배`);
+  console.log(`seed ${seed} (${((performance.now() - t0) / 1000).toFixed(0)}초): 졸업 ${graduated.length} · 전설 ${cleared.length} / ${rows.length}명 · 100배 도달 ${everLegend.size} · 최종 중앙 ${mult[Math.floor(mult.length / 2)].toFixed(2)}배 · 1위 ${(mult.at(-1)! ).toFixed(1)}배 · 강제청산 ${liqs}회 · 승격 ${grads} · 주식 중앙 ${stockMult[Math.floor(stockMult.length / 2)].toFixed(2)}배 · 신흥주 최고 ${ventMax.toFixed(1)}배`);
   console.log(`  도달 [10배 ${reached(10)} · 20배 ${reached(20)} · 30배 ${reached(30)} · 50배 ${reached(50)} · 100배 ${reached(100)}]`);
   console.log("  성향별 졸업: " + [...byStyle].map(([s, e]) => `${s} ${e.cleared}/${e.n}(최고 ${e.best.toFixed(1)}배)`).join(", "));
   console.log(`  거품 주식 +${(bubbleUp * 100).toFixed(0)}% / ${(bubbleDown * 100).toFixed(0)}% · 호가-기준가 최대 ${(offRef * 100).toFixed(1)}% · 호가 봇 손익 주식 $${(maker.stock / 1e6).toFixed(2)}M 코인 $${(maker.coin / 1e6).toFixed(2)}M 신흥주 $${(maker.venture / 1e6).toFixed(2)}M · tick 평균 ${(tickSum / (SEASON_MS / 1000)).toFixed(2)}ms · 최대 ${tickMax.toFixed(0)}ms`);

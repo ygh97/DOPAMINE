@@ -379,7 +379,7 @@ async function toggleBan(name: string, banned: boolean) {
             </tr>
           </tbody>
         </table>
-        <p v-else class="empty">S{{ hallSeason }}에는 전설이 없습니다. 시즌 중 100배(총자산 $1,000만)를 달성하면 전설로 여기에 남고 시즌 엠블럼을 받습니다.</p>
+        <p v-else class="empty">S{{ hallSeason }}에는 전설이 없습니다. 100배(총자산 $1,000만)를 시즌 끝까지 유지하면 전설로 여기에 남고 시즌 엠블럼을 받습니다. 100배 아래로 내려가면 전설이 풀립니다.</p>
       </div>
     </div>
     <div v-else class="chat-wrap" :class="{ 'is-folded': chatFolded }">

@@ -36,7 +36,7 @@ export interface Future { id: number; sym: string; side: "long" | "short"; lev: 
 export type AccountKind = "user" | "bot" | "mm" | "whale";
 export interface Account {
   userId: number; name: string; kind: AccountKind; cash: number; positions: Map<string, Position>; futures: Map<number, Future>;
-  /** clearedTick: 100배 전설 달성 tick, gradTick: 20배 졸업 달성 tick */
+  /** clearedTick: 100배 전설이 된 tick (100배 아래로 내려가면 null), gradTick: 20배 졸업 달성 tick */
   clearedTick: number | null; gradTick: number | null; resetAt: number | null;
   /** 🤖 봇 교대로 쉬는 중: 매매하지 않고 랭킹에서 숨는다 (메모리만) */
   resting?: boolean;
@@ -77,6 +77,7 @@ export class Broker {
   private makerTouched = new Set<string>(); // 지정가가 체결된 종목
   private stuck = new Set<Future>();                    // 호가가 없어 이번 tick 청산하지 못한 포지션
   private broadcasts: string[] = [];
+  private legendAnnounced = new Set<number>();           // 이번 시즌 [전설] 전광판 알림을 이미 띄운 사람
   private recent = new Map<number, { tick: number; count: number }>(); // 주문 속도 제한
   private rankCache: { tick: number; rows: RankRow[]; mm: RankRow[]; whales: RankRow[]; rankByUser: Map<string, number> } | null = null;
   /** 직전 정산의 종목별 순매수 명목 (세력 계정 주문 제외). 유동성 공급 세력이 반대편을 받는 데 쓴다 */
@@ -790,10 +791,18 @@ export class Broker {
           this.stmts.updGrad.run(tick, acc.userId, this.season.id);
           if (loud) this.broadcasts.push(`[졸업] 🎓 ${acc.name}님이 총자산 ${money(equity)} 달성으로 20배 졸업!`);
         }
+        // 전설은 100배를 유지하는 동안만: 아래로 내려가면 지워지고, 시즌 끝에 100배 이상인 사람만 명예의 전당에 남는다.
+        // 전광판 알림은 시즌에 사람마다 한 번 (기준선 근처에서 오르내릴 때 반복하지 않게)
         if (equity >= GOAL && acc.clearedTick == null) {
           acc.clearedTick = tick;
           this.stmts.updCleared.run(tick, acc.userId, this.season.id);
-          if (loud) this.broadcasts.push(`[전설] 🏆 ${acc.name}님이 총자산 ${money(equity)} 달성으로 100배 전설이 되었습니다!`);
+          if (loud && !this.legendAnnounced.has(acc.userId)) {
+            this.legendAnnounced.add(acc.userId);
+            this.broadcasts.push(`[전설] 🏆 ${acc.name}님이 총자산 ${money(equity)} 달성으로 100배 전설이 되었습니다!`);
+          }
+        } else if (equity < GOAL && acc.clearedTick != null) {
+          acc.clearedTick = null;
+          this.stmts.updCleared.run(null, acc.userId, this.season.id);
         }
       }
       return { name: acc.name, kind: acc.kind, equity, returnPct: (equity / startCash(acc.kind) - 1) * 100, clearedTick: acc.clearedTick, gradTick: acc.gradTick };
