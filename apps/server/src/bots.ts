@@ -114,8 +114,8 @@ abstract class Agent {
       for (const sym of acc.positions.keys()) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
       return;
     }
-    // 파산 기준: 🤖 봇 $1만(새 봇으로 교체), 🐋 고래 $100만(같은 이름으로 다시, 성향 새로), 🏦 세력 $50만(다시 시작)
-    const eq = c.broker.equity(acc), floor = this.kind === "whale" ? 1_000_000 : this.kind === "mm" ? 500_000 : 10_000;
+    // 파산 기준: 🤖 봇 $1만(새 봇으로 교체), 🐋 고래 $100만(같은 이름으로 다시, 성향 새로), 🏦 세력 $100만(다시 시작)
+    const eq = c.broker.equity(acc), floor = this.kind === "bot" ? 10_000 : 1_000_000;
     if (eq < floor && c.tick > this.resetCooldown) { this.bust(c); this.resetCooldown = c.tick + 60; this.lastOrder = c.tick; return; }
     if (this.lastOrder < 0) this.lastOrder = c.tick;
     this.act(c);

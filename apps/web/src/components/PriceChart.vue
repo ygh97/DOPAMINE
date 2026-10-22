@@ -49,8 +49,8 @@ export interface ChartUserConfig {
   showHighLow: boolean;
   showLastPrice: boolean;
   showPosLines: boolean;
-  /** 포지션 선 종류별: 현물 평단·선물 진입가·청산가·익절·손절·지정가(미체결) */
-  pos: { avg: boolean; entry: boolean; liq: boolean; tp: boolean; stop: boolean; orders: boolean };
+  /** 포지션 선 종류별: 현물 평단·선물 진입가·청산가·익절·손절·지정가(미체결)·내 체결 B/S */
+  pos: { avg: boolean; entry: boolean; liq: boolean; tp: boolean; stop: boolean; orders: boolean; fills: boolean };
   showGrid: boolean;
   yAxisInside: boolean;
   ma1On: boolean; ma1: number;
@@ -67,7 +67,7 @@ const cfg = reactive<ChartUserConfig>({
   showHighLow: !isMobileInit,
   showLastPrice: true,
   showPosLines: true,
-  pos: { avg: true, entry: true, liq: true, tp: true, stop: true, orders: true },
+  pos: { avg: true, entry: true, liq: true, tp: true, stop: true, orders: true, fills: true },
   showGrid: true,
   yAxisInside: isMobileInit,
   ma1On: true, ma1: 5,
@@ -231,6 +231,30 @@ function syncPosLines() {
   if (on.orders) for (const o of a.me.orders.filter(x => x.sym === shown)) {
     const what = o.kind === "fut" ? `${o.side === "buy" ? "롱" : "숏"} ${o.lev}x` : o.side === "buy" ? "매수" : "매도";
     add(o.price, `${what} 지정가 ${money(o.price)}`, cssVar(o.side === "buy" ? "--up" : "--down"), true);
+  }
+  if (on.fills) syncFillMarks(ts);
+}
+
+/** 체결 방향: 매수·롱 진입·숏 종료 = B, 매도·숏 진입·롱 종료 = S (청산·스탑·익절·정산은 방향을 몰라 뺀다) */
+const FILL_DIR: Record<string, "B" | "S"> = { buy: "B", "long-open": "B", "short-close": "B", sell: "S", "short-open": "S", "long-close": "S" };
+
+/** 최근 체결(최대 50건)을 그 체결이 들어간 봉에 B/S로 찍는다. 같은 봉·같은 방향은 하나로 묶어 평균가에 */
+function syncFillMarks(lastTs: number) {
+  const span = period.value * 60_000, barIdx = (t: number) => Math.floor((t - 1) / 60); // 1분봉 = 60 tick
+  const groups = new Map<string, { ts: number; side: "B" | "S"; qty: number; notional: number; n: number }>();
+  for (const f of a.me!.fills) {
+    const side = FILL_DIR[f.side];
+    if (f.sym !== shown || !side) continue;
+    const t1 = lastTs - Math.max(0, barIdx(m.tick) - barIdx(f.tick)) * 60_000;
+    if (t1 < base[0].timestamp) continue;
+    const ts = Math.floor(t1 / span) * span, key = `${ts}${side}`, g = groups.get(key) ?? { ts, side, qty: 0, notional: 0, n: 0 };
+    g.qty += f.qty; g.notional += f.qty * f.price; g.n++;
+    groups.set(key, g);
+  }
+  for (const g of groups.values()) {
+    const id = chart!.createOverlay({ name: "fillMark", groupId: "positions", lock: true, points: [{ timestamp: g.ts, value: g.notional / g.qty }],
+      extendData: { side: g.side, label: g.n > 1 ? `${g.side}${g.n}` : g.side, color: cssVar(g.side === "B" ? "--up" : "--down") } });
+    if (typeof id === "string") posIds.push(id);
   }
 }
 
@@ -494,6 +518,7 @@ onBeforeUnmount(() => {
             <label><input v-model="cfg.pos.tp" type="checkbox" data-pos="tp" @change="applyUserConfig"> 익절</label>
             <label><input v-model="cfg.pos.stop" type="checkbox" data-pos="stop" @change="applyUserConfig"> 손절</label>
             <label><input v-model="cfg.pos.orders" type="checkbox" data-pos="orders" @change="applyUserConfig"> 지정가(미체결)</label>
+            <label><input v-model="cfg.pos.fills" type="checkbox" data-pos="fills" @change="applyUserConfig"> 내 체결 B/S</label>
           </div>
           <label><input v-model="cfg.showGrid" type="checkbox" @change="applyUserConfig"> 배경 격자선 (Grid)</label>
           <label><input v-model="cfg.yAxisInside" type="checkbox" @change="applyUserConfig"> Y축 가격표 차트 안쪽 배치 (모바일 넓게 보기)</label>

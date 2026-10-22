@@ -126,6 +126,20 @@ export function register() {
       ];
     },
   });
+  // 내 체결 표시: 체결가에 점, 매수 B는 아래·매도 S는 위에 글자
+  registerOverlay({
+    name: "fillMark", totalStep: 2, lock: true,
+    needDefaultPointFigure: false, needDefaultXAxisFigure: false, needDefaultYAxisFigure: false,
+    createPointFigures: ({overlay, coordinates: [c]}) => {
+      if (!c) return [];
+      const d = overlay.extendData || {}, buy = d.side === "B", color = d.color || css("--accent");
+      return [
+        {type: "circle", ignoreEvent: true, attrs: {x: c.x, y: c.y, r: 3}, styles: {style: "fill", color}},
+        {type: "text", ignoreEvent: true, attrs: {x: c.x, y: buy ? c.y + 6 : c.y - 6, text: d.label || d.side, align: "center", baseline: buy ? "top" : "bottom"},
+          styles: {color: "#fff", size: 10, weight: "bold", backgroundColor: color, borderColor: color, borderRadius: 3, paddingLeft: 3, paddingRight: 3, paddingTop: 1, paddingBottom: 1}},
+      ];
+    },
+  });
 }
 
 // 아이콘: 18x18 stroke path
