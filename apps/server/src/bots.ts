@@ -274,6 +274,10 @@ export const WHALES: WhaleDef[] = [
   { name: "북극고래", kinds: ["stock"], lev: 2, pct: 60, chance: 1 / 2000, hold: [300, 900] },
   { name: "보리고래", kinds: ["venture"], lev: 3, pct: 40, chance: 1 / 1100, hold: [30, 150] },
 ];
+/** 세력이 돌아가며 쓰는 전략 (고래 제외). 세력 이름은 세력1~세력N이라 화면에서는 무슨 전략인지 모른다 */
+export const MM_STRATEGIES = (Object.keys(MM_NAMES) as MmStyle[]).filter(s => s !== "whale");
+/** 한 전략을 쓰는 시간 (tick): 20~40분. 갈아탈 때 지정가를 취소하고 포지션을 정리한다 */
+const MM_PERIOD: [number, number] = [1200, 2400];
 /** 회전매매 세력이 도는 시장 */
 const DESK: Partial<Record<MmStyle, string[]>> = { rotation: ["stock"], coinDesk: ["coin"], ventureDesk: ["venture"] };
 /** 유동성 세력이 지정가를 거는 거리 (현재가 대비) */
@@ -283,21 +287,49 @@ export interface MmTuning { strength: Partial<Record<MmStyle, number>> }
 const FAIR_PER = new Map(ASSETS.filter(a => a.fairPER).map(a => [a.sym, a.fairPER!]));
 const PAIRS: [string, string][] = [["BTC", "ETH"], ["NVDA", "AMD"], ["AAPL", "MSFT"], ["GOOGL", "META"], ["JPM", "V"], ["SOL", "XRP"]];
 
+/**
+ * 🏦 세력: 전략 목록(cycle)을 계좌 난수로 섞어 두고 20~40분마다 다음 전략으로 갈아탄다 (한 번에 하나: 같은 계좌에서 전략끼리 포지션이 엉키지 않게).
+ * 갈아타는 시각은 세력마다 달라 정리 매물이 한꺼번에 몰리지 않는다. 🐋 고래는 전략 하나(whale)만 쓴다
+ */
 class MarketMaker extends Agent {
-  private style: MmStyle; private k: number;
+  private cycle: MmStyle[]; private at = 0; private nextSwitch: number;
+  private strength: Partial<Record<MmStyle, number>>;
   private ventures = new Set<string>();
   private activity = new Map<string, number>(); // 종목별 최근 사람·봇 거래 금액 (감쇠 합)
   private posAt = new Map<number, number>();    // 선물 포지션이 처음 보인 tick
   private whale: WhaleDef | null;
-  constructor(userId: number, name: string, seed: number, style: MmStyle, strength = 1, kind: AccountKind = "mm", whale: WhaleDef | null = null) {
-    super(userId, name, kind, seed); this.style = style; this.k = strength; this.whale = whale;
+  constructor(userId: number, name: string, seed: number, styles: MmStyle[], strength: Partial<Record<MmStyle, number>> = {}, kind: AccountKind = "mm", whale: WhaleDef | null = null) {
+    super(userId, name, kind, seed); this.strength = strength; this.whale = whale;
+    const r = this.rand, cycle = [...styles];
+    for (let i = cycle.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [cycle[i], cycle[j]] = [cycle[j], cycle[i]]; }
+    this.cycle = cycle;
+    this.nextSwitch = Math.round(uni(r, 0, MM_PERIOD[1])); // 첫 교대 시각도 세력마다 다르게
   }
-  get label() { return this.whale ? this.whale.name : this.style; }
+  /** 지금 쓰는 전략 */
+  private get style(): MmStyle { return this.cycle[this.at]; }
+  private get k() { return this.strength[this.style] ?? 1; }
+  get label() { return this.whale ? this.whale.name : `${this.name}(${this.style})`; }
+  /** 전략을 바꾸기 전에 지정가를 취소하고 포지션을 시장가로 정리한다. 다 비었으면 true */
+  private flatten(c: Ctx): boolean {
+    const acc = c.broker.account(this.userId);
+    if (c.broker.ordersOf(this.userId).length) { this.cancelAll(c); return false; }
+    if (!acc.futures.size && !acc.positions.size) return true;
+    for (const f of acc.futures.values()) if (!f.closing) { try { c.broker.closeFuture(this.userId, f.id, 100).catch(() => {}); } catch { /* 다음 tick */ } }
+    for (const sym of [...acc.positions.keys()]) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
+    return false;
+  }
   /** 명목 금액 → 예수금 대비 비중(%) */
   private pctFor(c: Ctx, notional: number, lev: number) { const cash = c.broker.account(this.userId).cash; return cash > 0 ? (notional / (lev * cash)) * 100 * this.k : 0; }
 
   act(c: Ctx) {
     const r = this.rand;
+    if (this.cycle.length > 1 && c.tick >= this.nextSwitch) { // 전략 교대: 정리가 끝나면 다음 전략
+      if (!this.flatten(c)) return;
+      this.at = (this.at + 1) % this.cycle.length;
+      this.nextSwitch = c.tick + Math.round(uni(r, ...MM_PERIOD));
+      this.meta.clear(); this.posAt.clear(); this.activity.clear(); this.ventures.clear();
+      return;
+    }
     switch (this.style) {
       case "liquidity": { // 사람·봇이 많이 거래하는 종목 위·아래에 선물 지정가를 두껍게 건다 (A10). 체결되면 120틱 안에 정리
         for (const [sym, v] of this.activity) this.activity.set(sym, v * 0.98);
@@ -535,14 +567,20 @@ export class BotRunner {
       if (id != null) { const b = new Bot(id, `봇${i + 1}`, opts.seed, style); this.agents.push(b); this.bots.push(b); }
     }
     if (opts.marketMakers) {
-      for (const style of Object.keys(MM_NAMES) as MmStyle[]) {
-        if (style === "whale") continue;
-        const id = ensure(MM_NAMES[style], "mm");
-        if (id != null) this.agents.push(new MarketMaker(id, MM_NAMES[style], opts.seed, style, opts.tuning?.strength[style] ?? 1, "mm"));
-      }
+      // 🏦 세력1~세력N: 전략마다 하나씩이던 예전 계정(유동성세력 등)은 이름만 바꿔 이어 쓴다
+      MM_STRATEGIES.forEach((style, i) => {
+        const name = `세력${i + 1}`;
+        const old = db.prepare("SELECT id FROM users WHERE name = ? AND kind = 'mm'").get(MM_NAMES[style]) as { id: number } | undefined;
+        if (old && !db.prepare("SELECT 1 FROM users WHERE name = ?").get(name)) {
+          db.prepare("UPDATE users SET name = ? WHERE id = ?").run(name, old.id);
+          getBroker().setName(old.id, name);
+        }
+        const id = ensure(name, "mm");
+        if (id != null) this.agents.push(new MarketMaker(id, name, opts.seed, MM_STRATEGIES, opts.tuning?.strength, "mm"));
+      });
       for (const w of WHALES) { // 🐋 고래는 세력이 아니라 거래자 (별도 탭)
         const id = ensure(w.name, "whale");
-        if (id != null) this.agents.push(new MarketMaker(id, w.name, opts.seed, "whale", opts.tuning?.strength.whale ?? 1, "whale", w));
+        if (id != null) this.agents.push(new MarketMaker(id, w.name, opts.seed, ["whale"], opts.tuning?.strength, "whale", w));
       }
     }
   }

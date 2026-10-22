@@ -23,9 +23,11 @@ function startNode(name, args, cwd, env = {}) {
   procs.push(p);
   return p;
 }
-// 테스트마다 새 DB를 쓴다 (기존 계좌·시즌과 섞이지 않게)
+// 테스트마다 새 DB를 쓴다 (기존 계좌·시즌과 섞이지 않게). pid가 예전 실행과 겹칠 수 있어 남은 파일을 먼저 지운다 (rmSync는 한글 경로에서 죽어 unlinkSync)
+const E2E_DB = path.join(require("node:os").tmpdir(), `dc-e2e-${process.pid}.db`);
+for (const f of [E2E_DB, `${E2E_DB}-wal`, `${E2E_DB}-shm`]) { try { fs.unlinkSync(f); } catch { /* 없음 */ } }
 const startServer = (env = {}) => startNode("server", ["--disable-warning=ExperimentalWarning", "src/index.ts"], path.join(ROOT, "apps/server"),
-  { PORT: String(API_PORT), DB_FILE: path.join(require("node:os").tmpdir(), `dc-e2e-${process.pid}.db`), ...env });
+  { PORT: String(API_PORT), DB_FILE: E2E_DB, ...env });
 const startWeb = () => startNode("web", [VITE, "--strictPort", "--port", String(WEB_PORT)], path.join(ROOT, "apps/web"), { API_ORIGIN: API });
 
 async function waitFor(url, ms = 30000) {

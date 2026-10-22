@@ -802,6 +802,11 @@ export class Broker {
     return this.ensureRankCache().whales;
   }
   /** 계정 종류가 바뀌었을 때 (예: 세력이던 고래 → 고래). 이미 메모리에 올라간 계좌도 맞춘다 */
+  /** 계정 이름이 바뀌었을 때 (예: 예전 세력 이름 → 세력1). 이미 메모리에 올라간 계좌도 맞춘다 */
+  setName(userId: number, name: string) {
+    if (this.accounts.has(userId)) this.account(userId).name = name;
+    this.rankCache = null;
+  }
   setKind(userId: number, kind: AccountKind) {
     this.account(userId).kind = kind;
     this.rankCache = null;

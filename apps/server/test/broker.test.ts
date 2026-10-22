@@ -602,3 +602,20 @@ test("이미 불러온 계좌의 종류가 바뀌어도 랭킹에 맞게 나온�
   assert.ok(s.broker.whaleRanking().some(r => r.name === "고래"), "고래 탭");
   assert.ok(!s.broker.mmRanking().some(r => r.name === "고래"), "세력 현황에는 없음");
 });
+
+test("🏦 세력은 세력1~세력N 이름으로 나오고, 예전 전략 이름 계정은 이름만 바뀌어 이어진다. 세력은 20~40분마다 전략을 바꾼다", () => {
+  const s = setup();
+  s.db.prepare("INSERT INTO users (name, pass, created_at, kind) VALUES ('유동성세력', '-', 0, 'mm')").run();
+  const oldId = (s.db.prepare("SELECT id FROM users WHERE name = '유동성세력'").get() as { id: number }).id;
+  s.broker.account(oldId);
+  const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 0, marketMakers: true, seed: 2 });
+  bots.tick(s.tick().news); // 첫 tick에 계좌가 올라온다
+  const mm = s.broker.mmRanking();
+  assert.equal(mm.length, 20);
+  assert.ok(mm.every(r => /^세력\d+$/.test(r.name)), "이름에 전략이 드러나지 않음");
+  assert.ok(mm.some(r => r.name === "세력1") && (s.db.prepare("SELECT name FROM users WHERE id = ?").get(oldId) as { name: string }).name === "세력1", "예전 계정이 세력1로");
+  const before = bots.describe().filter(d => d.kind === "mm").map(d => d.label);
+  for (let i = 0; i < 2500; i++) { const r = s.tick(); bots.tick(r.news); }
+  const after = bots.describe().filter(d => d.kind === "mm").map(d => d.label);
+  assert.ok(after.some((l, i) => l !== before[i]), "전략 교대");
+});
