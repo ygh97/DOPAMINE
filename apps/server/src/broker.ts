@@ -23,6 +23,8 @@ const MAX_CASCADE = 50;          // 한 번에 이어서 처리하는 강제 청
 const HOLD_SHARE = 0.2;
 const ORDERS_PER_TICK = 2;      // tick(1초)당 계정별 주문 수
 const LIQ_LOSS = 0.9;           // 증거금 손실 90%에서 강제 청산
+const RESET_LOCK_TICKS = 600;   // 다시 시작한 뒤 10분간 10배 레버리지 금지 (2026-10-24 하루 없앴다가 되돌림, 기준은 5배 초과 → 10배)
+const RESET_LOCKED_LEV = 10;
 const PEAK_MS = 14_280_000;     // 마감 3시간 58분 전(20:00)부터 체결하면 그날 LP 감점 절반
 const LATE_RESET_MS = 3_480_000; // 마감 58분 전(23:00)부터 다시 시작하면 그날은 손실 마감으로 정산
 export const CROWD_TICKS = 120;  // 단합 감지 구간: 최근 2분
@@ -331,10 +333,13 @@ export class Broker {
   private checkPct(pct: number) {
     if (!Number.isFinite(pct) || pct <= 0 || pct > 100) throw new OrderError("비중은 0~100% 사이여야 합니다.");
   }
-  private checkLev(sym: string, lev: number) {
+  private checkLev(userId: number, sym: string, lev: number) {
     const q = this.x.quote(sym);
     if (!q) throw new OrderError("거래할 수 없는 종목입니다.");
     if (!LEVERAGE[q.market].includes(lev)) throw new OrderError(`이 종목의 레버리지는 ${LEVERAGE[q.market].join("·")}배만 됩니다.`);
+    const acc = this.account(userId);
+    if (lev >= RESET_LOCKED_LEV && acc.resetAt != null && this.market.tick - acc.resetAt < RESET_LOCK_TICKS)
+      throw new OrderError(`다시 시작한 뒤 10분 동안은 ${RESET_LOCKED_LEV}배 레버리지를 쓸 수 없습니다.`);
   }
   /** 한 번의 주문을 트랜잭션으로 묶는다. DB가 실패하면 메모리 계좌를 버리고 다시 읽는다 */
   private atomic<T>(userIds: number[], fn: () => T): T {
@@ -448,7 +453,7 @@ export class Broker {
   private openNow(userId: number, sym: string, side: string, lev: number, pct: number, qty?: number): Fill {
     if (side !== "long" && side !== "short") throw new OrderError("롱 또는 숏만 할 수 있습니다.");
     this.checkAmount(pct, qty);
-    this.checkLev(sym, lev);
+    this.checkLev(userId, sym, lev);
     const acc = this.admit(userId, sym), xs: Side = side === "long" ? "buy" : "sell";
     const fill = this.atomic([userId], () => {
       const unit = step(this.x.quote(sym)!.market), all = acc.cash / (1 + lev * FEE);
@@ -571,7 +576,7 @@ export class Broker {
     if (side !== "buy" && side !== "sell") throw new OrderError("매수 또는 매도만 할 수 있습니다.");
     if (!Number.isFinite(req.price) || req.price <= 0) throw new OrderError("가격이 올바르지 않습니다.");
     this.checkAmount(pct, req.qty);
-    if (kind === "fut") this.checkLev(sym, req.lev ?? 0);
+    if (kind === "fut") this.checkLev(userId, sym, req.lev ?? 0);
     const acc = this.admit(userId, sym), q = this.x.quote(sym)!, unit = step(q.market);
     if (this.ordersOf(userId).length >= MAX_OPEN_ORDERS) throw new OrderError(`미체결 주문은 최대 ${MAX_OPEN_ORDERS}개입니다.`);
     const tickSz = this.x.tickOf(sym), price = Math.max(tickSz, Math.round(req.price / tickSz) * tickSz);

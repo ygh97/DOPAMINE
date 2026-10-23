@@ -21,6 +21,6 @@ const title = computed(() => [`${tier.value.name} · ${props.lp.toLocaleString()
       <img :src="ant" alt="" class="rb-ant" />
       <img v-if="ring" :src="ring" alt="" class="rb-frame" />
     </span>
-    <span v-if="label" class="rb-label" :style="{ color: tier.color }">{{ tier.name }}</span>
+    <span v-if="label" class="rb-label" :style="tier.nameColor ? { color: tier.color } : undefined">{{ tier.name }}<slot /></span>
   </span>
 </template>

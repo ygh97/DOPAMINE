@@ -9,10 +9,12 @@ import OrderBook from "./components/OrderBook.vue";
 import OrderPanel from "./components/OrderPanel.vue";
 import PriceChart from "./components/PriceChart.vue";
 import QuoteHeader from "./components/QuoteHeader.vue";
+import RankBadge from "./components/RankBadge.vue";
 import SocialPanel from "./components/SocialPanel.vue";
 import ToastMessage from "./components/ToastMessage.vue";
 import TopBar from "./components/TopBar.vue";
 import Watchlist from "./components/Watchlist.vue";
+import { ANT_TIERS } from "@dopamine/engine";
 import { money, pct } from "./format";
 import { useAccount } from "./stores/account";
 import { useMarket } from "./stores/market";
@@ -160,7 +162,9 @@ onMounted(() => {
   <!-- 타인 포트폴리오 훔쳐보기 & 반대 포지션 저격 모달 -->
   <dialog id="spyDlg" ref="spyDlg" aria-label="트레이더 포트폴리오 스캔" @click="onSpyBackdrop">
     <div class="dlg-head">
-      <h2>🎯 트레이더 포지션 스캔 <span v-if="spyData" class="spy-name">@{{ spyData.name }}</span></h2>
+      <h2>🎯 트레이더 포지션 스캔 <span v-if="spyData" class="spy-name">@{{ spyData.name }}</span>
+        <RankBadge v-if="spyData && m.badges[spyData.name]?.lp != null" :lp="m.badges[spyData.name]!.lp!" :frame="m.frameFor(spyData.name)" :size="44" label />
+      </h2>
       <div class="dlg-head-actions">
         <button v-if="spyData && a.me && spyData.name.toLowerCase() !== a.me.name.toLowerCase()" type="button" class="dlg-act-btn" data-act="spy-whisper" @click="whisperFromSpy(spyData.name)">💬 귓속말</button>
         <button v-if="m.spyTarget" type="button" class="dlg-act-btn" @click="fetchSpy(m.spyTarget!)">🔄 새로고침</button>
@@ -309,7 +313,7 @@ onMounted(() => {
       </div>
       <div class="guide-card">
         <h3>1. 목표와 시즌</h3>
-        <p><b>$100,000</b>으로 시작해 50배($500만)면 <b>졸업</b>, 100배($1,000만)면 <b>전설</b>. 전설은 100배를 <b>지키는 동안만</b>이고, 시즌이 끝날 때 100배 이상이어야 <b>명예의 전당</b>에 오릅니다. 시즌은 <b>매일 00:00~23:58</b>(게임 속 1년)이고, 2분 쉰 뒤 모두 $100,000로 새로 시작합니다. 시즌 최종 1~3등은 <b>TOP 3 메달</b>, 전설은 <b>시즌 엠블럼</b>이 이름 옆에 영구로 붙습니다. 다 잃으면 상단 <b>[다시 시작]</b> (직후 10분은 5배까지만).</p>
+        <p><b>$100,000</b>으로 시작해 50배($500만)면 <b>졸업</b>, 100배($1,000만)면 <b>전설</b>. 전설은 100배를 <b>지키는 동안만</b>이고, 시즌이 끝날 때 100배 이상이어야 <b>명예의 전당</b>에 오릅니다. 시즌은 <b>매일 00:00~23:58</b>(게임 속 1년)이고, 2분 쉰 뒤 모두 $100,000로 새로 시작합니다. 시즌 최종 1~3등은 <b>TOP 3 메달</b>, 전설은 <b>시즌 엠블럼</b>이 이름 옆에 영구로 붙습니다. 다 잃으면 상단 <b>[다시 시작]</b> (직후 10분은 10배 금지, 5배까지는 바로 가능).</p>
       </div>
       <div class="guide-card">
         <h3>2. 종목: 주식 · 코인 · 신흥주</h3>
@@ -342,6 +346,30 @@ onMounted(() => {
       <div class="guide-card">
         <h3>9. 채팅 · 단축키 · 팁</h3>
         <p><code>/w 닉네임 내용</code>은 귓속말(오면 알림음), <code>/r 내용</code>은 마지막으로 나에게 귓속말한 사람에게 답장. 채팅의 청산·졸업 알림은 기본으로 꺼져 있고 <b>🔔 알림</b>으로 켭니다. 보유 종목의 <b>[자랑]</b>은 서버가 실제 계좌로 만든 수익 인증입니다. 단축키: <b>B</b> 매수/롱, <b>S</b> 매도/숏, <b>1~4</b> 비중 10~100%. 보고 있는 종목을 다시 누르면 차트가 최신 봉으로 갑니다. 서버가 잠깐 꺼져 있던 동안은 시세도 멈춰 있습니다.</p>
+      </div>
+      <div id="guideLp" class="guide-card">
+        <h3>10. 개미 계급 · LP</h3>
+        <p>시즌이 바뀌어도 남는 <b>LP</b>로 개미 계급이 정해집니다. 모두 0 LP(알개미)에서 시작하고, 매일 <b>23:58 마감</b> 때 <b>사람끼리의 순위</b>(🤖 봇·세력·고래 제외)로 LP가 오르내립니다.</p>
+        <ul class="guide-list">
+          <li><b>원금($100,000)보다 많이</b> 남기고 마감하면: 1위 <b>+120</b> · 2위 +95 · 3위 +75 · 4~10위 +50 · 11~30위 +25 · 31~50위 +10. 100배 전설로 마감하면 <b>+40</b> 더.</li>
+          <li><b>손실이거나 51위 밖</b>이면 계급별로 깎입니다(아래 표). 단 그날 <b>20:00 이후에 거래</b>했으면 절반만.</li>
+          <li>그날 거래대금이 첫 거래 때 자산의 <b>10% 미만</b>이면 쉰 날로 봐서 깎지 않습니다. 독침개미부터는 오래 쉬면 <b>휴면 감점</b>.</li>
+          <li><b>23:00 이후에 [다시 시작]</b>하면 그날은 손실 마감으로 칩니다.</li>
+          <li>애벌레개미(50)·아기개미(120)를 한 번 넘으면 그 아래로는 떨어지지 않습니다.</li>
+          <li>실시간 순위 50위 안(원금 초과)이면 배지에 테두리: 1·2·3위 왕관, 4~10위 금테, 11~30위 은테, 31~50위 동테.</li>
+        </ul>
+        <table class="guide-tiers">
+          <thead><tr><th>계급</th><th>LP</th><th>손실·51위 밖</th><th>휴면</th><th>혜택</th></tr></thead>
+          <tbody>
+            <tr v-for="t in ANT_TIERS" :key="t.id">
+              <td><RankBadge :lp="t.minLp" :size="26" label /></td>
+              <td>{{ t.minLp.toLocaleString() }}</td>
+              <td>{{ t.deduction || "없음" }}</td>
+              <td>{{ t.idleDays ? `${t.idleDays}일 쉬면 하루 ${t.idlePenalty}` : "" }}</td>
+              <td>{{ [t.minLp === 50 || t.minLp === 120 ? `보호선 ${t.minLp}` : "", t.nameColor ? "닉네임 색" : "", t.bubble === "border" ? "말풍선 테두리" : t.bubble === "fill" ? "말풍선 배경" : "", t.entryBanner ? "입장 전광판" : ""].filter(Boolean).join(" · ") }}</td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
   </dialog>

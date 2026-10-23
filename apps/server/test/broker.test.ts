@@ -428,7 +428,7 @@ test("같은 종목·방향·배율 선물은 하나로 합친다 (물타기): �
   assert.equal((s.db.prepare("SELECT COUNT(*) AS c FROM futures WHERE user_id = ?").get(u) as { c: number }).c, 3, "DB에서도 합침");
 });
 
-test("선물 레버리지 한도, 다시 시작한 직후에도 최대 배율 가능 (2026-10-24 리셋 제한 삭제)", async () => {
+test("선물 레버리지 한도 및 다시 시작 후 10분간 10배 금지 (5배는 가능)", async () => {
   const s = setup();
   const u = s.user("lev_tester");
   assert.throws(() => s.broker.openFuture(u, "BTC", "long", 20, 10), OrderError, "코인은 최대 10배");
@@ -436,8 +436,11 @@ test("선물 레버리지 한도, 다시 시작한 직후에도 최대 배율 �
   await openFut(s, u, "NVDA", "short", 10, 10);
   s.broker.reset(u);
   assert.equal(s.broker.me(u).futures.length, 0);
+  assert.throws(() => s.broker.openFuture(u, "NVDA", "long", 10, 10), OrderError, "리셋 직후 10배 금지");
+  await openFut(s, u, "NVDA", "long", 5, 10);
+  for (let i = 0; i < 600; i++) s.tick();
   await openFut(s, u, "NVDA", "long", 10, 10);
-  assert.ok(s.broker.me(u).futures.some(f => f.lev === 10), "리셋 직후 10배 가능");
+  assert.ok(s.broker.me(u).futures.some(f => f.lev === 10), "10분 뒤에는 10배 가능"); // 앞의 5배 롱은 그사이 악재로 청산될 수도 있다
 });
 
 test("강제 청산: 증거금 90% 손실 가격이 되면 바로 시장가 강제 청산", async () => {

@@ -4,6 +4,8 @@ import { dateText, money, pct } from "../format";
 import { useAccount } from "../stores/account";
 import { useMarket } from "../stores/market";
 import { useUi } from "../stores/ui";
+import RankBadge from "./RankBadge.vue";
+import UpdatesButton from "./UpdatesButton.vue";
 
 const m = useMarket();
 const a = useAccount();
@@ -18,6 +20,12 @@ function openGuide() {
   m.guideOpen = true;
   guideSeen.value = true;
   try { localStorage.setItem("dc-guide-seen", "1"); } catch { /* 저장 못 해도 이번엔 열린다 */ }
+}
+/** 내 개미 계급 프로필을 누르면 뉴비 가이드의 LP 설명으로 */
+const myLp = computed(() => (a.me ? m.badges[a.me.name]?.lp ?? 0 : 0));
+function openLpGuide() {
+  openGuide();
+  setTimeout(() => document.getElementById("guideLp")?.scrollIntoView({ block: "start" }), 50);
 }
 const ret = computed(() => (a.equity / START - 1) * 100);
 // 시즌 남은 시간 (tick마다 다시 계산)
@@ -49,10 +57,16 @@ function restart() {
     <div class="clock" :title="left">S{{ m.season?.id ?? 1 }} · <b>{{ dateText(m.date) }}</b> <small id="seasonLeft" class="muted">{{ left }}</small></div>
     <span class="conn" :class="{ on: m.connected }" :title="m.connected ? `지금 ${m.viewers}명이 보고 있습니다 (손님 포함, 탭마다 1명, 5분 동안 조작이 없으면 빠짐)` : undefined">{{ m.connected ? "실시간" : "재연결 중" }}<b v-if="m.connected && m.viewers" id="viewerCount" class="viewers"> · {{ m.viewers }}명 보는 중</b></span>
     <button id="guideBtn" type="button" class="icon-btn guide-top-btn" :class="{ fresh: !guideSeen }" @click="openGuide">📘 뉴비 가이드</button>
+    <UpdatesButton />
 
     <div v-if="a.me" id="topUserNick" class="top-center-nick">
-      <span class="nick-label">트레이더</span>
-      <b class="nick-name">{{ a.me.name }}</b>
+      <button type="button" class="nick-tier" title="개미 계급 · LP 가이드" @click="openLpGuide">
+        <RankBadge :lp="myLp" :frame="m.frameFor(a.me.name)" :size="34" />
+        <span class="nick-stack">
+          <b class="nick-name" :style="m.tierFor(a.me.name)?.nameColor ? { color: m.tierFor(a.me.name)!.color } : undefined">{{ a.me.name }}</b>
+          <small class="nick-lp"><span class="nick-tier-name">{{ m.tierFor(a.me.name)?.name ?? "알개미" }} · </span>{{ myLp.toLocaleString() }} LP</small>
+        </span>
+      </button>
       <span class="nick-rank">{{ a.me.rank ? `#${a.me.rank}위` : "순위 집계중" }}</span>
     </div>
 
