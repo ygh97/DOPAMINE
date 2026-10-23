@@ -1110,7 +1110,18 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 
 /* 랭킹·세력·고래·전당·애널리스트: 탭은 한 줄(넘치면 가로 스크롤), 이름은 왼쪽, 숫자는 오른쪽 */
 .social-head { gap: 6px; }
-.social-tabs { flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+/* 탭 묶음은 글자만큼만 (회색 바탕이 오른쪽 끝까지 늘어나지 않게), 좁으면 줄어들며 가로 스크롤.
+   채팅 탭의 알림·관리 버튼은 오른쪽 끝에 붙는다 */
+.social-tabs { flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.social-head > .mini-btn { flex: none; white-space: nowrap; }
+.social-head > .mini-btn:first-of-type { margin-left: auto; }
+@media (max-width: 760px) {
+  /* 폰: 탭을 조금 좁히고, 알림 버튼은 아이콘만, 운영자 관리는 PC에서 */
+  .social-tabs button { padding: 4px 5px; font-size: 12px; }
+  .social-head { padding: 8px 6px; gap: 4px; }
+  .social-head > .mini-btn { padding: 3px 5px; margin-left: 0; }
+  .social-head > .mini-btn .btn-label, .social-head > [data-act="admin-toggle"] { display: none; }
+}
 .social-tabs::-webkit-scrollbar { display: none; }
 .social-tabs button { flex: none; white-space: nowrap; padding: 4px 9px; }
 .rank-table td { padding: 6px 8px; font-variant-numeric: tabular-nums; white-space: nowrap; }
