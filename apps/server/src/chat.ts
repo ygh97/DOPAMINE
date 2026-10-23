@@ -14,11 +14,13 @@ export function checkWords(text: string) {
 
 export class ChatError extends Error {}
 
-export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean }
+/** loud: 전광판 알림을 화면 위 LIVE 바에 띄울지 (사람의 청산·졸업·전설, 봇·세력·고래는 증거금 $20만 이상 청산만) */
+export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean; loud?: boolean }
 
 // 시스템·서버가 만드는 표시. 일반 채팅으로는 이 말머리로 시작할 수 없다 (사칭 방지)
 const RESERVED = ["[티배깅]", "[강제청산]", "[졸업]", "[전설]", "[100배졸업]", "[공유]"];
 const LIQ_RE = /^\[강제청산\] 💥 (\S+)님 \$(\S+) /;
+const LOUD_BOT_MARGIN = 200_000; // 봇·세력·고래 청산은 이 증거금 이상만 LIVE 바에 띄운다 (봇 청산이 시간당 수백 건이라)
 export interface ChatAdminMsg extends ChatMsg { reports: number; hidden: boolean }
 
 export class Chat {
@@ -33,6 +35,7 @@ export class Chat {
       ensureSys: db.prepare("INSERT OR IGNORE INTO users (id, name, pass, created_at) VALUES (0, '⚡전광판', '-', 0)"),
       insMsg: db.prepare("INSERT INTO chat_messages (user_id, name, text, at, to_name) VALUES (?, ?, ?, ?, ?)"),
       selUser: db.prepare("SELECT name, banned FROM users WHERE id = ?"),
+      selKind: db.prepare("SELECT kind FROM users WHERE name = ? COLLATE NOCASE"),
       selTarget: db.prepare("SELECT name FROM users WHERE name = ? COLLATE NOCASE"),
       // /r: 나에게 마지막으로 귓속말을 보낸 사람
       selLastWhisperer: db.prepare("SELECT name FROM chat_messages WHERE to_name = ? COLLATE NOCASE AND user_id != 0 ORDER BY id DESC LIMIT 1"),
@@ -58,7 +61,17 @@ export class Chat {
     this.stmts.ensureSys.run();
     const id = Number(this.stmts.insMsg.run(0, "⚡전광판", text, now, null).lastInsertRowid);
     this.recentCache = null;
-    return { id, name: "⚡전광판", text, at: now, to: null };
+    return { id, name: "⚡전광판", text, at: now, to: null, loud: this.loud(text) };
+  }
+
+  /** 전광판 알림을 LIVE 바에 띄울지: 졸업·전설(사람만 방송된다)은 항상, 강제청산은 사람이거나 증거금이 크면 */
+  private loud(text: string) {
+    const m = LIQ_RE.exec(text);
+    if (!m) return true;
+    const kind = (this.stmts.selKind.get(m[1]) as { kind: string } | undefined)?.kind ?? "user";
+    if (kind === "user") return true;
+    const margin = Number(/증거금 \$([\d,]+)/.exec(text)?.[1].replace(/,/g, "") ?? 0);
+    return margin >= LOUD_BOT_MARGIN;
   }
 
   /** trusted = 서버가 만든 문구(공유·티배깅). 말머리 사칭 검사를 건너뛴다 */
@@ -105,7 +118,7 @@ export class Chat {
   recent(limit = 50, viewerName?: string | null): ChatMsg[] {
     if (!this.recentCache) {
       const rows = this.stmts.selRecent.all(120) as unknown as (Omit<ChatMsg, "reacted"> & { reacted: number })[];
-      this.recentCache = rows.reverse().map(r => ({ ...r, reacted: Boolean(r.reacted) }));
+      this.recentCache = rows.reverse().map(r => ({ ...r, reacted: Boolean(r.reacted), ...(r.name === "⚡전광판" ? { loud: this.loud(r.text) } : {}) }));
     }
     if (!viewerName) return this.recentCache.slice(-limit);
     const whispers = this.stmts.selWhispers.all(viewerName, limit) as unknown as ChatMsg[];

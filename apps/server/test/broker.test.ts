@@ -738,3 +738,16 @@ test("🏦 세력은 세력1~세력N 이름으로 나오고, 예전 전략 이�
   const after = bots.describe().filter(d => d.kind === "mm").map(d => d.label);
   assert.ok(after.some((l, i) => l !== before[i]), "전략 교대");
 });
+
+test("전광판 loud: 사람 청산·졸업은 LIVE 바에, 봇 청산은 증거금 $20만 이상만", () => {
+  const s = setup(), chat = new Chat(s.db);
+  s.user("개미1");
+  const bot = s.user("레버봇01");
+  s.db.prepare("UPDATE users SET kind = 'bot' WHERE id = ?").run(bot);
+  const liq = (name: string, margin: number) => chat.system(`[강제청산] 💥 ${name}님 $NVDA 10x 롱 (증거금 $${margin.toLocaleString()}) 강제청산!`).loud;
+  assert.equal(liq("개미1", 1_000), true);
+  assert.equal(liq("레버봇01", 199_999), false);
+  assert.equal(liq("레버봇01", 250_000), true);
+  assert.equal(chat.system("[졸업] 🎓 개미1님이 총자산 $2,000,000 달성으로 20배 졸업!").loud, true);
+  assert.deepEqual(chat.recent(10).filter(m => m.name === "⚡전광판").map(m => m.loud), [true, false, true, true]);
+});

@@ -10,7 +10,7 @@ export type AccountKind = "user" | "bot" | "mm" | "whale";
 /** gradTick: 20배 졸업, clearedTick: 100배 전설 */
 export interface RankRow { rank: number; name: string; kind?: AccountKind; equity: number; returnPct: number; clearedTick: number | null; gradTick?: number | null }
 /** reacted: 강제청산 알림에 누군가 이미 티배깅·묵념을 했다 (버튼을 숨긴다) */
-export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean }
+export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean; loud?: boolean }
 export const kindBadge = (k?: AccountKind) => (k === "bot" ? "🤖" : k === "mm" ? "🏦" : k === "whale" ? "🐋" : "");
 export interface OrderPreset { mode: "spot" | "fut"; side: "buy" | "sell"; lev?: number; seq: number }
 /** 서버가 보내는 압축 봉: [timestamp, open, high, low, close, volume] */
@@ -67,10 +67,26 @@ export const useMarket = defineStore("market", () => {
     }
     if (msg.name !== "⚡전광판" || msg.id <= lastBannerId || msg.reacted) return;
     lastBannerId = msg.id;
+    const myName = (() => { try { return localStorage.getItem("dc-name") ?? ""; } catch { return ""; } })();
+    if (!msg.loud && !(myName && msg.text.includes(` ${myName}님`))) return; // 작은 봇 청산은 채팅에만
     const kind: "clear" | "liq" = msg.text.startsWith("[강제청산]") ? "liq" : "clear"; // 졸업·전설(예전 100배졸업 포함)
     const text = msg.text.replace(/^\[(졸업|전설|100배졸업|강제청산)\]\s*/, "");
-    banner.value = { id: msg.id, text, kind };
-    setTimeout(() => { if (banner.value?.id === msg.id) banner.value = null; }, 6000);
+    bannerQueue.push({ id: msg.id, text, kind });
+    if (bannerQueue.length > 3) bannerQueue.shift(); // 밀리면 오래된 것부터 버린다
+    if (!bannerBusy) showNextBanner();
+  }
+  // 전광판은 LIVE 바 자리에 6초 뜨고, 다음 알림 전에 뉴스가 최소 4초는 보이게 쉰다
+  const bannerQueue: { id: number; text: string; kind: "clear" | "liq" }[] = [];
+  let bannerBusy = false;
+  function showNextBanner() {
+    const next = bannerQueue.shift();
+    if (!next) { bannerBusy = false; return; }
+    bannerBusy = true;
+    banner.value = next;
+    setTimeout(() => {
+      if (banner.value?.id === next.id) banner.value = null;
+      setTimeout(showNextBanner, 4000);
+    }, 6000);
   }
 
   const tab = ref<MarketKind>("stock");

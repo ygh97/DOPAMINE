@@ -100,11 +100,6 @@ function snipePosition(sym: string, mode: "spot" | "fut", side: "buy" | "sell", 
   if (mView.value !== "all") mView.value = "trade";
 }
 
-// 강제청산 알림 1건당 처음 누른 한 명만 성공한다. 문구는 서버가 만든다
-async function sendBannerTeabag(liqId: number, type: "teabag" | "rip") {
-  if (!a.me) { a.notify("참가해야 반응할 수 있습니다.", "error"); return; }
-  await a.react(liqId, type);
-}
 
 /** 포지션 스캔 창에서 그 사람에게 귓속말: 창을 닫고 채팅을 귓속말 모드로 연다 */
 function whisperFromSpy(name: string) {
@@ -128,14 +123,6 @@ onMounted(() => {
 
 <template>
   <TopBar />
-  <div v-if="m.banner" id="megaphoneBanner" class="megaphone" :class="m.banner.kind" @click="m.banner = null">
-    <b>⚡ 실시간 전광판</b>
-    <span>{{ m.banner.text }}</span>
-    <span v-if="m.banner.kind === 'liq'" class="banner-actions" @click.stop>
-      <button type="button" class="teabag-btn" data-act="banner-teabag" @click="sendBannerTeabag(m.banner.id, 'teabag')">🤣 티배깅 조롱</button>
-      <button type="button" class="teabag-btn rip" data-act="banner-rip" @click="sendBannerTeabag(m.banner.id, 'rip')">🕯️ 묵념</button>
-    </span>
-  </div>
   <div v-if="m.whisperAlert" id="whisperAlertBanner" class="whisper-alert" role="alert">
     <span class="whisper-alert-badge">🔒 귓속말 도착</span>
     <button type="button" class="whisper-name-btn" title="클릭: 포트폴리오 훔쳐보기" @click="m.spyTarget = m.whisperAlert.from">@{{ m.whisperAlert.from }}</button>

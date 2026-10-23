@@ -2,9 +2,16 @@
 import type { NewsItem } from "@dopamine/engine";
 import { computed, ref } from "vue";
 import { badgeClass, badgeText, change, clock, dateText, pct } from "../format";
+import { useAccount } from "../stores/account";
 import { useMarket } from "../stores/market";
 
 const m = useMarket();
+const a = useAccount();
+// 강제청산 알림 1건당 처음 누른 한 명만 성공한다. 문구는 서버가 만든다
+async function react(liqId: number, type: "teabag" | "rip") {
+  if (!a.me) { a.notify("참가해야 반응할 수 있습니다.", "error"); return; }
+  await a.react(liqId, type);
+}
 const expanded = ref(false);
 const latest = computed(() => m.news[0] ?? null);
 const recent5 = computed(() => m.news.slice(0, 5));
@@ -22,7 +29,16 @@ function symMove(n: NewsItem, sym: string): number | null {
 
 <template>
   <div class="newsline-wrap">
-    <div :key="latest?.id ?? 'empty'" class="newsline" :class="{ 'is-event': !!latest?.event }" aria-live="polite" title="눌러서 자세히 보기" @click="openLatest">
+    <!-- 전광판(청산·졸업·전설)은 LIVE 바 자리에 잠깐 뜬다. 줄이 새로 생기지 않아 아래 화면이 흔들리지 않는다 -->
+    <div v-if="m.banner" id="megaphoneBanner" :key="`b${m.banner.id}`" class="newsline megaphone" :class="m.banner.kind" title="눌러서 닫기" @click="m.banner = null">
+      <span class="live">전광판</span>
+      <span class="headline">{{ m.banner.text }}</span>
+      <span v-if="m.banner.kind === 'liq'" class="banner-actions" @click.stop>
+        <button type="button" class="teabag-btn" data-act="banner-teabag" @click="react(m.banner.id, 'teabag')">🤣 티배깅</button>
+        <button type="button" class="teabag-btn rip" data-act="banner-rip" @click="react(m.banner.id, 'rip')">🕯️ 묵념</button>
+      </span>
+    </div>
+    <div v-else :key="latest?.id ?? 'empty'" class="newsline" :class="{ 'is-event': !!latest?.event }" aria-live="polite" title="눌러서 자세히 보기" @click="openLatest">
       <span class="live">LIVE</span>
       <template v-if="latest">
         <span :class="badgeClass(latest)">{{ badgeText(latest) }}</span>

@@ -397,12 +397,6 @@ dialog#policyDlg::backdrop { background: rgba(10, 15, 25, .45); }
 
 
 /* 100배 졸업·강제청산 실시간 전광판 알림 */
-.megaphone {
-  display: flex; align-items: center; justify-content: center; gap: 10px;
-  padding: 7px 16px; font-size: 13px; font-weight: 700; cursor: pointer;
-  background: var(--up); color: #fff;
-}
-.megaphone.clear { background: linear-gradient(90deg, #b45309, #d97706, #b45309); }
 .msg.broadcast {
   padding: 5px 8px; border-radius: 6px;
   background: var(--warn-soft); border: 1px solid var(--warn);
@@ -1180,9 +1174,21 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
   .join-hint { display: none; }
   .float-toggle-btn, #newsExpandBtn, .news-recent5 { display: none; }
   .news-act-btn { padding: 3px 8px; font-size: 12px; }
-  .megaphone { flex-wrap: wrap; gap: 4px 8px; padding: 5px 10px; font-size: 12px; }
-  .megaphone > b { display: none; }
-  .megaphone .teabag-btn { padding: 2px 8px; font-size: 11px; }
   /* 차트·주문 화면은 차트를 크게 */
   .layout[data-mview="trade"] .chart-area { min-height: 46vh; }
+}
+
+/* 전광판은 LIVE 바 자리를 빌린다: 같은 높이, 한 줄, 글이 길면 말줄임 */
+.newsline-wrap > .newsline { box-sizing: border-box; min-height: 61px; }
+.newsline.megaphone { justify-content: flex-start; background: var(--up); color: #fff; border-bottom-color: var(--up); animation: none; }
+.newsline.megaphone.clear { background: linear-gradient(90deg, #b45309, #d97706, #b45309); border-bottom-color: #b45309; }
+.newsline.megaphone .live { color: #fff; }
+.newsline.megaphone .headline { font-weight: 700; }
+.newsline.megaphone .banner-actions { display: inline-flex; gap: 6px; flex: none; }
+/* 귓속말 도착은 화면 위에 떠서 레이아웃을 밀지 않는다 */
+.whisper-alert { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 300; border-radius: 10px; max-width: calc(100vw - 16px); flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .newsline.megaphone .teabag-btn { padding: 2px 6px; font-size: 11px; }
+  .whisper-alert { gap: 6px; padding: 8px 10px; font-size: 12.5px; }
+  .whisper-alert-text { max-width: 60vw; }
 }
