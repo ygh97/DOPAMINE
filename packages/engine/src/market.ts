@@ -33,13 +33,13 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   srWeight: 0.35,         // 지지·저항 기울기 최대치 = 개별 σ의 35%
   gradCap: 3e9,           // 신흥주 → 주식 승격: 검증 성공 gradSuccesses회 이상 + 시총 30억 달러
   gradSuccesses: 2,
-  gradCooldown: 0,        // 승격 사이 평균 간격(±30%). 0이면 시즌 ÷ (maxNewGrowth + 1) → 시즌 동안 고르게 퍼진다. 첫 승격은 그 절반 뒤
+  gradCooldown: 0,        // 승격 사이 평균 간격(±30%). 0이면 시즌 ÷ (maxNewGrowth + 1): 상한이 없으면 0 = 조건이 되는 순간 바로 승격
   gradPER: 15,
   splitPrice: 0.1,        // 신흥주 가격이 $0.10 아래면 주식병합(10:1)
   delistCap: 5e7,         // 시총 5천만 달러 아래면 관리종목 → 유예 기간 뒤에도 미달이면 상장폐지
   watchTicks: 2400,       // 관리종목 유예 기간 (게임 30일 = 40분)
   rescueOdds: [0.3, 0.3], // 유예 중 회생 이벤트 확률: [인수 제안, 유상증자], 나머지는 소식 없음
-  maxNewGrowth: 10,       // 신성장(승격 종목) 최대 개수. 다 차면 더 승격하지 않는다
+  maxNewGrowth: Infinity, // 신성장(승격 종목) 최대 개수. 시즌제라 상한 없이 조건(검증 성공 + 시총)만 되면 승격한다 (2026-10-23 전: 10)
   ventureCap: 300,        // 신흥주 소프트 상한: 시작가 대비 이 배수에 가까울수록 검증 성공 상승폭이 줄어든다 (100배 전설 보정으로 100 → 300)
   ventureSuccess: 0.85,   // 신흥주 검증 성공 확률 (졸업률 보정용, tools/sim-bots.ts. 2026-10-22 보정: 100배 전설 평균 3% 이상 → 약 3.5%)
   epsHalfLife: 172_800,   // EPS가 기준값으로 돌아가는 반감기(틱, 2일)
@@ -154,6 +154,21 @@ type Task =
   | { at: number; kind: "memeDump"; sym: string; size: number }
   | { at: number; kind: "score"; analyst: string; rid: string; sym: string; opinion: Opinion; price0: number };
 const SNAPSHOT_VERSION = 1;
+
+// 지어 낸 신흥주 이름 조각: 앞(2자 기호) + 뒤(1자 기호) + 무작위 1자 = 4자 티커
+const VENTURE_HEADS = [
+  { name: "네오", sym: "NE" }, { name: "퀀텀", sym: "QT" }, { name: "아스트로", sym: "AS" }, { name: "하이퍼", sym: "HP" }, { name: "에코", sym: "EC" },
+  { name: "나노", sym: "NN" }, { name: "제네", sym: "GN" }, { name: "옵티", sym: "OP" }, { name: "테라", sym: "TR" }, { name: "크로노", sym: "CR" },
+  { name: "루나", sym: "LN" }, { name: "벡터", sym: "VC" }, { name: "플라즈", sym: "PZ" }, { name: "소닉", sym: "SN" }, { name: "오로라", sym: "AR" },
+];
+const VENTURE_TAILS = [
+  { name: "젠", sym: "G" }, { name: "랩스", sym: "L" }, { name: "텍", sym: "T" }, { name: "셀", sym: "C" }, { name: "웍스", sym: "W" },
+  { name: "메드", sym: "M" }, { name: "에너지", sym: "E" }, { name: "모빌리티", sym: "B" }, { name: "시스", sym: "S" }, { name: "팜", sym: "F" },
+];
+const VENTURE_TECHS = [
+  "고체 전해질 배터리", "단백질 접힘 신약", "초소형 위성 통신", "양자 암호 칩", "합성 연료 촉매", "뇌파 인터페이스", "자율 수중 드론",
+  "탄소 나노튜브 섬유", "유전자 편집 작물", "초전도 송전선", "마이크로 원자로", "생분해 플라스틱", "AI 신약 설계", "레이저 핵융합 연료",
+];
 
 export function createMarket({ assets, sectors, spares = [], seed = 20261021, now = Date.now(), options = {}, snapshot }: CreateMarketInput): Market {
   const merged: MarketOptions = { ...DEFAULT_OPTIONS, ...options };
@@ -668,13 +683,21 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   }
   function listNew() {
     const i = sparePool.findIndex(d => !state[d.sym]);
-    if (i < 0) { scheduled.push({ at: tick + 300, kind: "list" }); return; } // 예비 종목이 없으면 나중에 다시
-    const [d] = sparePool.splice(i, 1), price = Math.round(uni(2, 10) * 100) / 100;
+    const [d] = i >= 0 ? sparePool.splice(i, 1) : [inventVenture()], price = Math.round(uni(2, 10) * 100) / 100;
     addAsset({ ...d, market: "venture", sector: "venture", price, cap: price * Math.round(uni(5e7, 2e8)), parValue: d.parValue ?? 0.1 });
     const a = state[d.sym], fill = fillOf(a);
     a.bars.push({ timestamp: barTime(), open: price, high: price, low: price, close: price, volume: 0 });
     actions.push({ type: "list", sym: a.sym });
     publish({ kind: "신흥주", headline: `${a.name}(${a.sym}) · ${fill(NEWS.listing.ipo.h)}`, body: fill(NEWS.listing.ipo.b), symbols: [a.sym] });
+  }
+  // 예비 가상 기업이 바닥나면(승격에 상한이 없다) 이름을 지어 낸다. seed 난수라 같은 seed면 같은 이름. 이름 끝에 "가상" 표기는 화면이 붙인다
+  function inventVenture(): SpareDef {
+    const taken = new Set([...Object.keys(state), ...sparePool.map(d => d.sym)]);
+    for (;;) {
+      const [head, tail, tech] = [pick(VENTURE_HEADS), pick(VENTURE_TAILS), pick(VENTURE_TECHS)];
+      const sym = head.sym + tail.sym + String.fromCharCode(65 + Math.floor(rand() * 26));
+      if (!taken.has(sym)) return { sym, name: head.name + tail.name, tech };
+    }
   }
   // ---------- 가격 ----------
   function updateBarStats(a: AssetState) {

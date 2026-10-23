@@ -144,6 +144,18 @@ test("검증 성공 + 시총 기준이면 주식으로 승격한다", () => {
   assert.ok(q.per && Math.abs(q.per - 15) < 1e-9, "승격 시 PER 15");
 });
 
+test("승격에 상한이 없고, 예비 기업이 바닥나면 이름을 지어 신흥주 10개를 채운다", () => {
+  const m = createMarket({ assets: ASSETS, sectors: SECTORS, spares: [], seed: 6, now: NOW, options: { ...FAST, gradCap: 0, gradSuccesses: 1 } });
+  const known = new Set(ASSETS.map(a => a.sym));
+  let grads = 0;
+  for (let i = 0; i < 60000 && grads < 12; i++) grads += m.step().actions.filter(x => x.type === "graduate").length;
+  run(m, 100); // 빈자리 상장 (40~80틱 뒤)
+  const qs = m.quotes();
+  assert.ok(grads >= 12, `승격 ${grads}개 (상한 10 넘음)`);
+  assert.equal(qs.filter(q => q.market === "venture").length, 10, "신흥주는 늘 10개");
+  assert.ok(qs.some(q => q.market === "venture" && !known.has(q.sym)), "지어 낸 신흥주가 상장됨");
+});
+
 test("스냅샷에서 이어 돌리면 끊김 없이 같은 경로", () => {
   const a = make(12);
   run(a, 3000);
