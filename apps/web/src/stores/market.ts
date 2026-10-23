@@ -19,7 +19,7 @@ export type PackedBar = [number, number, number, number, number, number];
 export interface Badges { emblems: { season: number; icon: string }[]; medals: { season: number; rank: number }[] }
 /** 일정·애널리스트·보고 있는 종목의 의견 분포 (/api/research) */
 export interface Research { tick: number; upcoming: Upcoming[]; analysts: AnalystView[]; consensus: Consensus | null }
-interface TickEvent { tick: number; date: GameDate; bars: Record<string, [...PackedBar, number]> }
+interface TickEvent { tick: number; date: GameDate; viewers?: number; bars: Record<string, [...PackedBar, number]> }
 
 export const useMarket = defineStore("market", () => {
   const quotes = ref<Record<string, Quote>>({});
@@ -98,6 +98,10 @@ export const useMarket = defineStore("market", () => {
     try { localStorage.setItem("dc-float-news", floatingNewsOpen.value ? "1" : "0"); } catch { /* ignore */ }
   }
   const guideOpen = ref(false);
+  /** 지금 사이트를 보고 있는 화면 수 (서버가 tick마다 보낸다) */
+  const viewers = ref(0);
+  // 폴링으로 볼 때 서버가 화면 수를 셀 수 있게 탭마다 고유 id
+  const vid = Math.random().toString(36).slice(2, 12);
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
   const socialTab = ref<"chat" | "rank" | "mm" | "whale" | "hall" | "analyst">("rank");
@@ -151,6 +155,7 @@ export const useMarket = defineStore("market", () => {
     lastBars.value = bars;
     date.value = d.date;
     tick.value = d.tick;
+    if (d.viewers != null) viewers.value = d.viewers;
   }
 
   async function loadSnapshot() {
@@ -161,6 +166,7 @@ export const useMarket = defineStore("market", () => {
     season.value = s.season;
     date.value = s.date;
     tick.value = s.tick;
+    if (s.viewers != null) viewers.value = s.viewers;
     news.value = s.news;
     if (Array.isArray(s.chat)) {
       chat.value = s.chat;
@@ -199,7 +205,7 @@ export const useMarket = defineStore("market", () => {
     pollTimer = window.setInterval(async () => {
       try {
         const tok = (() => { try { return localStorage.getItem("dc-token") ?? ""; } catch { return ""; } })();
-        const r = await fetch(`/api/poll?tick=${tick.value}`, tok ? { headers: { Authorization: `Bearer ${tok}` } } : undefined);
+        const r = await fetch(`/api/poll?tick=${tick.value}&vid=${vid}`, tok ? { headers: { Authorization: `Bearer ${tok}` } } : undefined);
         if (!r.ok) { connected.value = false; return; }
         const d = await r.json();
         connected.value = true;
@@ -321,6 +327,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, list, current,
+  return { quotes, sectors, date, news, tick, connected, viewers, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

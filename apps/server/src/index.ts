@@ -106,12 +106,20 @@ function ensureTickCache() {
 
 function snapshot(viewerName?: string | null) {
   ensureTickCache();
-  return { tick: market.tick, date: market.gameDate(), season: seasonInfo(), sectors: SECTORS, quotes: cachedQuotes, news: market.news.slice(0, 50), chat: chat.recent(50, viewerName) };
+  return { tick: market.tick, date: market.gameDate(), viewers: viewers(), season: seasonInfo(), sectors: SECTORS, quotes: cachedQuotes, news: market.news.slice(0, 50), chat: chat.recent(50, viewerName) };
 }
 
 // ---------- SSE ----------
 type Client = { write: (chunk: string) => boolean };
 const clients = new Set<Client>();
+// 1초 폴링으로 보는 화면(SSE를 버퍼링하는 프록시 뒤): 화면마다 만든 vid를 마지막으로 본 시각
+const pollers = new Map<string, number>();
+/** 지금 사이트를 보고 있는 화면 수 = SSE 연결 + 5초 안에 폴링한 화면 (손님 포함, 봇은 연결하지 않는다) */
+function viewers() {
+  const now = Date.now();
+  for (const [k, t] of pollers) if (now - t > 5000) pollers.delete(k);
+  return clients.size + pollers.size;
+}
 const settledLog: { tick: number; type: string; sym: string }[] = [];
 const splitLog: { tick: number; sym: string }[] = [];
 let lastAssetsTick = 0;
@@ -166,7 +174,7 @@ const loop = setInterval(() => {
   const rankRows = market.tick % 5 === 0 ? broker.ranking(20) : null;
   for (const text of broker.drainBroadcasts()) send("chat", chat.system(text));
   if (!clients.size) return;
-  send("tick", { tick: market.tick, date: market.gameDate(), bars: cachedBars });
+  send("tick", { tick: market.tick, date: market.gameDate(), viewers: viewers(), bars: cachedBars });
   if (rankRows) send("ranking", rankingInfo(rankRows));
 }, Math.max(10, Math.min(250, TICK_MS / 2)));
 
@@ -227,14 +235,16 @@ function viewerOf(req: FastifyRequest): string | null {
 
 app.get("/api/snapshot", async req => snapshot(viewerOf(req)));
 
-app.get<{ Querystring: { tick?: string } }>("/api/poll", async req => {
+app.get<{ Querystring: { tick?: string; vid?: string } }>("/api/poll", async req => {
   const since = Number(req.query.tick) || market.tick;
+  if (req.query.vid) pollers.set(String(req.query.vid).slice(0, 40), Date.now());
   ensureTickCache();
   const settled = settledLog.filter(s => s.tick > since).map(({ type, sym }) => ({ type, sym }));
   const reload = [...new Set(splitLog.filter(s => s.tick > since).map(s => s.sym))];
   return {
     tick: market.tick,
     date: market.gameDate(),
+    viewers: viewers(),
     season: seasonInfo(),
     bars: cachedBars,
     news: market.news.filter(n => n.tick > since).slice(0, 30).reverse(),

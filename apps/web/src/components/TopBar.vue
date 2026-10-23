@@ -12,6 +12,13 @@ const name = ref("");
 const password = ref("");
 
 const START = 100_000;
+// 뉴비 가이드를 한 번도 안 열었으면 버튼을 채워서 깜빡인다 (이 브라우저에 기억)
+const guideSeen = ref((() => { try { return localStorage.getItem("dc-guide-seen") === "1"; } catch { return false; } })());
+function openGuide() {
+  m.guideOpen = true;
+  guideSeen.value = true;
+  try { localStorage.setItem("dc-guide-seen", "1"); } catch { /* 저장 못 해도 이번엔 열린다 */ }
+}
 const ret = computed(() => (a.equity / START - 1) * 100);
 // 시즌 남은 시간 (tick마다 다시 계산)
 const left = computed(() => {
@@ -40,8 +47,8 @@ function restart() {
   <header class="topbar">
     <div class="logo"><b>도파민 <i>센터</i></b><small>DOPAMINE CENTER</small></div>
     <div class="clock" :title="left">S{{ m.season?.id ?? 1 }} · <b>{{ dateText(m.date) }}</b> <small id="seasonLeft" class="muted">{{ left }}</small></div>
-    <span class="conn" :class="{ on: m.connected }">{{ m.connected ? "실시간" : "재연결 중" }}</span>
-    <button id="guideBtn" type="button" class="icon-btn guide-top-btn" @click="m.guideOpen = true">? 뉴비 가이드</button>
+    <span class="conn" :class="{ on: m.connected }" :title="m.connected ? `지금 ${m.viewers}명이 보고 있습니다 (손님 포함, 탭마다 1명)` : undefined">{{ m.connected ? "실시간" : "재연결 중" }}<b v-if="m.connected && m.viewers" id="viewerCount" class="viewers"> · {{ m.viewers }}명 보는 중</b></span>
+    <button id="guideBtn" type="button" class="icon-btn guide-top-btn" :class="{ fresh: !guideSeen }" @click="openGuide">📘 뉴비 가이드</button>
 
     <div v-if="a.me" id="topUserNick" class="top-center-nick">
       <span class="nick-label">트레이더</span>

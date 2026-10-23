@@ -1203,3 +1203,12 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
   .whisper-alert { gap: 6px; padding: 8px 10px; font-size: 12.5px; }
   .whisper-alert-text { max-width: 60vw; }
 }
+
+/* 실시간 보는 사람 수 */
+.conn .viewers { font-weight: 700; color: var(--text); }
+/* 뉴비 가이드: 처음 온 사람에게는 채운 버튼 + 은은한 깜빡임 */
+.guide-top-btn { font-size: 13px; padding: 5px 12px; }
+.guide-top-btn.fresh { background: var(--accent); color: #fff; animation: guidePulse 1.8s ease-in-out infinite; }
+@keyframes guidePulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(29, 111, 216, .45); } 50% { box-shadow: 0 0 0 6px rgba(29, 111, 216, 0); } }
+@media (prefers-reduced-motion: reduce) { .guide-top-btn.fresh { animation: none; } }
+@media (max-width: 760px) { .guide-top-btn { font-size: 12px; padding: 3px 9px; } }
