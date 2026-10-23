@@ -106,6 +106,12 @@ async function sendBannerTeabag(liqId: number, type: "teabag" | "rip") {
   await a.react(liqId, type);
 }
 
+/** 포지션 스캔 창에서 그 사람에게 귓속말: 창을 닫고 채팅을 귓속말 모드로 연다 */
+function whisperFromSpy(name: string) {
+  closeSpy();
+  replyWhisper(name);
+}
+
 function replyWhisper(from: string) {
   m.replyWhisperTo = from;
   m.whisperAlert = null;
@@ -169,6 +175,7 @@ onMounted(() => {
     <div class="dlg-head">
       <h2>🎯 트레이더 포지션 스캔 <span v-if="spyData" class="spy-name">@{{ spyData.name }}</span></h2>
       <div class="dlg-head-actions">
+        <button v-if="spyData && a.me && spyData.name.toLowerCase() !== a.me.name.toLowerCase()" type="button" class="dlg-act-btn" data-act="spy-whisper" @click="whisperFromSpy(spyData.name)">💬 귓속말</button>
         <button v-if="m.spyTarget" type="button" class="dlg-act-btn" @click="fetchSpy(m.spyTarget!)">🔄 새로고침</button>
         <button type="button" class="dlg-act-btn close" @click="closeSpy">✕ 닫기</button>
       </div>

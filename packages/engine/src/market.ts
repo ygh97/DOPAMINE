@@ -11,7 +11,8 @@ import type { AnalystStat, AnalystView, AssetDef, Bar, Consensus, CorporateActio
 
 export const DEFAULT_OPTIONS: MarketOptions = {
   ticksPerBar: 60,        // 1분봉 = 60틱(1초 tick)
-  ticksPerDay: 80,        // 게임 하루
+  ticksPerDay: 80,        // 게임 하루 (실적·심사·등락률 같은 규칙의 하루)
+  calendarDayTicks: 0,    // 화면 달력의 하루 (0이면 ticksPerDay). 서버가 시즌 하나 = 달력 1년이 되게 넣는다. 규칙에는 안 쓴다
   prevResetDays: 1,       // 등락률 기준가(prev) 초기화 주기 = 게임 하루(80틱)
   seasonGrowth: [1.5, 3], // 우상향은 여기서만 만든다: 시즌 동안 적정가가 1.5~3배 (시즌마다 하나를 뽑음)
   seasonTicks: 28_800,    // 시즌 = 게임 1년 (360일 × 80틱 = 실제 8시간)
@@ -232,7 +233,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   // 시즌 달력은 과거 차트(warmup)가 끝난 시점부터 1년차 1월 1일. 그 전은 year 0 = "시즌 전"
   const seasonStartTick = cfg.warmupBars * cfg.ticksPerBar;
   const gameDate = (t = tick): GameDate => {
-    const d = Math.floor((t - seasonStartTick) / cfg.ticksPerDay);
+    const d = Math.floor((t - seasonStartTick) / (cfg.calendarDayTicks || cfg.ticksPerDay));
     if (d < 0) return { year: 0, month: 0, day: 0 };
     return { year: Math.floor(d / 360) + 1, month: Math.floor((d % 360) / 30) + 1, day: (d % 30) + 1 };
   };
