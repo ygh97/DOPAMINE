@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <polygon points="32,4 56,14 52,46 32,60 12,46 8,14" fill="#0c192c" stroke="#38bdf8" stroke-width="2.5"/>
+  <ellipse cx="42" cy="41" rx="8" ry="6.5" fill="#0284c7" stroke="#7dd3fc" stroke-width="1.5"/>
+  <ellipse cx="31" cy="36" rx="6" ry="4.5" fill="#0369a1" stroke="#38bdf8" stroke-width="1.5"/>
+  <circle cx="24" cy="25" r="9" fill="#7c2d12" stroke="#38bdf8" stroke-width="1.5"/>
+  <!-- Cyber Visor Goggles -->
+  <rect x="14" y="21" width="19" height="7.5" rx="3.5" fill="#06b6d4" stroke="#e0f2fe" stroke-width="1.5"/>
+  <line x1="17" y1="23.5" x2="29" y2="23.5" stroke="#cffafe" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M20 16 Q16 9 11 11 M28 16 Q33 9 38 11" stroke="#38bdf8" stroke-width="2" stroke-linecap="round"/>
+  <path d="M25 39 L18 49 M31 40 L29 51 M37 40 L43 50" stroke="#38bdf8" stroke-width="2.2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <polygon points="32,4 56,14 52,46 32,60 12,46 8,14" fill="#3b0707" stroke="#f97316" stroke-width="2.8"/>
+  <!-- Flame Aura -->
+  <path d="M16 44 Q12 28 22 18 Q26 10 32 13 Q40 9 44 20 Q52 30 47 44 Z" fill="#ea580c" fill-opacity="0.35"/>
+  <ellipse cx="38" cy="43" rx="8" ry="6.5" fill="#dc2626" stroke="#fdba74" stroke-width="1.5"/>
+  <circle cx="30" cy="26" r="9.5" fill="#ef4444" stroke="#fde047" stroke-width="1.6"/>
+  <polygon points="24,25 29,28 25,29" fill="#fef08a"/>
+  <polygon points="36,25 31,28 35,29" fill="#fef08a"/>
+  <path d="M26 17 Q21 9 15 11 M34 17 Q39 9 45 11" stroke="#fde047" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M24 37 L16 47 M30 39 L26 51 M36 39 L42 50" stroke="#fb923c" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

@@ -18,7 +18,7 @@ export class ChatError extends Error {}
 export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean; loud?: boolean }
 
 // 시스템·서버가 만드는 표시. 일반 채팅으로는 이 말머리로 시작할 수 없다 (사칭 방지)
-const RESERVED = ["[티배깅]", "[강제청산]", "[졸업]", "[전설]", "[100배졸업]", "[공유]"];
+const RESERVED = ["[티배깅]", "[강제청산]", "[졸업]", "[전설]", "[100배졸업]", "[공유]", "[입장]"];
 const LIQ_RE = /^\[강제청산\] 💥 (\S+)님 \$(\S+) /;
 const LOUD_BOT_MARGIN = 1_000_000; // 봇·세력·고래 청산은 이 증거금 이상만 LIVE 바에 띄운다 (2026-10-24 $20만 → $100만: 세력 실탄이 커져 시간당 38건 뜨던 것을 약 8건으로)
 export interface ChatAdminMsg extends ChatMsg { reports: number; hidden: boolean }

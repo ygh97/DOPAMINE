@@ -30,7 +30,7 @@ function symMove(n: NewsItem, sym: string): number | null {
 <template>
   <div class="newsline-wrap">
     <!-- 전광판(청산·졸업·전설)은 LIVE 바 자리에 잠깐 뜬다. 줄이 새로 생기지 않아 아래 화면이 흔들리지 않는다 -->
-    <div v-if="m.banner" id="megaphoneBanner" :key="`b${m.banner.id}`" class="newsline megaphone" :class="m.banner.kind" title="눌러서 닫기" @click="m.banner = null">
+    <div v-if="m.banner" id="megaphoneBanner" :key="`b${m.banner.id}`" class="newsline megaphone" :class="m.banner.kind" :style="m.banner.color ? { '--banner-color': m.banner.color } : undefined" title="눌러서 닫기" @click="m.banner = null">
       <span class="live">전광판</span>
       <span class="headline">{{ m.banner.text }}</span>
       <span v-if="m.banner.kind === 'liq'" class="banner-actions" @click.stop>

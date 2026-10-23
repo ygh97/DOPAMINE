@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="larvaShield" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#334155"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="larvaBody" x1="16" y1="16" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="100%" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <polygon points="32,4 56,14 52,46 32,60 12,46 8,14" fill="url(#larvaShield)" stroke="#7dd3fc" stroke-width="2.5"/>
+  <circle cx="28" cy="43" r="9" fill="#e2e8f0" stroke="#64748b" stroke-width="1.5"/>
+  <circle cx="34" cy="37" r="9.5" fill="#f1f5f9" stroke="#64748b" stroke-width="1.5"/>
+  <circle cx="32" cy="25" r="10" fill="url(#larvaBody)" stroke="#fbbf24" stroke-width="1.5"/>
+  <path d="M27 16 Q24 10 20 12" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/>
+  <path d="M37 16 Q40 10 44 12" stroke="#fbbf24" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="28" cy="24" r="3" fill="#0f172a"/>
+  <circle cx="36" cy="24" r="3" fill="#0f172a"/>
+  <circle cx="29" cy="23" r="1.2" fill="#38bdf8"/>
+  <circle cx="37" cy="23" r="1.2" fill="#38bdf8"/>
+</svg>

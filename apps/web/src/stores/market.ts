@@ -1,6 +1,6 @@
 // 시세·뉴스 상태. 접속 시 /api/snapshot 한 번, 이후 /api/stream(SSE)으로 변경분만 받는다.
 // Cloudflare Quick Tunnel(*.trycloudflare.com)처럼 무한 SSE 스트림을 버퍼링하는 프록시에서는 자동으로 /api/poll(1초 폴링)로 전환한다.
-import type { AnalystView, Consensus, GameDate, MarketKind, NewsItem, Quote, Upcoming } from "@dopamine/engine";
+import { ANT_TIERS, frameOf, tierOf, type AnalystView, type AntTier, type Consensus, type GameDate, type MarketKind, type NewsItem, type Quote, type RankFrame, type Upcoming } from "@dopamine/engine";
 import { defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import { playWhisperDing } from "../sound";
@@ -16,7 +16,8 @@ export interface OrderPreset { mode: "spot" | "fut"; side: "buy" | "sell"; lev?:
 /** 서버가 보내는 압축 봉: [timestamp, open, high, low, close, volume] */
 export type PackedBar = [number, number, number, number, number, number];
 /** 이름별 배지: 시즌 엠블럼(100배 전설)과 TOP 3 메달 (/api/badges) */
-export interface Badges { emblems: { season: number; icon: string }[]; medals: { season: number; rank: number }[] }
+/** lp: 개미 계급 누적 LP (사람만) */
+export interface Badges { emblems: { season: number; icon: string }[]; medals: { season: number; rank: number }[]; lp?: number }
 /** 일정·애널리스트·보고 있는 종목의 의견 분포 (/api/research) */
 export interface Research { tick: number; upcoming: Upcoming[]; analysts: AnalystView[]; consensus: Consensus | null }
 interface TickEvent { tick: number; date: GameDate; viewers?: number; bars: Record<string, [...PackedBar, number]> }
@@ -47,7 +48,9 @@ export const useMarket = defineStore("market", () => {
   /** 마지막으로 병합·폐지 정산된 종목들. 계좌 스토어가 보고 내 보유와 겹치면 계좌를 다시 받는다 */
   const settled = ref<{ type: string; sym: string }[]>([]);
   const chat = ref<ChatMsg[]>([]);
-  const banner = ref<{ id: number; text: string; kind: "clear" | "liq" } | null>(null);
+  /** entry: 개미 계급 입장 알림 (color = 계급 색) */
+  type Banner = { id: number; text: string; kind: "clear" | "liq" | "entry"; color?: string };
+  const banner = ref<Banner | null>(null);
   const whisperAlert = ref<{ id: number; from: string; text: string } | null>(null);
   const unreadWhispers = ref(0);
   const replyWhisperTo = ref<string | null>(null);
@@ -69,14 +72,15 @@ export const useMarket = defineStore("market", () => {
     lastBannerId = msg.id;
     const myName = (() => { try { return localStorage.getItem("dc-name") ?? ""; } catch { return ""; } })();
     if (!msg.loud && !(myName && msg.text.includes(` ${myName}님`))) return; // 작은 봇 청산은 채팅에만
-    const kind: "clear" | "liq" = msg.text.startsWith("[강제청산]") ? "liq" : "clear"; // 졸업·전설(예전 100배졸업 포함)
-    const text = msg.text.replace(/^\[(졸업|전설|100배졸업|강제청산)\]\s*/, "");
-    bannerQueue.push({ id: msg.id, text, kind });
+    const entry = msg.text.startsWith("[입장]") ? ANT_TIERS.find(t => msg.text.startsWith(`[입장] ${t.name} `)) : undefined;
+    const kind: Banner["kind"] = entry ? "entry" : msg.text.startsWith("[강제청산]") ? "liq" : "clear"; // 졸업·전설(예전 100배졸업 포함)
+    const text = msg.text.replace(/^\[(졸업|전설|100배졸업|강제청산|입장)\]\s*/, "");
+    bannerQueue.push({ id: msg.id, text, kind, color: entry?.color });
     if (bannerQueue.length > 3) bannerQueue.shift(); // 밀리면 오래된 것부터 버린다
     if (!bannerBusy) showNextBanner();
   }
   // 전광판은 LIVE 바 자리에 6초 뜨고, 다음 알림 전에 뉴스가 최소 4초는 보이게 쉰다
-  const bannerQueue: { id: number; text: string; kind: "clear" | "liq" }[] = [];
+  const bannerQueue: Banner[] = [];
   let bannerBusy = false;
   function showNextBanner() {
     const next = bannerQueue.shift();
@@ -124,6 +128,11 @@ export const useMarket = defineStore("market", () => {
   }
   /** 1등 메달이 하나라도 있으면 채팅·랭킹 이름을 금색으로 */
   const isChamp = (name: string) => !!badges.value[name]?.medals.some(x => x.rank === 1);
+  /** 실시간 순위 테두리: 사람끼리 50위 안·원금 초과인 사람의 순위 (랭킹과 같이 받는다) */
+  const frames = ref<Record<string, number>>({});
+  /** 사람이면 개미 계급 (봇·세력·고래는 null) */
+  const tierFor = (name: string): AntTier | null => { const lp = badges.value[name]?.lp; return lp == null ? null : tierOf(lp); };
+  const frameFor = (name: string): RankFrame => frameOf(frames.value[name], Infinity);
   const calendarOpen = ref(false);
   async function loadResearch() {
     try {
@@ -306,8 +315,8 @@ export const useMarket = defineStore("market", () => {
     });
   }
 
-  function applyRanking(d: { rows: RankRow[]; players: number; mm?: RankRow[]; whales?: RankRow[] }) {
-    ranking.value = d.rows; players.value = d.players; mmRanking.value = d.mm ?? []; whaleRanking.value = d.whales ?? [];
+  function applyRanking(d: { rows: RankRow[]; players: number; mm?: RankRow[]; whales?: RankRow[]; frames?: Record<string, number> }) {
+    ranking.value = d.rows; players.value = d.players; mmRanking.value = d.mm ?? []; whaleRanking.value = d.whales ?? []; frames.value = d.frames ?? {};
   }
   /** 강제청산 알림에 누군가 반응함 → 버튼 숨김 (전광판 배너도) */
   function markReacted(id: number) {
@@ -339,6 +348,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, viewers, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, list, current,
+  return { quotes, sectors, date, news, tick, connected, viewers, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, frames, tierFor, frameFor, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

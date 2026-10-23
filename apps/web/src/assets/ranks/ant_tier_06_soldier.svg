@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <polygon points="32,4 56,14 52,46 32,60 12,46 8,14" fill="#1e293b" stroke="#cbd5e1" stroke-width="2.8"/>
+  <!-- Combat Helmet -->
+  <path d="M16 26 C16 14 48 14 48 26 L50 29 L14 29 Z" fill="#64748b" stroke="#e2e8f0" stroke-width="1.8"/>
+  <line x1="32" y1="15" x2="32" y2="28" stroke="#94a3b8" stroke-width="2"/>
+  <!-- Fierce Soldier Head & Mandibles -->
+  <circle cx="32" cy="33" r="10" fill="#9a3412" stroke="#f97316" stroke-width="1.5"/>
+  <polygon points="24,31 29,34 25,35" fill="#fef08a"/>
+  <polygon points="40,31 35,34 39,35" fill="#fef08a"/>
+  <path d="M25 40 Q23 47 29 46 M39 40 Q41 47 35 46" stroke="#fdba74" stroke-width="3" stroke-linecap="round" fill="none"/>
+  <path d="M18 44 L13 51 M23 46 L20 54 M46 44 L51 51 M41 46 L44 54" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+</svg>

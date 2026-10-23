@@ -147,6 +147,16 @@ export function openDb(file: string): Db {
       message TEXT,
       PRIMARY KEY (season_id, rank)
     );
+    CREATE TABLE IF NOT EXISTS lp_log (
+      season_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      rank INTEGER,
+      equity REAL,
+      delta INTEGER NOT NULL,
+      lp INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      PRIMARY KEY (season_id, user_id)
+    );
     CREATE TABLE IF NOT EXISTS hall_of_fame (
       season_id INTEGER NOT NULL,
       rank INTEGER NOT NULL,
@@ -171,6 +181,16 @@ export function openDb(file: string): Db {
     "ALTER TABLE accounts ADD COLUMN grad_tick INTEGER", // 졸업(50배) 시점 (cleared_tick은 100배 전설)
     "ALTER TABLE open_orders ADD COLUMN reduce INTEGER NOT NULL DEFAULT 0", // 선물 종료 지정가 (pos_id 포지션만 줄인다)
     "ALTER TABLE snapshots ADD COLUMN exchange TEXT", // 호가창 상태 (M8): 캔들·호가 봇 재고. 사람 주문은 open_orders
+    // 개미 계급 LP (2026-10-24): 시즌을 넘어 남는다. lp_floor = 강등 보호선, idle_seasons = 이어진 비활동 시즌 수, last_equity = 직전 참가 시즌 최종 자산 (LP 동점 순서)
+    "ALTER TABLE users ADD COLUMN lp INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN lp_floor INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN idle_seasons INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN last_equity REAL",
+    // 시즌(하루) 활동: 첫 체결 때 자산, 거래대금, 마감 4시간 안(20:00~) 체결, 마감 1시간 안(23:00~) 다시 시작
+    "ALTER TABLE accounts ADD COLUMN base_equity REAL",
+    "ALTER TABLE accounts ADD COLUMN turnover REAL NOT NULL DEFAULT 0",
+    "ALTER TABLE accounts ADD COLUMN peak_trade INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE accounts ADD COLUMN late_reset INTEGER NOT NULL DEFAULT 0",
   ]) {
     try { db.exec(sql); } catch { /* 이미 있음 */ }
   }

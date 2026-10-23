@@ -1153,6 +1153,19 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 
 /* 이름 배지·금색 이름·명예의 전당 TOP 3 */
 .name-badges { display: inline-flex; align-items: center; gap: 1px; margin-left: 3px; vertical-align: middle; }
+/* 개미 계급 배지: 개미 위에 실시간 순위 테두리 */
+.rank-badge { display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
+.rank-badge .rb-icon { position: relative; display: inline-flex; width: var(--rb-size, 18px); height: var(--rb-size, 18px); flex: none; }
+.rank-badge .rb-ant { width: 100%; height: 100%; }
+.rank-badge .rb-frame { position: absolute; inset: -20%; width: 140%; height: 140%; pointer-events: none; }
+.rank-badge.frame-rank1 .rb-icon { filter: drop-shadow(0 0 4px rgba(56, 189, 248, .75)); }
+.rank-badge.frame-rank2 .rb-icon { filter: drop-shadow(0 0 4px rgba(244, 63, 94, .7)); }
+.rank-badge.frame-rank3 .rb-icon { filter: drop-shadow(0 0 4px rgba(16, 185, 129, .7)); }
+.rank-badge.frame-gold .rb-icon { filter: drop-shadow(0 0 3px rgba(250, 204, 21, .65)); }
+.rank-badge .rb-label { font-size: 12px; font-weight: 700; }
+/* 개미 계급 채팅 말풍선: 불개미 테두리, 군단장·여왕 배경 */
+.chat-card.tier-border { border: 1px solid var(--tier-color); }
+.chat-card.tier-fill { border: 1px solid var(--tier-color); background: color-mix(in srgb, var(--tier-color) 14%, transparent); }
 .nb-emblem { font-size: 12px; line-height: 1; }
 .nb-medal { font-size: 12px; line-height: 1; margin-left: 2px; white-space: nowrap; }
 .nb-medal small, .nb-more { font-size: 9px; color: var(--muted); margin-left: 1px; }
@@ -1200,6 +1213,9 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 .newsline.megaphone .live { color: #fff; }
 .newsline.megaphone .headline { font-weight: 700; }
 .newsline.megaphone .banner-actions { display: inline-flex; gap: 6px; flex: none; }
+/* 개미 계급 입장 알림: 그 계급 색 전광판 */
+.newsline.megaphone.entry { background: linear-gradient(90deg, color-mix(in srgb, var(--banner-color) 70%, #000), var(--banner-color), color-mix(in srgb, var(--banner-color) 70%, #000)); border-bottom-color: var(--banner-color); color: #111; }
+.newsline.megaphone.entry .live, .newsline.megaphone.entry .headline { color: #111; }
 /* 귓속말 도착은 화면 위에 떠서 레이아웃을 밀지 않는다 */
 .whisper-alert { position: fixed; top: 8px; left: 50%; transform: translateX(-50%); z-index: 300; border-radius: 10px; max-width: calc(100vw - 16px); flex-wrap: wrap; }
 @media (max-width: 760px) {

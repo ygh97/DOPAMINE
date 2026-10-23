@@ -98,14 +98,14 @@ const ENV = {
     await pageB.click('[data-act="chat-sys"]');
     log.sysHidden = { liq: await liqMsg(pageB).count(), teabag: await pageB.locator("#chatLog .share-badge.teabag").count(), otherPage: await liqMsg(page).count() };
 
-    // 4) 다시 시작 직후 10배 진입 시도 → 5배 초과 제한 안내
+    // 4) 다시 시작 직후에도 10배 진입 가능 (2026-10-24 리셋 제한 삭제)
     page.once("dialog", d => d.accept());
     await page.click(".account button:has-text('다시 시작')");
     await page.waitForFunction(() => document.querySelector(".toast")?.textContent.includes("다시 시작"));
     await page.click('[data-lev="10"]');
     await page.click("#orderBtn");
-    await page.waitForFunction(() => document.querySelector(".toast.error")?.textContent.includes("5배"));
-    log.resetLock = await toast(page);
+    await page.waitForFunction(() => document.querySelector(".toast")?.textContent.includes("10x"));
+    log.resetOpen = await toast(page);
     await page.screenshot({ path: path.join(OUT, "m4-2-liquidated.png") });
 
     await browser.close();

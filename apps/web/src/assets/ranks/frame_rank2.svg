@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none">
+  <rect x="10" y="18" width="60" height="54" rx="10" stroke="#f43f5e" stroke-width="3.2" fill="rgba(244,63,94,0.08)"/>
+  <rect x="13" y="21" width="54" height="48" rx="7" stroke="#fbbf24" stroke-width="1.5"/>
+  <!-- Top Ruby Crown -->
+  <polygon points="24,20 28,8 35,15 40,5 45,15 52,8 56,20" fill="#fb7185" stroke="#ffe4e6" stroke-width="1.6"/>
+  <circle cx="40" cy="13" r="3.2" fill="#e11d48" stroke="#fef08a" stroke-width="1.2"/>
+  <polygon points="10,18 14,14 18,18 14,22" fill="#f43f5e"/>
+  <polygon points="70,18 66,14 62,18 66,22" fill="#f43f5e"/>
+</svg>

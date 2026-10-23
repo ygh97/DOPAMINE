@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <radialGradient id="eggGlow" cx="50%" cy="42%" r="48%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="55%" stop-color="#cbd5e1"/>
+      <stop offset="100%" stop-color="#64748b"/>
+    </radialGradient>
+    <linearGradient id="eggShield" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#475569"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+  </defs>
+  <polygon points="32,4 56,14 52,46 32,60 12,46 8,14" fill="url(#eggShield)" stroke="#94a3b8" stroke-width="2.5"/>
+  <ellipse cx="32" cy="46" rx="14" ry="5" fill="#0f172a" stroke="#64748b" stroke-width="1.5"/>
+  <path d="M32 14 C41 14 45 25 45 35 C45 43 39 48 32 48 C25 48 19 43 19 35 C19 25 23 14 32 14 Z" fill="url(#eggGlow)" stroke="#f8fafc" stroke-width="1.5"/>
+  <ellipse cx="28" cy="24" rx="4" ry="7" transform="rotate(-18 28 24)" fill="#ffffff" fill-opacity="0.65"/>
+  <circle cx="34" cy="34" r="3.5" fill="#475569" fill-opacity="0.35"/>
+  <circle cx="32" cy="39" r="2.5" fill="#475569" fill-opacity="0.35"/>
+</svg>

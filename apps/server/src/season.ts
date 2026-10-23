@@ -9,6 +9,7 @@ import { randomInt } from "node:crypto";
 import { ASSETS, Exchange, SECTORS, SPARES, createMarket, type ExchangeOptions, type MarketOptions } from "@dopamine/engine";
 import type { RankRow } from "./broker.ts";
 import { tx, type Db } from "./db.ts";
+import { lpByName, settleLp } from "./ranks.ts";
 
 export interface Season { id: number; seed: number; startedAt: number; tickMs: number; lengthMs: number }
 interface SeasonRow { id: number; seed: number; started_at: number; tick_ms: number; length_ms: number; last_seen_at: number | null }
@@ -111,7 +112,7 @@ export const SEASON_EMBLEMS = ["🔥", "💎", "🚀", "🌙", "⚡", "🐉", "�
 export const emblemOf = (season: number) => SEASON_EMBLEMS[(season - 1) % SEASON_EMBLEMS.length];
 
 /**
- * 시즌을 닫고 다음 시즌을 연다. 명예의 전당: 100배 전설을 달성한 사람 전원 + 시즌 최종 순위 사람 1·2·3등(TOP 3).
+ * 시즌을 닫고 다음 시즌을 연다. 개미 계급 LP 정산, 명예의 전당: 100배 전설을 달성한 사람 전원 + 시즌 최종 순위 사람 1·2·3등(TOP 3).
  * 다음 시즌: 매일 일정(lengthMs null)이면 다음 00:00 (그날 23:58 전에 끝냈으면 지금부터).
  * 고정 길이면 이전 시즌이 끝난 시각에 이어서 (서버가 오래 꺼져 있었거나 운영자가 일찍 끝냈으면 지금부터).
  */
@@ -121,6 +122,7 @@ export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = D
     : { startedAt: now >= end && now - end < lengthMs ? end : now, lengthMs }; // 일찍 끝냈으면(운영자 새 시즌) 지금부터
   const seed = randomInt(1, 2 ** 31);
   return tx(db, () => {
+    settleLp(db, season.id, ranking);
     const add = db.prepare("INSERT OR IGNORE INTO hall_of_fame (season_id, rank, name, equity, return_pct, cleared_tick) VALUES (?, ?, ?, ?, ?, ?)");
     // 명예의 전당은 100배 전설을 달성한 사람만 (봇 제외). 순위는 사람끼리 다시 매긴다. 예전 시즌 기록(1~3위)은 그대로 둔다
     const people = ranking.filter(r => r.kind === "user").map((r, i) => ({ ...r, rank: i + 1 }));
@@ -158,9 +160,9 @@ export function hallOfFame(db: Db, limit = 30) {
   return { seasons, rows, top3 };
 }
 
-export interface Badges { emblems: { season: number; icon: string }[]; medals: { season: number; rank: number }[] }
+export interface Badges { emblems: { season: number; icon: string }[]; medals: { season: number; rank: number }[]; lp?: number }
 /**
- * 이름별 배지: 시즌 엠블럼(그 시즌 100배 전설, 진행 중 시즌은 달성하는 순간부터)과 TOP 3 메달.
+ * 이름별 배지: 시즌 엠블럼(그 시즌 100배 전설, 진행 중 시즌은 달성하는 순간부터), TOP 3 메달, 개미 계급 LP(사람 전원).
  * 채팅·랭킹 이름 옆에 붙는다. 1등 메달이 하나라도 있으면 화면이 이름을 금색으로 칠한다
  */
 export function badgesOf(db: Db, currentSeason: number): Record<string, Badges> {
@@ -172,6 +174,7 @@ export function badgesOf(db: Db, currentSeason: number): Record<string, Badges> 
   for (const l of legends) get(l.name).emblems.push({ season: l.season, icon: emblemOf(l.season) });
   for (const t of db.prepare("SELECT season_id AS season, rank, name FROM season_top3 ORDER BY season_id").all() as { season: number; rank: number; name: string }[])
     get(t.name).medals.push({ season: t.season, rank: t.rank });
+  for (const [name, lp] of lpByName(db)) get(name).lp = lp;
   return out;
 }
 

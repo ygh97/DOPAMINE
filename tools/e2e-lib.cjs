@@ -68,4 +68,4 @@ function outDir() {
   return out;
 }
 
-module.exports = { ROOT, API, APP, sleep, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir };
+module.exports = { ROOT, API, APP, E2E_DB, sleep, startServer, startWeb, waitServer, waitWeb, killAll, openApp, outDir };

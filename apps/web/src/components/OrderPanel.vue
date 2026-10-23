@@ -28,7 +28,6 @@ const targetFree = computed(() => target.value ? target.value.qty - (a.me?.order
 const limitText = ref("");
 
 const levels = computed(() => LEVERAGE[m.current?.market ?? "stock"]);
-const lockRemainSec = computed(() => (a.me?.resetAt != null ? Math.max(0, 600 - (m.tick - a.me.resetAt)) : 0));
 watch(levels, l => { if (!l.includes(lev.value)) lev.value = l[0]; });
 watch(() => m.orderPreset, p => {
   if (!p) return;
@@ -149,8 +148,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
       <div v-if="mode === 'fut'">
         <div class="field-label">
           <span>레버리지 (최대 {{ levels[levels.length - 1] }}배)</span>
-          <span v-if="lockRemainSec > 0" class="liq-cell">고배율 잠금 {{ Math.floor(lockRemainSec / 60) }}:{{ String(lockRemainSec % 60).padStart(2, '0') }}</span>
-          <span v-else>격리 증거금</span>
+          <span>격리 증거금</span>
         </div>
         <div class="chips" :style="{ gridTemplateColumns: `repeat(${levels.length}, 1fr)` }">
           <button v-for="l in levels" :key="l" :data-lev="l" :aria-pressed="lev === l" @click="lev = l">{{ l }}x</button>

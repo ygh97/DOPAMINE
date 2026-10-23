@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="queenGold" x1="12" y1="8" x2="52" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#fef08a"/>
+      <stop offset="50%" stop-color="#facc15"/>
+      <stop offset="100%" stop-color="#ca8a04"/>
+    </linearGradient>
+  </defs>
+  <polygon points="32,4 56,14 52,46 32,60 12,46 8,14" fill="#2a1b05" stroke="url(#queenGold)" stroke-width="3.2"/>
+  <!-- Radiant Wings -->
+  <path d="M28 32 C14 20 8 24 12 34 C15 40 24 38 28 35 Z" fill="#fef9c3" fill-opacity="0.45" stroke="#fde047" stroke-width="1.5"/>
+  <path d="M36 32 C50 20 56 24 52 34 C49 40 40 38 36 35 Z" fill="#fef9c3" fill-opacity="0.45" stroke="#fde047" stroke-width="1.5"/>
+  <!-- Golden Queen Body & Crown -->
+  <ellipse cx="32" cy="45" rx="7.5" ry="7" fill="url(#queenGold)" stroke="#fef08a" stroke-width="1.5"/>
+  <circle cx="32" cy="26" r="8.5" fill="url(#queenGold)" stroke="#ffffff" stroke-width="1.5"/>
+  <polygon points="24,18 27,11 32,15 37,11 40,18" fill="#facc15" stroke="#fef08a" stroke-width="1.4"/>
+  <circle cx="32" cy="15" r="1.6" fill="#38bdf8"/>
+  <ellipse cx="28.5" cy="26" rx="2.2" ry="3" fill="#422006"/>
+  <ellipse cx="35.5" cy="26" rx="2.2" ry="3" fill="#422006"/>
+</svg>

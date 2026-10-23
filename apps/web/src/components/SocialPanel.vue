@@ -25,6 +25,8 @@ const loadHall = async () => {
   if (hallSeason.value == null || !tabs.includes(hallSeason.value)) hallSeason.value = d.seasons.at(-1) ?? d.current;
 };
 const isMe = (name: string) => !!a.me && a.me.name.toLowerCase() === name.toLowerCase();
+/** 개미 계급 닉네임 색 (독침개미~) */
+const tierName = (name: string) => { const t = m.tierFor(name); return t?.nameColor ? { color: t.color } : undefined; };
 async function saveHallMessage(t: TopRow) {
   if (await a.hallMessage(t.season, (drafts.value[t.season] ?? "").trim())) { drafts.value[t.season] = ""; await loadHall(); }
 }
@@ -285,7 +287,7 @@ async function toggleBan(name: string, banned: boolean) {
             <td>{{ r.rank }}</td>
             <td class="rk-name">
               <span v-if="kindBadge(r.kind)" class="kind-badge" :title="r.kind === 'bot' ? '봇' : '세력'">{{ kindBadge(r.kind) }}</span>
-              <b :class="{ 'champ-name': m.isChamp(r.name) }">{{ r.name }}</b>
+              <b :class="{ 'champ-name': m.isChamp(r.name) }" :style="tierName(r.name)">{{ r.name }}</b>
               <NameBadges :name="r.name" />
               <span v-if="r.clearedTick" class="stage legend">전설</span>
               <span v-else-if="r.gradTick" class="stage grad">졸업</span>
@@ -427,7 +429,9 @@ async function toggleBan(name: string, banned: boolean) {
               'is-mine': c.name === a.me?.name,
               'is-broadcast': c.name === '⚡전광판',
               'is-whisper': !!c.to,
+              [`tier-${m.tierFor(c.name)?.bubble}`]: !c.to && !!m.tierFor(c.name)?.bubble,
             }"
+            :style="!c.to && m.tierFor(c.name)?.bubble ? { '--tier-color': m.tierFor(c.name)!.color } : undefined"
             :data-msg-id="c.id"
           >
             <div class="chat-card-head">
@@ -440,6 +444,7 @@ async function toggleBan(name: string, banned: boolean) {
                 type="button"
                 class="chat-user-btn"
                 :class="{ 'mine-name': c.name === a.me?.name, 'champ-name': m.isChamp(c.name) }"
+                :style="tierName(c.name)"
                 :title="c.name === '⚡전광판' ? '' : '클릭: 포트폴리오 훔쳐보기 / 우클릭: 귓속말'"
                 @click="c.name !== '⚡전광판' && (m.spyTarget = c.name)"
                 @contextmenu.prevent="startWhisper(c.name)"

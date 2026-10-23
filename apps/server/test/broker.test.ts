@@ -8,6 +8,7 @@ import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { backupDb, openDb } from "../src/db.ts";
+import { liveFrames, peopleRanks, settleLp } from "../src/ranks.ts";
 import { badgesOf, bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot, setTop3Message, touchSeason } from "../src/season.ts";
 
 const T0 = 1_792_000_000_000;
@@ -427,7 +428,7 @@ test("같은 종목·방향·배율 선물은 하나로 합친다 (물타기): �
   assert.equal((s.db.prepare("SELECT COUNT(*) AS c FROM futures WHERE user_id = ?").get(u) as { c: number }).c, 3, "DB에서도 합침");
 });
 
-test("선물 레버리지 한도 및 다시 시작 후 10분간 5배 초과 금지", async () => {
+test("선물 레버리지 한도, 다시 시작한 직후에도 최대 배율 가능 (2026-10-24 리셋 제한 삭제)", async () => {
   const s = setup();
   const u = s.user("lev_tester");
   assert.throws(() => s.broker.openFuture(u, "BTC", "long", 20, 10), OrderError, "코인은 최대 10배");
@@ -435,11 +436,8 @@ test("선물 레버리지 한도 및 다시 시작 후 10분간 5배 초과 금�
   await openFut(s, u, "NVDA", "short", 10, 10);
   s.broker.reset(u);
   assert.equal(s.broker.me(u).futures.length, 0);
-  assert.throws(() => s.broker.openFuture(u, "NVDA", "long", 10, 10), OrderError, "리셋 직후 10배 금지");
-  await openFut(s, u, "NVDA", "long", 5, 10);
-  for (let i = 0; i < 600; i++) s.tick();
   await openFut(s, u, "NVDA", "long", 10, 10);
-  assert.ok(s.broker.me(u).futures.some(f => f.lev === 10), "10분 뒤에는 10배 가능"); // 앞의 5배 롱은 그사이 악재로 청산될 수도 있다
+  assert.ok(s.broker.me(u).futures.some(f => f.lev === 10), "리셋 직후 10배 가능");
 });
 
 test("강제 청산: 증거금 90% 손실 가격이 되면 바로 시장가 강제 청산", async () => {
@@ -700,6 +698,56 @@ test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다�
   bots.tick(s.tick().news);
   assert.equal(nameOf(whale), wname, "고래 이름 그대로");
   assert.ok(Math.abs(s.broker.equity(s.broker.account(whale)) - 5_000_000) < 1, "고래는 $500만으로");
+});
+
+test("개미 계급 LP 정산: 순위별 +LP·동점·전설·손실·51위 밖·피크 경감·23시 리셋·휴면·보호선, 시즌당 한 번", async () => {
+  const s = setup();
+  const sid = s.season.id;
+  const row = (name: string, equity: number, legend = false) => ({ rank: 0, name, kind: "user" as const, equity, returnPct: 0, clearedTick: legend ? 1 : null, gradTick: null });
+  const ids: Record<string, number> = {};
+  for (const n of ["일등", "공동", "삼등", "전설", "손실", "여왕", "여왕휴면", "보호", "늦리셋", "구경"]) ids[n] = s.user(n);
+  const set = (n: string, sql: string, ...v: (number | null)[]) => s.db.prepare(`UPDATE users SET ${sql} WHERE id = ?`).run(...v, ids[n]);
+  const act = (n: string, base: number, turnover: number, peak = 0, late = 0) =>
+    s.db.prepare("UPDATE accounts SET base_equity = ?, turnover = ?, peak_trade = ?, late_reset = ? WHERE user_id = ? AND season_id = ?").run(base, turnover, peak, late, ids[n], sid);
+  set("여왕", "lp = ?", 1700); act("여왕", 100_000, 50_000, 1);              // 10단계 손실 + 20시 이후 체결: -45 → -22 (0 쪽으로)
+  set("여왕휴면", "lp = ?, idle_seasons = ?", 1700, 1);                      // 10단계, 이틀째 비활동: -35
+  set("보호", "lp = ?, lp_floor = ?", 125, 120); act("보호", 100_000, 50_000); // 3단계 손실: 감점 0
+  act("손실", 100_000, 50_000); set("손실", "lp = ?", 230);                  // 4단계 손실(활동): -10
+  act("늦리셋", 100_000, 50_000, 0, 1); set("늦리셋", "lp = ?", 400);        // 수익이어도 23시 이후 리셋이면 손실 처리: 5단계 -15
+  set("구경", "lp = ?", 400); act("구경", 100_000, 5_000);                   // 거래대금 5% = 비활동: 감점 없음
+  const ranking = [row("일등", 200_000), row("공동", 200_000), row("전설", 10_500_000, true), row("삼등", 150_000), row("늦리셋", 140_000), row("손실", 90_000), row("여왕", 80_000), row("보호", 70_000), row("구경", 60_000)]
+    .sort((x, y) => y.equity - x.equity);
+  assert.deepEqual(peopleRanks(ranking).map(p => p.rank), [1, 2, 2, 4, 5, 6, 7, 8, 9], "총자산이 같으면 같은 순위");
+  assert.deepEqual(Object.keys(liveFrames(ranking)), ["전설", "일등", "공동", "삼등", "늦리셋"], "테두리는 원금 초과만");
+  settleLp(s.db, sid, ranking);
+  const lp = (n: string) => (s.db.prepare("SELECT lp FROM users WHERE id = ?").get(ids[n]) as { lp: number }).lp;
+  assert.equal(lp("전설"), 120 + 40, "1위 + 전설");
+  assert.equal(lp("일등"), 95, "공동 2위는 둘 다 2위 LP");
+  assert.equal(lp("공동"), 95);
+  assert.equal(lp("삼등"), 50, "4위는 금테 +50");
+  assert.equal(lp("늦리셋"), 385, "23시 이후 리셋: 손실 처리");
+  assert.equal(lp("손실"), 220);
+  assert.equal(lp("여왕"), 1678, "피크 경감 -22");
+  assert.equal(lp("여왕휴면"), 1665, "휴면 -35");
+  assert.equal(lp("보호"), 125);
+  assert.equal(lp("구경"), 400, "비활동은 감점 없음");
+  settleLp(s.db, sid, ranking);
+  assert.equal(lp("전설"), 160, "같은 시즌은 한 번만");
+  // 보호선: 120을 넘은 적 있으면 그 아래로 안 내려간다
+  set("손실", "lp = ?, lp_floor = ?", 222, 120);
+  s.db.prepare("DELETE FROM lp_log").run(); // 다음 날처럼 다시 정산
+  settleLp(s.db, sid, [row("손실", 90_000)]);
+  assert.equal(lp("손실"), 212);
+  assert.equal(badgesOf(s.db, sid)["전설"].lp, 160, "배지에 LP");
+});
+
+test("LP 활동 기록: 사람의 체결은 첫 체결 때 자산과 거래대금을 남긴다", async () => {
+  const s = setup();
+  const u = s.user("활동가");
+  await order(s, u, "NVDA", "buy", 50);
+  const a = s.db.prepare("SELECT base_equity, turnover FROM accounts WHERE user_id = ? AND season_id = ?").get(u, s.season.id) as { base_equity: number; turnover: number };
+  assert.ok(a.base_equity > 99_000 && a.base_equity <= 100_000, `기준 자산 ${a.base_equity}`);
+  assert.ok(a.turnover > 45_000 && a.turnover <= 50_000, `거래대금 ${a.turnover}`);
 });
 
 test("단합 받아치기: 2분 안에 사람 3명이 같은 종목을 크게 사면 세력 하나가 반대로 숏을 잡는다, 2명이면 안 한다", async () => {

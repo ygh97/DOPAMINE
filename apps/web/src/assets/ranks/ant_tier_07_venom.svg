@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <polygon points="32,4 56,14 52,46 32,60 12,46 8,14" fill="#052e16" stroke="#4ade80" stroke-width="2.8"/>
+  <!-- Glowing Venom Stinger Abdomen -->
+  <ellipse cx="36" cy="40" rx="9" ry="7" fill="#16a34a" stroke="#86efac" stroke-width="1.6"/>
+  <polygon points="28,43 14,51 24,37" fill="#bef264" stroke="#4ade80" stroke-width="1.2"/>
+  <circle cx="29" cy="24" r="8.5" fill="#22c55e" stroke="#bbf7d0" stroke-width="1.5"/>
+  <ellipse cx="26" cy="24" rx="2.5" ry="3.5" transform="rotate(-15 26 24)" fill="#052e16"/>
+  <ellipse cx="33" cy="24" rx="2.5" ry="3.5" transform="rotate(15 33 24)" fill="#052e16"/>
+  <path d="M25 16 Q20 9 14 11 M33 16 Q38 9 44 11" stroke="#86efac" stroke-width="2.2" stroke-linecap="round"/>
+  <circle cx="48" cy="26" r="2" fill="#4ade80"/>
+  <circle cx="17" cy="31" r="1.8" fill="#bef264"/>
+</svg>

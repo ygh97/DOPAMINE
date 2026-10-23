@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none">
+  <rect x="10" y="18" width="60" height="54" rx="10" stroke="#38bdf8" stroke-width="3.5" fill="rgba(14,165,233,0.08)"/>
+  <rect x="13" y="21" width="54" height="48" rx="7" stroke="#facc15" stroke-width="1.8" stroke-dasharray="6 3"/>
+  <!-- Top Diamond Crown -->
+  <polygon points="22,20 26,6 35,14 40,3 45,14 54,6 58,20" fill="#facc15" stroke="#fef08a" stroke-width="1.8"/>
+  <polygon points="40,8 44,14 40,19 36,14" fill="#38bdf8"/>
+  <circle cx="26" cy="6" r="2" fill="#e0f2fe"/>
+  <circle cx="54" cy="6" r="2" fill="#e0f2fe"/>
+  <!-- Corner Diamonds -->
+  <polygon points="10,18 14,14 18,18 14,22" fill="#38bdf8"/>
+  <polygon points="70,18 66,14 62,18 66,22" fill="#38bdf8"/>
+  <polygon points="10,72 14,68 18,72 14,76" fill="#38bdf8"/>
+  <polygon points="70,72 66,68 62,72 66,76" fill="#38bdf8"/>
+</svg>

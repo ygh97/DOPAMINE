@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <polygon points="32,4 56,14 52,46 32,60 12,46 8,14" fill="#1e1035" stroke="#c084fc" stroke-width="3"/>
+  <!-- Holographic Commander Cape -->
+  <path d="M20 31 L12 50 L48 50 L44 31 Z" fill="#9333ea" fill-opacity="0.55" stroke="#e879f9" stroke-width="1.4"/>
+  <!-- Cyber Armor Torso -->
+  <path d="M21 33 L43 33 L39 48 L25 48 Z" fill="#475569" stroke="#e2e8f0" stroke-width="1.6"/>
+  <polygon points="32,36 36,41 32,46 28,41" fill="#a855f7"/>
+  <!-- Armored Head -->
+  <circle cx="32" cy="23" r="9.5" fill="#334155" stroke="#d8b4fe" stroke-width="1.8"/>
+  <polygon points="25,22 30,25 26,26" fill="#e879f9"/>
+  <polygon points="39,22 34,25 38,26" fill="#e879f9"/>
+  <path d="M27 14 Q22 7 16 9 M37 14 Q42 7 48 9" stroke="#e879f9" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

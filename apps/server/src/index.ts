@@ -4,12 +4,13 @@ import { timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SECTORS, type Bar, type NewsItem, type Quote } from "@dopamine/engine";
+import { SECTORS, tierOf, type Bar, type NewsItem, type Quote } from "@dopamine/engine";
 import { Auth, AuthError } from "./auth.ts";
 import { BotRunner } from "./bots.ts";
 import { Broker, OrderError } from "./broker.ts";
 import { Chat, ChatError, checkWords } from "./chat.ts";
 import { backupDb, openDb } from "./db.ts";
+import { liveFrames } from "./ranks.ts";
 import { badgesOf, bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, seasonStats, setTop3Message, targetTick, touchSeason } from "./season.ts";
 
 const PORT = Number(process.env.PORT ?? 4810);
@@ -95,8 +96,8 @@ function rollover() {
   send("season", seasonInfo());
 }
 const seasonInfo = () => ({ id: season.id, startedAt: season.startedAt, endsAt: season.startedAt + season.lengthMs });
-/** 랭킹(사람 + 🤖) 상위 20명, 참가자 수, 🏦 세력 */
-const rankingInfo = (rows = broker.ranking(20)) => ({ rows, players: broker.players, mm: broker.mmRanking(), whales: broker.whaleRanking() });
+/** 랭킹(사람 + 🤖) 상위 20명, 참가자 수, 🏦 세력, 실시간 순위 테두리(사람끼리 50위 안·원금 초과: 이름 → 순위) */
+const rankingInfo = (rows = broker.ranking(20)) => ({ rows, players: broker.players, mm: broker.mmRanking(), whales: broker.whaleRanking(), frames: liveFrames(broker.ranking(Infinity)) });
 
 // JSON 크기를 줄이려고 유효숫자 7자리로 자른다 ($94,880.10, $0.3121 모두 충분)
 const r7 = (v: number) => Number(v.toPrecision(7));
@@ -323,6 +324,7 @@ app.post<{ Body: { name: string; password: string } }>("/api/join", {
 }, async (req, reply) => {
   if (!joinAllowed(clientIp(req))) return reply.code(429).send({ error: "참가 시도가 너무 많습니다. 1분 뒤에 다시 시도하세요." });
   const { token, userId, name, created } = auth.join(req.body.name, req.body.password);
+  announceEntry(userId);
   return { token, name, created, me: broker.me(userId) };
 });
 
@@ -330,8 +332,26 @@ app.post("/api/logout", async req => { auth.logout(req.headers.authorization); r
 
 app.get("/api/me", async (req, reply) => {
   const id = userOf(req, reply);
+  if (id) announceEntry(id);
   return id && broker.me(id);
 });
+
+/**
+ * 개미 계급 입장 알림 (8~10단계): 시즌(하루)에 사람마다 한 번 전광판에. 화면은 [입장] 말머리 뒤 계급 이름으로 전광판을 그 계급 색으로 칠한다.
+ * 이미 보냈는지는 오늘 시즌의 전광판 기록으로 본다 (서버를 다시 켜도 두 번 안 뜬다)
+ */
+const entered = new Set<string>();
+function announceEntry(userId: number) {
+  const key = `${season.id}:${userId}`;
+  if (entered.has(key)) return;
+  const u = db.prepare("SELECT name, lp FROM users WHERE id = ? AND kind = 'user'").get(userId) as { name: string; lp: number } | undefined;
+  const t = u && tierOf(u.lp);
+  if (!u || !t?.entryBanner) return;
+  entered.add(key);
+  const text = `[입장] ${t.name} ${u.name}님이 입장하셨습니다`;
+  if (db.prepare("SELECT 1 FROM chat_messages WHERE user_id = 0 AND text = ? AND at >= ?").get(text, season.startedAt)) return;
+  send("chat", chat.system(text));
+}
 
 // 비중(pct) 대신 수량(qty)을 직접 넣을 수 있다 (둘 중 하나)
 app.post<{ Body: { sym: string; side: string; pct: number; qty?: number } }>("/api/order", {
