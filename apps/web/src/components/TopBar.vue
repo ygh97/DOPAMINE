@@ -30,8 +30,8 @@ const left = computed(() => {
   const h = Math.floor(ms / 3_600_000), d = Math.floor(h / 24), min = Math.floor((ms % 3_600_000) / 60_000);
   return d ? `${d}일 ${h % 24}시간 남음` : h ? `${h}시간 ${min}분 남음` : `${min}분 ${Math.floor((ms % 60_000) / 1000)}초 남음`;
 });
-// 다음 목표: 20배 졸업 전에는 졸업, 졸업 뒤에는 100배 전설
-const nextGoal = computed(() => (a.me?.gradTick == null ? { label: "20배 졸업", value: a.me?.grad ?? 2e6 } : { label: "100배 전설", value: a.me?.goal ?? 1e7 }));
+// 다음 목표: 50배 졸업 전에는 졸업, 졸업 뒤에는 100배 전설
+const nextGoal = computed(() => (a.me?.gradTick == null ? { label: "50배 졸업", value: a.me?.grad ?? 5e6 } : { label: "100배 전설", value: a.me?.goal ?? 1e7 }));
 const goalPct = computed(() => Math.min(100, (a.equity / nextGoal.value.value) * 100));
 
 async function submit() {
@@ -66,7 +66,7 @@ function restart() {
       <button class="icon-btn" data-act="theme" @click="ui.toggleTheme()">{{ ui.theme === "dark" ? "라이트" : "다크" }}</button>
     </div>
     <form v-else class="account join" @submit.prevent="submit">
-      <span class="muted join-hint">$100,000 → 20배 졸업 · 100배 전설</span>
+      <span class="muted join-hint">$100,000 → 50배 졸업 · 100배 전설</span>
       <input v-model="name" name="name" placeholder="이름 (2~12자)" maxlength="12" autocomplete="username" required>
       <input v-model="password" name="password" type="password" placeholder="비밀번호 6자 이상" minlength="6" maxlength="64" autocomplete="current-password" required>
       <button class="join-btn" :disabled="a.busy">참가하기</button>

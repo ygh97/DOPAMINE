@@ -28,7 +28,7 @@ if (seeds.length > 1) {
   const nums = (re: RegExp) => outs.map(o => re.exec(o)).filter(Boolean).map(m => Number(m![1]));
   const med = (a: number[]) => a.sort((x, y) => x - y)[Math.floor(a.length / 2)];
   const sum = (k: number) => totals.reduce((s, t) => s + t[k], 0), n = Math.max(1, sum(2));
-  console.log(`== 전체 ${sum(2)}명: 20배 졸업 ${sum(0)} (${((sum(0) / n) * 100).toFixed(1)}%) · 100배 전설(시즌 끝 유지) ${sum(1)} (${((sum(1) / n) * 100).toFixed(1)}%) · 100배 도달 ${sum(3)} (${((sum(3) / n) * 100).toFixed(1)}%)`
+  console.log(`== 전체 ${sum(2)}명: 50배 졸업 ${sum(0)} (${((sum(0) / n) * 100).toFixed(1)}%) · 100배 전설(시즌 끝 유지) ${sum(1)} (${((sum(1) / n) * 100).toFixed(1)}%) · 100배 도달 ${sum(3)} (${((sum(3) / n) * 100).toFixed(1)}%)`
     + ` · 주식 중앙 ${med(nums(/주식 중앙 ([\d.]+)배/))}배 · 거품 최대 ${Math.max(...nums(/거품 주식 \+([\d.]+)%/))}% · tick 최대 ${Math.max(...nums(/tick 평균 [\d.]+ms · 최대 ([\d.]+)ms/))}ms`);
 } else {
   run(seeds[0] ?? 1);

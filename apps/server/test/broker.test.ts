@@ -308,19 +308,19 @@ test("엔진이 바뀌어 스냅샷을 못 읽어도 시즌은 이어진다: 처
   assert.equal(currentSeason(s.db, 1, 1000, 7 * 86_400_000, T0).id, s.season.id, "시즌 그대로");
 });
 
-test("졸업(20배)·전설(100배) 알림, 시즌 종료: 명예의 전당은 전설만, 새 시즌은 새 seed와 $100,000 계좌", async () => {
+test("졸업(50배)·전설(100배) 알림, 시즌 종료: 명예의 전당은 전설만, 새 시즌은 새 seed와 $100,000 계좌", async () => {
   const s = setup(10);
   const a = s.user("winner"), b = s.user("legend"), c = s.user("grad"), d = s.user("fourth");
   await order(s, a, "NVDA", "buy", 50);
   void d;
   s.broker.account(b).cash = 11_000_000; // 100배 넘김 → 졸업 + 전설
-  s.broker.account(c).cash = 3_000_000;  // 20배 넘김 → 졸업만
+  s.broker.account(c).cash = 6_000_000;  // 50배 넘김 → 졸업만
   s.tick();
   const rows = s.broker.ranking(Infinity);
   const casts = s.broker.drainBroadcasts();
   assert.ok(casts.some(t => t.startsWith("[전설]") && t.includes("legend")), "전설 알림");
   assert.ok(casts.some(t => t.startsWith("[졸업]") && t.includes("grad")), "졸업 알림");
-  assert.equal(rows.find(r => r.name === "grad")?.gradTick != null && rows.find(r => r.name === "grad")?.clearedTick, null, "20배는 졸업만");
+  assert.equal(rows.find(r => r.name === "grad")?.gradTick != null && rows.find(r => r.name === "grad")?.clearedTick, null, "50배는 졸업만");
   const next = finishSeason(s.db, s.season, rows, T0 + s.season.lengthMs + 1000);
   assert.equal(next.id, s.season.id + 1);
   assert.notEqual(next.seed, s.season.seed);
@@ -748,7 +748,7 @@ test("전광판 loud: 사람 청산·졸업은 LIVE 바에, 봇 청산은 증거
   assert.equal(liq("개미1", 1_000), true);
   assert.equal(liq("레버봇01", 199_999), false);
   assert.equal(liq("레버봇01", 250_000), true);
-  assert.equal(chat.system("[졸업] 🎓 개미1님이 총자산 $2,000,000 달성으로 20배 졸업!").loud, true);
+  assert.equal(chat.system("[졸업] 🎓 개미1님이 총자산 $2,000,000 달성으로 50배 졸업!").loud, true);
   assert.deepEqual(chat.recent(10).filter(m => m.name === "⚡전광판").map(m => m.loud), [true, false, true, true]);
 });
 

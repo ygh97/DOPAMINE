@@ -14,7 +14,7 @@ import type { Season } from "./season.ts";
 
 export const START_CASH = 100_000;
 export const MM_CASH = 2_000_000; // 🏦 세력·🐋 고래 계정 시작 자금
-export const GRAD = 2_000_000;    // 20배 = 졸업
+export const GRAD = 5_000_000;    // 50배 = 졸업 (2026-10-23 전: 20배)
 export const GOAL = 10_000_000;   // 100배 = 전설 (명예의 전당)
 const FEE = 0.0005;              // 시장가(호가를 먹는 쪽) 수수료. 지정가로 걸어 둔 쪽은 0
 const MAX_OPEN_ORDERS = 20;      // 1인 미체결 지정가 최대
@@ -36,7 +36,7 @@ export interface Future { id: number; sym: string; side: "long" | "short"; lev: 
 export type AccountKind = "user" | "bot" | "mm" | "whale";
 export interface Account {
   userId: number; name: string; kind: AccountKind; cash: number; positions: Map<string, Position>; futures: Map<number, Future>;
-  /** clearedTick: 100배 전설이 된 tick (100배 아래로 내려가면 null), gradTick: 20배 졸업 달성 tick */
+  /** clearedTick: 100배 전설이 된 tick (100배 아래로 내려가면 null), gradTick: 50배 졸업 달성 tick */
   clearedTick: number | null; gradTick: number | null; resetAt: number | null;
   /** 🤖 봇 교대로 쉬는 중: 매매하지 않고 랭킹에서 숨는다 (메모리만) */
   resting?: boolean;
@@ -866,13 +866,13 @@ export class Broker {
     const money = (v: number) => `$${Math.round(v).toLocaleString()}`;
     const raw = [...this.accounts.values()].filter(acc => !acc.resting).map(acc => {
       const equity = this.equity(acc);
-      // 20배 졸업·100배 전설은 사람과 봇만 (봇은 졸업률 확인용으로 기록만, 전광판 알림은 사람만)
+      // 50배 졸업·100배 전설은 사람과 봇만 (봇은 졸업률 확인용으로 기록만, 전광판 알림은 사람만)
       if (acc.kind === "user" || acc.kind === "bot") {
         const tick = this.market.tick, loud = acc.kind === "user";
         if (equity >= GRAD && acc.gradTick == null) {
           acc.gradTick = tick;
           this.stmts.updGrad.run(tick, acc.userId, this.season.id);
-          if (loud) this.broadcasts.push(`[졸업] 🎓 ${acc.name}님이 총자산 ${money(equity)} 달성으로 20배 졸업!`);
+          if (loud) this.broadcasts.push(`[졸업] 🎓 ${acc.name}님이 총자산 ${money(equity)} 달성으로 50배 졸업!`);
         }
         // 전설은 100배를 유지하는 동안만: 아래로 내려가면 지워지고, 시즌 끝에 100배 이상인 사람만 명예의 전당에 남는다.
         // 전광판 알림은 시즌에 사람마다 한 번 (기준선 근처에서 오르내릴 때 반복하지 않게)

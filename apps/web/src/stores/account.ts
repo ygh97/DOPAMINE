@@ -17,7 +17,7 @@ export interface FuturePos {
 /** reduce = 선물 종료 지정가 (posId 포지션만 줄인다) */
 export interface OpenOrder { id: number; sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; lev: number; price: number; qty: number; filled: number; cash: number; held: number; reduce?: boolean; posId?: number | null }
 export interface Me {
-  /** grad: 20배 졸업 금액, goal: 100배 전설 금액 */
+  /** grad: 50배 졸업 금액, goal: 100배 전설 금액 */
   name: string; cash: number; equity: number; returnPct: number; goal: number; grad: number;
   clearedTick: number | null; gradTick: number | null; resetAt: number | null; tick: number;
   positions: { sym: string; qty: number; avg: number }[];

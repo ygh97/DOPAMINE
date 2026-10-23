@@ -7,7 +7,7 @@ import { playWhisperDing } from "../sound";
 
 /** user: 사람, bot: 🤖 봇, mm: 🏦 세력, whale: 🐋 고래 */
 export type AccountKind = "user" | "bot" | "mm" | "whale";
-/** gradTick: 20배 졸업, clearedTick: 100배 전설 */
+/** gradTick: 50배 졸업, clearedTick: 100배 전설 */
 export interface RankRow { rank: number; name: string; kind?: AccountKind; equity: number; returnPct: number; clearedTick: number | null; gradTick?: number | null }
 /** reacted: 강제청산 알림에 누군가 이미 티배깅·묵념을 했다 (버튼을 숨긴다) */
 export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean; loud?: boolean }
