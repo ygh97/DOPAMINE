@@ -110,6 +110,8 @@ export interface MarketOptions {
   ticksPerDay: number;
   /** 화면 달력(gameDate)의 하루 길이(틱). 0이면 ticksPerDay. 가격·뉴스 규칙에는 안 쓴다 */
   calendarDayTicks: number;
+  /** 시즌마다 한 번 "가상 금융위기" (비공개 규칙) */
+  crash: boolean;
   /** 화면 달력이 시즌 시작에 이미 지나 있는 틱 (날짜를 실제 시각에 맞춘다) */
   calendarOffsetTicks: number;
   prevResetDays: number;

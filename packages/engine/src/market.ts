@@ -13,6 +13,7 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   ticksPerBar: 60,        // 1분봉 = 60틱(1초 tick)
   ticksPerDay: 80,        // 게임 하루 (실적·심사·등락률 같은 규칙의 하루)
   calendarDayTicks: 0,    // 화면 달력의 하루 (0이면 ticksPerDay). 서버가 시즌 하나 = 달력 1년이 되게 넣는다. 규칙에는 안 쓴다
+  crash: false,           // 시즌마다 한 번 "가상 금융위기" (비공개 규칙, SECRET.md). 서버가 매일 시즌에서 켠다
   calendarOffsetTicks: 0, // 화면 달력이 시즌 시작에 이미 지나 있는 틱 (매일 시즌: 그날 00:00부터 시즌 시작까지). 날짜가 실제 시각에 맞는다
   prevResetDays: 1,       // 등락률 기준가(prev) 초기화 주기 = 게임 하루(80틱)
   seasonGrowth: [1.5, 3], // 우상향은 여기서만 만든다: 시즌 동안 적정가가 1.5~3배 (시즌마다 하나를 뽑음)
@@ -74,6 +75,8 @@ interface AssetState extends AssetDef {
   variance: number;
   regime: "range" | "trend";
   pending: Impulse[];
+  /** 가상 금융위기 충격: 가격에만 더하고 변동성(variance)에는 넣지 않는다 (안 그러면 위기 뒤 한동안 마구 흔들린다) */
+  crashPending?: Impulse[];
   bars: Bar[];
   rsi: number;
   avgGain: number;
@@ -127,6 +130,8 @@ export interface Market {
   consensus(sym: string): Consensus;
   /** 엔진 전체 상태를 JSON으로 (난수 상태 포함). createMarket({ snapshot })으로 이어서 돌릴 수 있다 */
   snapshot(): string;
+  /** 가상 금융위기 투매 구간인지 (서버의 세력·고래가 매물을 던진다). 화면·API로 내보내지 않는다 */
+  crashing(): boolean;
 }
 
 // 내부 상태를 꺼내고 넣을 수 있는 난수 (스냅샷용)
@@ -153,8 +158,24 @@ type Task =
   | { at: number; kind: "etf"; sym: string; approve: boolean; eventId: string; title: string }
   | { at: number; kind: "rumor"; sym: string; confirm: boolean; pre: number; eventId: string }
   | { at: number; kind: "memeDump"; sym: string; size: number }
+  | { at: number; kind: "crash" }
+  | { at: number; kind: "crashNews"; step: 1 | 2 }
   | { at: number; kind: "score"; analyst: string; rid: string; sym: string; opinion: Opinion; price0: number };
 const SNAPSHOT_VERSION = 1;
+
+// 가상 금융위기 원인 (실존 기관·인물 없음). 시즌마다 하나를 뽑는다
+const CRASH_REASONS = [
+  { h: "가상 대형 투자은행 파산설 확산", b: "자산 규모 상위권의 가상 투자은행이 지급 불능 상태라는 소식이 퍼지며 금융권 전반으로 공포가 번지고 있다." },
+  { h: "가상 중앙은행 기습 금리 인상", b: "예고 없는 대폭 금리 인상에 위험자산 전반에서 대규모 매도가 쏟아지고 있다." },
+  { h: "가상 국채 시장 발작, 금리 폭등", b: "국채 금리가 하루 만에 급등하며 레버리지 자금이 한꺼번에 빠져나가고 있다." },
+  { h: "대형 가상 헤지펀드 마진콜 연쇄 청산", b: "초대형 가상 헤지펀드의 마진콜이 연쇄 강제 청산으로 번지며 전 시장에 매물이 쏟아지고 있다." },
+  { h: "가상 거대 부동산 개발사 디폴트", b: "대형 가상 부동산 개발사의 채무 불이행 소식에 신용 경색 우려가 확산하고 있다." },
+  { h: "가상 거래소 해킹, 코인 대량 유출설", b: "대형 가상 코인 거래소에서 대규모 유출 정황이 포착됐다는 소식에 코인과 위험자산이 동반 급락하고 있다." },
+  { h: "가상 무역 전쟁 전면 확대 선언", b: "주요국 간 관세 전쟁이 전면전으로 번지며 경기 침체 공포가 시장을 덮쳤다." },
+  { h: "가상 반도체 공급망 붕괴", b: "핵심 가상 공급망이 멈췄다는 소식에 기술주를 시작으로 전 업종이 무너지고 있다." },
+  { h: "가상 스테이블코인 페그 붕괴", b: "대표 가상 스테이블코인의 1달러 연동이 깨지며 코인 시장에서 시작된 패닉이 증시로 번지고 있다." },
+  { h: "가상 신용평가사, 국가 신용등급 강등", b: "가상 신용평가사의 기습적인 국가 신용등급 강등에 외국인 자금이 한꺼번에 이탈하고 있다." },
+];
 
 // 지어 낸 신흥주 이름 조각: 앞(2자 기호) + 뒤(1자 기호) + 무작위 1자 = 4자 티커
 const VENTURE_HEADS = [
@@ -181,7 +202,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   const sign = () => (rand() < 0.5 ? -1 : 1);
 
   let startTime = Math.floor(now / cfg.barMs) * cfg.barMs - (cfg.warmupBars - 1) * cfg.barMs;
-  let tick = 0, nextNewsAt = 3, warm = true, assetsVersion = 0, nextGradAt = Infinity;
+  let tick = 0, nextNewsAt = 3, warm = true, assetsVersion = 0, nextGradAt = Infinity, crashUntil = 0;
   let news: NewsItem[] = [];
   let actions: CorporateAction[] = []; // 이번 tick의 주식병합·폐지·승격·상장 (서버가 보유 정산에 쓴다)
   let scheduled: Task[] = [];
@@ -552,6 +573,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       case "etf": return etfResult(t);
       case "rumor": return rumorResult(t);
       case "memeDump": return memeDump(t);
+      case "crash": return crash();
+      case "crashNews": return crashNews(t.step);
       case "score": return scoreReport(t);
       case "venture1": {
         const a = state[t.sym];
@@ -758,11 +781,13 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       const fair = a.eps && a.fairPER ? a.eps * a.fairPER : a.anchor * Math.exp(a.dev);
       const pull = -cfg.kappa * (a.market === "coin" ? 0.3 : 1) * Math.log(a.price / fair);
       // 박스권: 과매수면 하락 쪽으로, 추세장: 강한 쪽으로 약하게
-      const rsiTilt = ((a.rsi - 50) / 50) * cfg.rsiWeight * a.sigma * (a.regime === "range" ? -1 : 0.5);
+      // 가상 금융위기 뒤 1시간은 과매도 되돌림(RSI)을 끈다: 안 그러면 바닥에서 위기 전 가격까지 튀어 오른다
+      const rsiTilt = crashUntil && tick < crashUntil + 3600 ? 0 : ((a.rsi - 50) / 50) * cfg.rsiWeight * a.sigma * (a.regime === "range" ? -1 : 0.5);
       const shock = drain(a.pending);
       const noise = gauss() * a.sigma * Math.sqrt(a.variance);
       // drift: 적정가와 같은 속도로 가격도 오른다. 당김(kappa)이 약해도 시즌 우상향을 따라가게 (당김은 이탈만 되돌린다)
-      let r = drift + a.betaM * m + a.betaS * (sec[a.sector] || 0) + noise + pull + rsiTilt + srTilt(a) + shock;
+      const crashShock = a.crashPending?.length ? drain(a.crashPending) : 0;
+      let r = drift + a.betaM * m + a.betaS * (sec[a.sector] || 0) + noise + pull + rsiTilt + srTilt(a) + shock + crashShock;
       if (a.jump && rand() < a.jump) r += gauss() * a.sigma * 6;
       const open = a.price;
       a.price = Math.max(0.01, a.price * Math.exp(r));
@@ -794,6 +819,34 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
 
   // 시작 가격 맞추기: 과거 차트를 먼저 만든 뒤 전체를 비율로 늘이거나 줄여 마지막 가격 = 설정한 시작가.
   // 그리고 시작가를 적정가로 다시 잡는다 (주식 EPS = 가격 / 적정 PER, 그 외 앵커 = 가격).
+  // ----- 가상 금융위기 (비공개 규칙, SECRET.md): 예고 없이 한 번에 터지고, 세력 차트처럼 계단식으로 최대 -50%, 바닥에서 -40%까지만 회복 -----
+  function crash() {
+    const reason = CRASH_REASONS[Math.floor(rand() * CRASH_REASONS.length)];
+    for (const a of live()) {
+      // 낙폭: 코인·신흥주 45~50%, 주식은 시장 민감도(베타)에 따라 25~50%. 바닥 -depth, 그 뒤 -0.8×depth에서 멈춘다
+      const depth = a.market === "stock" ? Math.min(0.5, Math.max(0.25, 0.22 + 0.2 * a.betaM)) * uni(0.92, 1.0) : uni(0.45, 0.5);
+      const L = Math.log(1 - depth), settle = Math.log(1 - 0.8 * depth);
+      // 회복은 위기 직전 가격의 settle까지만: 적정가를 거기로 옮긴다 (거품이 있었어도 기준은 직전 가격)
+      const target = a.price * Math.exp(settle);
+      if (a.eps != null && a.baseEps != null && a.fairPER) a.eps = Math.min(a.baseEps * cfg.epsBand[1], Math.max(a.baseEps * cfg.epsBand[0], target / a.fairPER));
+      else a.dev = Math.min(devBand[1], Math.max(devBand[0], Math.log(target / a.anchor)));
+      const q = (a.crashPending ??= []);
+      impulse(q, 0.45 * L, 180);                    // 1차 급락 (3분)
+      impulse(q, -0.12 * L, 150, 360);              // 데드캣 반등
+      impulse(q, 0.5 * L, 240, 600);                // 2차 급락 (반등에 산 롱 청산)
+      impulse(q, 0.17 * L, 90, 900);                // 마지막 투매 (긴 아래꼬리)
+      impulse(q, (settle - L) * 0.85, 1200, 1050);  // 바닥에서 일부 회복 (나머지는 적정가 당김)
+      a.volBoost = Math.max(a.volBoost, 1100);
+    }
+    crashUntil = tick + 1000;
+    scheduled.push({ at: tick + 620, kind: "crashNews", step: 1 }, { at: tick + 1060, kind: "crashNews", step: 2 });
+    publish({ kind: "시장", headline: `[속보] 가상 금융위기 · ${reason.h}… 전 시장 투매`, body: reason.b, symbols: [] });
+  }
+  function crashNews(step: 1 | 2) {
+    if (step === 1) publish({ kind: "시장", headline: "[속보] 공포 확산 · 마진콜 연쇄, 반등 뒤 투매 재개", body: "반등을 노린 매수세가 다시 꺾이며 레버리지 포지션의 강제 청산이 이어지고 있다.", symbols: [] });
+    else publish({ kind: "시장", headline: "가상 당국 긴급 시장 안정 조치 · 낙폭 일부 만회", body: "긴급 유동성 공급 발표 뒤 투매가 진정됐다. 다만 시장은 위기 이전 수준을 회복하지 못하고 있다.", symbols: [] });
+  }
+
   function rebase() {
     for (const a of live()) {
       const k = a.def.price / a.price;
@@ -810,6 +863,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     scheduled = scheduled.filter(t => t.kind !== "score"); // 과거 차트 구간의 리포트는 채점하지 않는다 (가격 비율이 바뀌었다)
     stats = freshStats();
     nextGradAt = tick + Math.round((cfg.gradCooldown / 2) * uni(0.7, 1.3));
+    // 가상 금융위기: 시즌의 30~80% 사이 어딘가 한 번. 따로 뽑는 난수라 다른 시세 경로는 그대로
+    if (cfg.crash) scheduled.push({ at: tick + Math.round(cfg.seasonTicks * (0.3 + 0.5 * mulberry32(seed ^ 0x5eed).next())), kind: "crash" });
   }
 
   // 스냅샷: 엔진의 모든 상태를 JSON 하나로. 서버 재시작 때 처음부터 재생하지 않고 이어서 돌린다
@@ -817,7 +872,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     return JSON.stringify({
       v: SNAPSHOT_VERSION, rng: rng.get(), tick, nextNewsAt, warm, assetsVersion,
       nextGradAt: Number.isFinite(nextGradAt) ? nextGradAt : null, startTime, news, scheduled,
-      marketPending, sectorPending, venturesBusy: [...venturesBusy], sparePool, state, drift, analysts: stats,
+      marketPending, sectorPending, venturesBusy: [...venturesBusy], sparePool, state, drift, analysts: stats, crashUntil,
     });
   }
   function restore(json: string) {
@@ -829,6 +884,12 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     sparePool = d.sparePool; state = d.state;
     drift = d.drift ?? drift; // drift가 없던 스냅샷은 새로 뽑은 값으로
     stats = d.analysts ?? freshStats();
+    crashUntil = d.crashUntil ?? 0;
+    // 위기 규칙이 생기기 전 스냅샷(이미 진행 중인 시즌): 아직 안 터졌고 시즌 80% 전이면 지금부터 그 사이 어딘가로 잡는다
+    if (cfg.crash && !d.warm && crashUntil === 0 && !scheduled.some(t => t.kind === "crash")) {
+      const start = cfg.warmupBars * cfg.ticksPerBar, lo = Math.max(tick + 600, start + Math.round(cfg.seasonTicks * 0.3)), hi = start + Math.round(cfg.seasonTicks * 0.8);
+      if (lo < hi) scheduled.push({ at: lo + Math.round((hi - lo) * mulberry32(seed ^ 0x5eed).next()), kind: "crash" });
+    }
     for (const a of Object.values(state)) a.dev ??= 0;
     for (const k in sectors) sectorPending[k] ??= [];
     news = news.filter(n => n.kind !== "세력");
@@ -896,6 +957,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     get news() { return news; },
     step,
     gameDate: () => gameDate(),
+    crashing: () => tick < crashUntil,
     quotes: () => live().map(toQuote),
     quote: sym => (state[sym] ? toQuote(state[sym]) : null),
     bars: sym => state[sym]?.bars ?? [],

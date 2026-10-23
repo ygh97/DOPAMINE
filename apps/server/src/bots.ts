@@ -6,7 +6,7 @@
 import { ASSETS, LEVERAGE, type NewsItem, type Quote } from "@dopamine/engine";
 
 /** 봇이 보는 시장: 호가창(Exchange)의 체결가·유동성 */
-export interface MarketView { readonly tick: number; quotes(): Quote[]; quote(sym: string): Quote | null; liquidity(sym: string): number | null; best(sym: string): { bid: number | null; ask: number | null } }
+export interface MarketView { readonly tick: number; quotes(): Quote[]; quote(sym: string): Quote | null; liquidity(sym: string): number | null; best(sym: string): { bid: number | null; ask: number | null }; crashing(): boolean }
 type Market = MarketView;
 import { START_CASH, type AccountKind, type Broker } from "./broker.ts";
 import type { Db } from "./db.ts";
@@ -367,8 +367,25 @@ class MarketMaker extends Agent {
   /** 명목 금액 → 예수금 대비 비중(%) */
   private pctFor(c: Ctx, notional: number, lev: number) { const cash = c.broker.account(this.userId).cash; return cash > 0 ? (notional / (lev * cash)) * 100 * this.k : 0; }
 
+  /**
+   * 가상 금융위기 투매 (비공개 규칙, SECRET.md): 지정가를 거두고, 롱·현물을 던지고, 숏을 잡는다.
+   * 실제 호가창에 시장가로 던져 거래량·연쇄 청산이 진짜로 생긴다. 숏은 15~25분 뒤 정리
+   */
+  private dump(c: Ctx) {
+    const r = this.rand, acc = c.broker.account(this.userId);
+    if (c.broker.ordersOf(this.userId).length) { this.cancelAll(c); return; }
+    if (r() > 0.25) return; // 계정마다 평균 4초에 한 번
+    this.lastOrder = c.tick;
+    const long = [...acc.futures.values()].find(f => f.side === "long" && !f.closing);
+    if (long) { try { c.broker.closeFuture(this.userId, long.id, 50).catch(() => {}); } catch { /* 다음 tick */ } return; }
+    const spot = [...acc.positions.keys()][0];
+    if (spot) { try { c.broker.place(this.userId, spot, "sell", 50).catch(() => {}); } catch { /* 다음 tick */ } return; }
+    this.open(c, pick(r, liveSyms(c)), "short", 5, 4 * this.k, Math.round(uni(r, 900, 1500)));
+  }
+
   act(c: Ctx) {
     const r = this.rand;
+    if (c.market.crashing()) { this.dump(c); return; }
     if (this.cycle.length > 1 && c.tick >= this.nextSwitch) { // 전략 교대: 정리가 끝나면 다음 전략
       if (!this.flatten(c)) return;
       this.at = (this.at + 1) % this.cycle.length;

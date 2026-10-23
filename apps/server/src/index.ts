@@ -25,7 +25,7 @@ const WEB_DIST = process.env.WEB_DIST ?? fileURLToPath(new URL("../../web/dist",
 // ENGINE_OPTIONS: 테스트용 엔진 설정 덮어쓰기 (JSON). 예: {"splitPrice":1000,"warmupBars":120}
 const ENGINE_OPTIONS = {
   // 매일 일정이면 화면 달력을 시즌 하나 = 1년차 1월 1일 ~ 12월 30일로 늘린다 (규칙의 게임 하루 80틱은 그대로)
-  ...(SEASON_MS == null ? { calendarDayTicks: Math.round(86_280_000 / 360 / TICK_MS) } : {}),
+  ...(SEASON_MS == null ? { calendarDayTicks: Math.round(86_280_000 / 360 / TICK_MS), crash: true } : {}),
   ...JSON.parse(process.env.ENGINE_OPTIONS ?? "{}"),
 };
 // EXCHANGE_OPTIONS: 테스트용 호가창 설정 덮어쓰기 (JSON). 예: {"backstop":{"stock":0.5,"coin":0.5,"venture":0.6}}

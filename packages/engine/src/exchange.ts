@@ -255,6 +255,8 @@ export class Exchange {
   bars(sym: string): readonly Bar[] { return this.st(sym)?.bars ?? []; }
   get tick() { return this.market.tick; }
   liquidity(sym: string) { return this.market.liquidity(sym); }
+  /** 가상 금융위기 투매 구간인지 (서버의 세력·고래용, 화면으로 내보내지 않는다) */
+  crashing() { return this.market.crashing(); }
 
   book(sym: string, depth = 10): BookView | null {
     const st = this.st(sym);
