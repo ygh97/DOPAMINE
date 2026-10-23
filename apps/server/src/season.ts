@@ -20,9 +20,12 @@ export function dailyEnd(t: number) {
   d.setHours(23, 58, 0, 0);
   return d.getTime();
 }
-/** 매일 일정: t 이후 시즌이 열리는 시각. 오늘 종료 전이면 지금, 아니면 다음 날 00:00 */
+/**
+ * 매일 일정: t 이후 시즌이 열리는 시각. 오늘 종료 1분 전보다 이르면 지금, 아니면 다음 날 00:00.
+ * (시즌 끝 tick은 23:58 직전 몇 초 안에 올 수 있다. 그 순간 "지금부터 23:58까지" 몇 초짜리 시즌을 만들면 안 된다)
+ */
 export function dailyStart(t: number) {
-  if (t < dailyEnd(t)) return t;
+  if (t < dailyEnd(t) - 60_000) return t;
   const d = new Date(t);
   d.setHours(24, 0, 0, 0);
   return d.getTime();

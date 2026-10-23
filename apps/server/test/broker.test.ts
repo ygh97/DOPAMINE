@@ -290,6 +290,10 @@ test("매일 일정: 00:00 시작·23:58 종료, 끝나면 다음 00:00까지 �
   const back = currentSeason(db, 1, 1000, null, at(21));
   assert.equal(back.startedAt, at(20, 30));
   assert.equal(back.startedAt + back.lengthMs, at(23, 58));
+  // 끝 tick이 23:58 몇 초 전에 와도 다음 시즌은 00:00부터 (몇 초짜리 시즌을 만들지 않는다)
+  const early = finishSeason(db, currentSeason(db, 1, 1000, null, at(21)), [], at(23, 58) - 1500, null);
+  assert.equal(early.startedAt, at(0, 0, 24));
+  db.prepare("DELETE FROM seasons WHERE id = ?").run(early.id); db.prepare("UPDATE seasons SET ended_at = NULL WHERE id = ?").run(back.id);
   // 23:58에 끝나면 다음 시즌은 00:00부터 23:58까지
   const s2 = finishSeason(db, back, [], at(23, 58), null);
   assert.equal(s2.startedAt, at(0, 0, 24));
