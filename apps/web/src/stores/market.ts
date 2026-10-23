@@ -102,6 +102,18 @@ export const useMarket = defineStore("market", () => {
   const viewers = ref(0);
   // 폴링으로 볼 때 서버가 화면 수를 셀 수 있게 탭마다 고유 id
   const vid = Math.random().toString(36).slice(2, 12);
+  // 5분 동안 마우스·키보드·터치·스크롤이 없으면 "쉬는 중"으로 알려 보는 사람 수에서 빠진다. 다시 움직이면 바로 돌아온다
+  const IDLE_MS = 5 * 60_000;
+  let lastInput = Date.now(), idleSent = false;
+  const sendPresence = (idle: boolean) => {
+    idleSent = idle;
+    void fetch("/api/presence", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ vid, idle }), keepalive: true }).catch(() => {});
+  };
+  if (typeof window !== "undefined") {
+    const touch = () => { lastInput = Date.now(); if (idleSent) sendPresence(false); };
+    for (const ev of ["pointerdown", "keydown", "wheel", "touchstart", "mousemove"]) window.addEventListener(ev, touch, { passive: true });
+    window.setInterval(() => { if (!idleSent && Date.now() - lastInput >= IDLE_MS) sendPresence(true); }, 15_000);
+  }
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
   const socialTab = ref<"chat" | "rank" | "mm" | "whale" | "hall" | "analyst">("rank");
@@ -249,7 +261,7 @@ export const useMarket = defineStore("market", () => {
       return;
     }
     source?.close();
-    source = new EventSource("/api/stream");
+    source = new EventSource(`/api/stream?vid=${vid}`);
     lastMessageAt = Date.now();
     source.onopen = () => { connected.value = true; void loadSnapshot(); void loadResearch(); }; // 재연결 시 놓친 상태 회복
     source.onerror = () => { connected.value = false; };

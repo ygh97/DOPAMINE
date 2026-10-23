@@ -110,15 +110,20 @@ function snapshot(viewerName?: string | null) {
 }
 
 // ---------- SSE ----------
-type Client = { write: (chunk: string) => boolean };
+type Client = { write: (chunk: string) => boolean; vid: string };
 const clients = new Set<Client>();
 // 1초 폴링으로 보는 화면(SSE를 버퍼링하는 프록시 뒤): 화면마다 만든 vid를 마지막으로 본 시각
 const pollers = new Map<string, number>();
-/** 지금 사이트를 보고 있는 화면 수 = SSE 연결 + 5초 안에 폴링한 화면 (손님 포함, 봇은 연결하지 않는다) */
+// 5분 동안 조작이 없는 화면의 vid (화면이 POST /api/presence로 알린다). 보는 사람 수에서 뺀다
+const idleVids = new Set<string>();
+/** 지금 사이트를 보고 있는 화면 수 = SSE 연결 + 5초 안에 폴링한 화면 - 쉬는 화면 (손님 포함, 봇은 연결하지 않는다) */
 function viewers() {
   const now = Date.now();
-  for (const [k, t] of pollers) if (now - t > 5000) pollers.delete(k);
-  return clients.size + pollers.size;
+  for (const [k, t] of pollers) if (now - t > 5000) { pollers.delete(k); idleVids.delete(k); }
+  let n = 0;
+  for (const c of clients) if (!idleVids.has(c.vid)) n++;
+  for (const k of pollers.keys()) if (!idleVids.has(k)) n++;
+  return n;
 }
 const settledLog: { tick: number; type: string; sym: string }[] = [];
 const splitLog: { tick: number; sym: string }[] = [];
@@ -538,10 +543,20 @@ app.get("/api/stream", (req, reply) => {
     "X-Accel-Buffering": "no",
   });
   res.write("retry: 3000\n\n");
-  const client: Client = { write: chunk => res.write(chunk) };
+  const vid = String((req.query as { vid?: string }).vid ?? "").slice(0, 40);
+  const client: Client = { write: chunk => res.write(chunk), vid };
   clients.add(client);
   const ping = setInterval(() => res.write(": ping\n\n"), 15_000);
-  req.raw.on("close", () => { clearInterval(ping); clients.delete(client); });
+  req.raw.on("close", () => { clearInterval(ping); clients.delete(client); if (!pollers.has(vid)) idleVids.delete(vid); });
+});
+
+// 화면이 쉬는 중(5분 동안 조작 없음)인지 알린다. 보는 사람 수에만 쓴다
+app.post<{ Body: { vid: string; idle: boolean } }>("/api/presence", {
+  schema: { body: { type: "object", required: ["vid", "idle"], properties: { vid: { type: "string", maxLength: 40 }, idle: { type: "boolean" } } } },
+}, async req => {
+  if (!req.body.idle) idleVids.delete(req.body.vid);
+  else if (idleVids.size < 10_000) idleVids.add(req.body.vid);
+  return { ok: true };
 });
 
 app.get("/api/health", async () => ({ ok: true, tick: market.tick, season: season.id, clients: clients.size, bootMs, replayed, fromSnapshot }));
