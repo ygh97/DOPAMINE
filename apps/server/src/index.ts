@@ -25,7 +25,7 @@ const WEB_DIST = process.env.WEB_DIST ?? fileURLToPath(new URL("../../web/dist",
 // ENGINE_OPTIONS: 테스트용 엔진 설정 덮어쓰기 (JSON). 예: {"splitPrice":1000,"warmupBars":120}
 const ENGINE_OPTIONS = {
   // 매일 일정이면 화면 달력을 시즌 하나 = 1년차 1월 1일 ~ 12월 30일로 늘린다 (규칙의 게임 하루 80틱은 그대로)
-  ...(SEASON_MS == null ? { calendarDayTicks: Math.round(86_280_000 / 360 / TICK_MS), crash: true } : {}),
+  ...(SEASON_MS == null ? { calendarDayTicks: Math.round(86_280_000 / 360 / TICK_MS) } : {}),
   ...JSON.parse(process.env.ENGINE_OPTIONS ?? "{}"),
 };
 // EXCHANGE_OPTIONS: 테스트용 호가창 설정 덮어쓰기 (JSON). 예: {"backstop":{"stock":0.5,"coin":0.5,"venture":0.6}}
@@ -43,7 +43,18 @@ let season = currentSeason(db, SEED, TICK_MS, SEASON_MS);
 function engineOptions(s: typeof season) {
   if (SEASON_MS != null) return ENGINE_OPTIONS;
   const midnight = new Date(s.startedAt); midnight.setHours(0, 0, 0, 0);
-  return { ...ENGINE_OPTIONS, calendarOffsetTicks: Math.max(0, Math.round((s.startedAt - midnight.getTime()) / TICK_MS)) };
+  return { ...ENGINE_OPTIONS, crash: crashSeason(s.id), calendarOffsetTicks: Math.max(0, Math.round((s.startedAt - midnight.getTime()) / TICK_MS)) };
+}
+/**
+ * 가상 금융위기는 두 시즌에 한 번: S1·S2 중 하나, S3·S4 중 하나… 어느 쪽인지는 운영자 키를 섞은 해시로 정한다 (코드만 보고는 못 맞힌다).
+ * S1은 이 규칙이 생기기 전에 끝나서 첫 쌍은 S2로 정한다
+ */
+function crashSeason(id: number) {
+  const pair = Math.ceil(id / 2);
+  if (pair === 1) return id === 2;
+  let h = 2166136261;
+  for (const ch of `${process.env.ADMIN_KEY ?? ""}:crash:${pair}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  return id === pair * 2 - 1 + ((h >>> 0) % 2);
 }
 let { market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, engineOptions(season), Date.now(), EXCHANGE_OPTIONS);
 let broker = new Broker(db, season, exchange);

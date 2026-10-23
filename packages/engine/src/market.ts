@@ -77,6 +77,8 @@ interface AssetState extends AssetDef {
   pending: Impulse[];
   /** 가상 금융위기 충격: 가격에만 더하고 변동성(variance)에는 넣지 않는다 (안 그러면 위기 뒤 한동안 마구 흔들린다) */
   crashPending?: Impulse[];
+  /** 가상 금융위기 동안의 바닥: 위기 직전 가격 × (1 - 낙폭). 다른 뉴스·흔들림이 겹쳐도 이 아래로는 안 간다 (위기 충격이 다 빠지면 지운다) */
+  crashFloor?: number | null;
   bars: Bar[];
   rsi: number;
   avgGain: number;
@@ -791,6 +793,10 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       if (a.jump && rand() < a.jump) r += gauss() * a.sigma * 6;
       const open = a.price;
       a.price = Math.max(0.01, a.price * Math.exp(r));
+      if (a.crashFloor) {
+        if (a.price < a.crashFloor) a.price = a.crashFloor * Math.exp(Math.abs(gauss()) * a.sigma); // 바닥에서 튕긴다 (긴 아래꼬리)
+        if (!a.crashPending?.length) a.crashFloor = null;
+      }
       const z = noise / a.sigma;
       a.variance = Math.min(4, Math.max(0.5, 0.97 * a.variance + 0.03 * (z * z + (shock / a.sigma) ** 2)));
 
@@ -819,17 +825,19 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
 
   // 시작 가격 맞추기: 과거 차트를 먼저 만든 뒤 전체를 비율로 늘이거나 줄여 마지막 가격 = 설정한 시작가.
   // 그리고 시작가를 적정가로 다시 잡는다 (주식 EPS = 가격 / 적정 PER, 그 외 앵커 = 가격).
-  // ----- 가상 금융위기 (비공개 규칙, SECRET.md): 예고 없이 한 번에 터지고, 세력 차트처럼 계단식으로 최대 -50%, 바닥에서 -40%까지만 회복 -----
+  // ----- 가상 금융위기 (SECRET.md): 예고 없이 한 번에 터지고, 세력 차트처럼 계단식으로 최대 -30%, 바닥에서 -24%까지만 회복 -----
   function crash() {
     const reason = CRASH_REASONS[Math.floor(rand() * CRASH_REASONS.length)];
     for (const a of live()) {
-      // 낙폭: 코인·신흥주 45~50%, 주식은 시장 민감도(베타)에 따라 25~50%. 바닥 -depth, 그 뒤 -0.8×depth에서 멈춘다
-      const depth = a.market === "stock" ? Math.min(0.5, Math.max(0.25, 0.22 + 0.2 * a.betaM)) * uni(0.92, 1.0) : uni(0.45, 0.5);
+      // 바닥 -depth, 그 뒤 -0.8×depth에서 멈춘다
+      // 낙폭(위기 직전 가격 대비): 코인·신흥주 27~30%, 주식은 베타에 따라 15~30% (2026-10-24 전: 최대 50%)
+      const depth = a.market === "stock" ? Math.min(0.3, Math.max(0.15, 0.13 + 0.12 * a.betaM)) * uni(0.92, 1.0) : uni(0.27, 0.3);
       const L = Math.log(1 - depth), settle = Math.log(1 - 0.8 * depth);
       // 회복은 위기 직전 가격의 settle까지만: 적정가를 거기로 옮긴다 (거품이 있었어도 기준은 직전 가격)
       const target = a.price * Math.exp(settle);
       if (a.eps != null && a.baseEps != null && a.fairPER) a.eps = Math.min(a.baseEps * cfg.epsBand[1], Math.max(a.baseEps * cfg.epsBand[0], target / a.fairPER));
       else a.dev = Math.min(devBand[1], Math.max(devBand[0], Math.log(target / a.anchor)));
+      a.crashFloor = a.price * (1 - depth);
       const q = (a.crashPending ??= []);
       impulse(q, 0.45 * L, 180);                    // 1차 급락 (3분)
       impulse(q, -0.12 * L, 150, 360);              // 데드캣 반등
