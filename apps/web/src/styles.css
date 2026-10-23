@@ -1160,3 +1160,29 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 .ht-edit { display: flex; gap: 4px; margin: 6px 0 0 26px; }
 .ht-edit input { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 5px; padding: 4px 8px; background: var(--panel-2); color: var(--text); font: inherit; font-size: 12px; }
 .hall-seasons small { font-size: 10px; color: var(--up); }
+
+/* 모바일: 위쪽(상단 바·LIVE 바)을 줄여 내용이 첫 화면에 더 보이게 */
+@media (max-width: 760px) {
+  .topbar { gap: 4px 8px; padding: 6px 10px; }
+  .logo small { display: none; }
+  .clock { font-size: 12px; }
+  .guide-top-btn { padding: 3px 8px; font-size: 12px; }
+  .nick-label { display: none; }
+  .top-center-nick { padding: 2px 8px; }
+  /* 줄 1: 로고·시즌 / 줄 2: 가이드·닉네임·버튼 / 줄 3: 총자산·수익률·예수금 */
+  .account:not(.join) { display: contents; }
+  #guideBtn, .top-center-nick { order: 1; }
+  .account:not(.join) .icon-btn { order: 2; }
+  .account:not(.join) .kv { order: 3; flex: 1 1 28%; min-width: 0; }
+  .account:not(.join) .kv span { font-size: 10px; }
+  .account:not(.join) .kv b { font-size: 13px; white-space: nowrap; }
+  .account .icon-btn { padding: 4px 6px; font-size: 11px; white-space: nowrap; }
+  .join-hint { display: none; }
+  .float-toggle-btn, #newsExpandBtn, .news-recent5 { display: none; }
+  .news-act-btn { padding: 3px 8px; font-size: 12px; }
+  .megaphone { flex-wrap: wrap; gap: 4px 8px; padding: 5px 10px; font-size: 12px; }
+  .megaphone > b { display: none; }
+  .megaphone .teabag-btn { padding: 2px 8px; font-size: 11px; }
+  /* 차트·주문 화면은 차트를 크게 */
+  .layout[data-mview="trade"] .chart-area { min-height: 46vh; }
+}
