@@ -1242,3 +1242,11 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 .pct-input::placeholder, .limit-input::placeholder, .stop-input::placeholder, .join input::placeholder, .chat-input input::placeholder {
   color: var(--muted); opacity: 1; font-weight: 400;
 }
+
+/* 종목 리스트: 가격 글자 길이가 바뀌어도 칸 폭·줄 높이가 그대로 (예전엔 tick마다 칸이 넓어졌다 좁아지며 이름이 두 줄로 접혀 줄이 위아래로 움직였다) */
+.watch-table { table-layout: fixed; }
+.watch-table th:nth-child(2), .watch-table td:nth-child(2) { width: 86px; }
+.watch-table th:nth-child(3), .watch-table td:nth-child(3) { width: 66px; }
+.watch-table td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.watch-table td.sym { overflow: hidden; }
+.watch-table td.sym small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

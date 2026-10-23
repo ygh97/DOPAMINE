@@ -14,13 +14,13 @@ export function checkWords(text: string) {
 
 export class ChatError extends Error {}
 
-/** loud: 전광판 알림을 화면 위 LIVE 바에 띄울지 (사람의 청산·졸업·전설, 봇·세력·고래는 증거금 $20만 이상 청산만) */
+/** loud: 전광판 알림을 화면 위 LIVE 바에 띄울지 (사람의 청산·졸업·전설, 봇·세력·고래는 증거금 $100만 이상 청산만) */
 export interface ChatMsg { id: number; name: string; text: string; at: number; to?: string | null; reacted?: boolean; loud?: boolean }
 
 // 시스템·서버가 만드는 표시. 일반 채팅으로는 이 말머리로 시작할 수 없다 (사칭 방지)
 const RESERVED = ["[티배깅]", "[강제청산]", "[졸업]", "[전설]", "[100배졸업]", "[공유]"];
 const LIQ_RE = /^\[강제청산\] 💥 (\S+)님 \$(\S+) /;
-const LOUD_BOT_MARGIN = 200_000; // 봇·세력·고래 청산은 이 증거금 이상만 LIVE 바에 띄운다 (봇 청산이 시간당 수백 건이라)
+const LOUD_BOT_MARGIN = 1_000_000; // 봇·세력·고래 청산은 이 증거금 이상만 LIVE 바에 띄운다 (2026-10-24 $20만 → $100만: 세력 실탄이 커져 시간당 38건 뜨던 것을 약 8건으로)
 export interface ChatAdminMsg extends ChatMsg { reports: number; hidden: boolean }
 
 export class Chat {
@@ -68,7 +68,7 @@ export class Chat {
   private loud(text: string) {
     const m = LIQ_RE.exec(text);
     if (!m) return true;
-    const kind = (this.stmts.selKind.get(m[1]) as { kind: string } | undefined)?.kind ?? "user";
+    const kind = (this.stmts.selKind.get(m[1]) as { kind: string } | undefined)?.kind ?? "bot"; // 이름이 없으면 교체돼 이름이 바뀐 봇
     if (kind === "user") return true;
     const margin = Number(/증거금 \$([\d,]+)/.exec(text)?.[1].replace(/,/g, "") ?? 0);
     return margin >= LOUD_BOT_MARGIN;

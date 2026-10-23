@@ -114,8 +114,8 @@ abstract class Agent {
       for (const sym of acc.positions.keys()) { try { c.broker.place(this.userId, sym, "sell", 100).catch(() => {}); } catch { /* 다음 tick */ } }
       return;
     }
-    // 파산 기준: 🤖 봇 $3만(새 봇으로 교체), 🐋 고래·🏦 세력은 시작 자금의 30% (같은 이름으로 다시)
-    const eq = c.broker.equity(acc), floor = this.kind === "bot" ? 30_000 : 0.3 * startCash(this.kind);
+    // 파산 기준: 🤖 봇 $3만(새 봇으로 교체), 🏦 세력 $500만·🐋 고래 $250만 = 시작 자금의 절반 (같은 이름으로 다시)
+    const eq = c.broker.equity(acc), floor = this.kind === "bot" ? 30_000 : 0.5 * startCash(this.kind);
     if (eq < floor && c.tick > this.resetCooldown) { this.bust(c); this.resetCooldown = c.tick + 60; this.lastOrder = c.tick; return; }
     if (this.lastOrder < 0) this.lastOrder = c.tick;
     this.act(c);
@@ -637,7 +637,8 @@ class MarketMaker extends Agent {
       }
       case "whale": { // 가끔 아주 큰 주문을 넣고 빠진다. 고래마다 시장·레버리지·비중·빈도가 다르다
         const w = this.whale ?? WHALES[0];
-        if (!this.meta.size && r() < this.k * w.chance * 2.5) this.open(c, pick(r, liveSyms(c, w.kinds)), r() < 0.55 ? "long" : "short", w.lev, w.pct, Math.round(uni(r, ...w.hold))); // 2026-10-24 2.5배 더 자주
+        // 2026-10-24: 포지션 하나만 들고 가끔 들어가서 거의 안 움직였다 → 최대 3종목, 기본 확률의 6배, 한 번에 비중은 3분의 1
+        if (this.meta.size < 3 && r() < this.k * w.chance * 6) this.open(c, pick(r, liveSyms(c, w.kinds)), r() < 0.55 ? "long" : "short", w.lev, w.pct / 3 + 5, Math.round(uni(r, ...w.hold)));
         this.expire(c);
       }
     }

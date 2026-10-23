@@ -679,7 +679,7 @@ test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭
   assert.deepEqual(hall.map(h => h.name), ["사람1"], "명예의 전당은 사람 전설만");
 });
 
-test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다음엔 직전에 빠진 번호)를 쓰고 $100,000. 🐋 고래는 시작 자금의 30%($150만) 아래면 같은 이름으로 $500만", () => {
+test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다음엔 직전에 빠진 번호)를 쓰고 $100,000. 🐋 고래는 시작 자금의 절반($250만) 아래면 같은 이름으로 $500만", () => {
   const s = setup();
   const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 3, marketMakers: true, seed: 4 });
   const num = (n: string) => Number(/봇(\d+)$/.exec(n)![1]);
@@ -696,7 +696,7 @@ test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다�
   bots.tick(s.tick().news);
   assert.equal(num(nameOf(b2)), 1, "다음은 직전에 빠진 번호");
   const whale = bots.describe().find(d => d.kind === "whale")!.userId, wname = nameOf(whale);
-  s.broker.reset(whale); s.broker.account(whale).cash = 1_400_000;
+  s.broker.reset(whale); s.broker.account(whale).cash = 2_400_000;
   bots.tick(s.tick().news);
   assert.equal(nameOf(whale), wname, "고래 이름 그대로");
   assert.ok(Math.abs(s.broker.equity(s.broker.account(whale)) - 5_000_000) < 1, "고래는 $500만으로");
@@ -745,17 +745,18 @@ test("🏦 세력은 세력1~세력N 이름으로 나오고, 예전 전략 이�
   assert.ok(after.some((l, i) => l !== before[i]), "전략 교대");
 });
 
-test("전광판 loud: 사람 청산·졸업은 LIVE 바에, 봇 청산은 증거금 $20만 이상만", () => {
+test("전광판 loud: 사람 청산·졸업은 LIVE 바에, 봇 청산은 증거금 $100만 이상만", () => {
   const s = setup(), chat = new Chat(s.db);
   s.user("개미1");
   const bot = s.user("레버봇01");
   s.db.prepare("UPDATE users SET kind = 'bot' WHERE id = ?").run(bot);
   const liq = (name: string, margin: number) => chat.system(`[강제청산] 💥 ${name}님 $NVDA 10x 롱 (증거금 $${margin.toLocaleString()}) 강제청산!`).loud;
   assert.equal(liq("개미1", 1_000), true);
-  assert.equal(liq("레버봇01", 199_999), false);
-  assert.equal(liq("레버봇01", 250_000), true);
+  assert.equal(liq("레버봇01", 999_999), false);
+  assert.equal(liq("레버봇01", 1_000_000), true);
+  assert.equal(liq("바뀐이름봇99", 1_000), false, "이름을 못 찾으면 봇으로 본다");
   assert.equal(chat.system("[졸업] 🎓 개미1님이 총자산 $2,000,000 달성으로 50배 졸업!").loud, true);
-  assert.deepEqual(chat.recent(10).filter(m => m.name === "⚡전광판").map(m => m.loud), [true, false, true, true]);
+  assert.deepEqual(chat.recent(10).filter(m => m.name === "⚡전광판").map(m => m.loud), [true, false, true, false, true]);
 });
 
 test("선물 종료 지정가: 포지션만 줄이고 수수료 0, 합계는 포지션 수량까지, 포지션이 줄면 최근 것부터 취소", async () => {
