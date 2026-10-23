@@ -116,7 +116,7 @@ export const useMarket = defineStore("market", () => {
   }
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
-  const socialTab = ref<"chat" | "rank" | "mm" | "whale" | "hall" | "analyst">("rank");
+  const socialTab = ref<"chat" | "rank" | "mm" | "whale" | "hall" | "analyst">("chat"); // 처음 들어오면 채팅부터
   const research = ref<Research | null>(null);
   const badges = ref<Record<string, Badges>>({});
   async function loadBadges() {

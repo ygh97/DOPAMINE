@@ -60,7 +60,7 @@ const logEl = ref<HTMLElement | null>(null);
 const stickBottom = ref(true);
 const unreadCount = ref(0);
 // 모바일(760px 이하)에서는 채팅을 펼치기/접기로 여닫을 수 있게 지원
-const chatFolded = ref(typeof window !== "undefined" && window.innerWidth <= 760);
+const chatFolded = ref(false); // 처음부터 펼쳐 둔다 (폰도)
 
 function isNearBottom(el: HTMLElement): boolean {
   return el.scrollHeight - el.scrollTop - el.clientHeight <= 42;

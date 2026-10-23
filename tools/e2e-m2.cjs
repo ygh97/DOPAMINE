@@ -58,6 +58,7 @@ const OUT = outDir();
     log.buyB = await toast(pageB);
 
     // 4) 랭킹에 두 사람 (5 tick마다 갱신)
+    await page.click('[data-c="rank"]'); // 처음 탭은 채팅
     await page.waitForFunction(() => document.querySelectorAll("#ranking tr").length >= 2, null, { timeout: 15000 });
     log.ranking = (await page.locator("#ranking").innerText()).split("\n").map(l => l.split("\t").slice(0, 2).join(" "));
     log.mineHighlighted = await page.locator("#ranking tr.mine").count();
