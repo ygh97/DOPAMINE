@@ -9,6 +9,9 @@ const m = useMarket();
 const stops = reactive<Record<number, string>>({});
 const tps = reactive<Record<number, string>>({});
 const closePx = reactive<Record<number, string>>({});
+const closeQty = reactive<Record<number, string>>({});
+const sellPx = reactive<Record<string, string>>({});
+const sellQty = reactive<Record<string, string>>({});
 
 const SIDE: Record<string, string> = {
   buy: "매수",
@@ -71,10 +74,17 @@ async function applyTp(id: number) {
 }
 // 지정가 종료: 아직 종료 지정가가 안 걸린 수량 전부를 그 가격에 건다 (나눠 걸려면 주문 패널의 "포지션 종료만")
 async function closeAtLimit(f: { id: number; sym: string; side: "long" | "short"; lev: number }) {
-  const price = Number((closePx[f.id] ?? "").trim());
+  const price = Number((closePx[f.id] ?? "").trim()), qty = Number((closeQty[f.id] ?? "").trim());
   if (!(price > 0)) return;
-  await a.limit({ sym: f.sym, kind: "fut", side: f.side === "long" ? "sell" : "buy", price, pct: 100, lev: f.lev, posId: f.id });
-  closePx[f.id] = "";
+  await a.limit({ sym: f.sym, kind: "fut", side: f.side === "long" ? "sell" : "buy", price, pct: 100, qty: qty > 0 ? qty : undefined, lev: f.lev, posId: f.id });
+  closePx[f.id] = ""; closeQty[f.id] = "";
+}
+// 보유종목 지정가 매도: 수량을 비우면 보유 전량
+async function sellAtLimit(p: { sym: string }) {
+  const price = Number((sellPx[p.sym] ?? "").trim()), qty = Number((sellQty[p.sym] ?? "").trim());
+  if (!(price > 0)) return;
+  await a.limit({ sym: p.sym, kind: "spot", side: "sell", price, pct: 100, qty: qty > 0 ? qty : undefined });
+  sellPx[p.sym] = ""; sellQty[p.sym] = "";
 }
 /** 이 포지션에 걸린 종료 지정가 수량 합 */
 const closingQty = (id: number) => (a.me?.orders ?? []).filter(o => o.reduce && o.posId === id).reduce((s, o) => s + o.qty, 0);
@@ -152,7 +162,7 @@ async function shareFill(f: Fill) {
     <p v-if="!a.me" class="empty">참가하면 보유종목·선물 포지션·체결 내역과 거래 통계가 여기에 표시됩니다.</p>
     <div v-else-if="a.holdTab === 'hold'" class="table-scroll">
       <table v-if="a.positions.length" id="holdings" class="grid">
-        <thead><tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>수익률</th><th>즉시 매도·공유</th></tr></thead>
+        <thead><tr><th>종목</th><th>수량</th><th>평단</th><th>현재가</th><th>평가금액</th><th>평가손익</th><th>수익률</th><th>지정가 매도</th><th>즉시 매도·공유</th></tr></thead>
         <tbody>
           <tr v-for="p in a.positions" :key="p.sym" :data-sym="p.sym" class="clickable" @click="m.select(p.sym)">
             <td><b>{{ p.sym }}</b> <small class="muted">{{ p.name }}</small></td>
@@ -162,6 +172,11 @@ async function shareFill(f: Fill) {
             <td>{{ money(p.value) }}</td>
             <td :class="p.pnl >= 0 ? 'up' : 'down'">{{ signedMoney(p.pnl) }}</td>
             <td :class="p.pnl >= 0 ? 'up' : 'down'">{{ pct(p.pnlPct) }}</td>
+            <td class="stop-cell" @click.stop>
+              <input v-model="sellPx[p.sym]" class="stop-input" inputmode="decimal" :placeholder="money(p.price)" aria-label="매도 지정가" @keydown.enter="sellAtLimit(p)">
+              <input v-model="sellQty[p.sym]" class="stop-input qty-input" inputmode="decimal" placeholder="전량" aria-label="매도 수량" @keydown.enter="sellAtLimit(p)">
+              <button class="mini-btn" data-act="sell-limit" :disabled="a.busy" @click="sellAtLimit(p)">걸기</button>
+            </td>
             <td class="act-cell" @click.stop>
               <button class="mini-btn" data-act="sell-10" :disabled="a.busy" @click="a.order(p.sym, 'sell', 10)">10%</button>
               <button class="mini-btn" data-act="sell-20" :disabled="a.busy" @click="a.order(p.sym, 'sell', 20)">20%</button>
@@ -202,6 +217,7 @@ async function shareFill(f: Fill) {
             </td>
             <td class="stop-cell" @click.stop>
               <input v-model="closePx[f.id]" class="stop-input" inputmode="decimal" :placeholder="money(f.price)" aria-label="종료 지정가" @keydown.enter="closeAtLimit(f)">
+              <input v-model="closeQty[f.id]" class="stop-input qty-input" inputmode="decimal" placeholder="전량" aria-label="종료 수량" @keydown.enter="closeAtLimit(f)">
               <button class="mini-btn" data-act="close-limit" :disabled="a.busy" @click="closeAtLimit(f)">걸기</button>
               <small v-if="closingQty(f.id)" class="muted" title="이 포지션에 걸어 둔 종료 지정가 수량 (미체결 탭)">{{ qtyText(f.sym, closingQty(f.id)) }} 걸림</small>
             </td>

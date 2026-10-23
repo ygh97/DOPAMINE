@@ -788,3 +788,25 @@ test("선물 종료 지정가: 포지션만 줄이고 수수료 0, 합계는 포
   assert.equal(s.broker.me(a).orders.length, 0, "포지션이 없어지면 전부 취소");
   assert.equal(s.db.prepare("SELECT COUNT(*) AS c FROM open_orders").get()!.c, 0);
 });
+
+test("수량 직접 입력: 현물 매수·매도, 지정가 매도, 선물 진입, 종료 지정가. 최대치를 넘으면 최대 수량을 알려 주며 거절", async () => {
+  const s = setup();
+  const u = s.user("수량러");
+  await s.broker.place(u, "AAPL", "buy", 0, 10); s.tick();
+  assert.equal(s.broker.me(u).positions[0].qty, 10, "10주 매수");
+  await assert.rejects(async () => s.broker.place(u, "AAPL", "sell", 0, 11), /보유 수량보다.*최대 10주/);
+  s.tick();
+  await s.broker.place(u, "AAPL", "sell", 0, 3); s.tick();
+  assert.equal(s.broker.me(u).positions[0].qty, 7, "3주 매도");
+  const hi = s.exchange.best("AAPL").ask! * 1.1;
+  const r = s.broker.limitOrder(u, { sym: "AAPL", kind: "spot", side: "sell", price: hi, pct: 0, qty: 4 }); s.tick();
+  assert.equal(r.order!.qty, 4, "지정가 매도 4주");
+  assert.throws(() => s.broker.place(u, "AAPL", "buy", 0, 1e9), /예수금이 부족합니다.*최대/);
+  s.tick();
+  await s.broker.openFuture(u, "NVDA", "long", 5, 0, 20); s.tick();
+  const f = s.broker.me(u).futures[0];
+  assert.equal(f.qty, 20, "선물 20주");
+  const c = s.broker.limitOrder(u, { sym: "NVDA", kind: "fut", side: "sell", price: s.exchange.best("NVDA").ask! * 1.2, pct: 0, qty: 5, posId: f.id }); s.tick();
+  assert.equal(c.order!.qty, 5, "종료 지정가 5주만");
+  assert.throws(() => s.broker.limitOrder(u, { sym: "NVDA", kind: "fut", side: "sell", price: s.exchange.best("NVDA").ask! * 1.2, pct: 0, qty: 16, posId: f.id }), /최대 15주/);
+});

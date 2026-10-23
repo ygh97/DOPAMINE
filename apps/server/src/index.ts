@@ -316,21 +316,22 @@ app.get("/api/me", async (req, reply) => {
   return id && broker.me(id);
 });
 
-app.post<{ Body: { sym: string; side: string; pct: number } }>("/api/order", {
-  schema: { body: { type: "object", required: ["sym", "side", "pct"], properties: { sym: { type: "string", maxLength: 10 }, side: { type: "string" }, pct: { type: "number" } } } },
+// 비중(pct) 대신 수량(qty)을 직접 넣을 수 있다 (둘 중 하나)
+app.post<{ Body: { sym: string; side: string; pct: number; qty?: number } }>("/api/order", {
+  schema: { body: { type: "object", required: ["sym", "side"], properties: { sym: { type: "string", maxLength: 10 }, side: { type: "string" }, pct: { type: "number" }, qty: { type: "number" } } } },
 }, async (req, reply) => {
   const id = userOf(req, reply);
   if (!id) return;
-  const fill = await broker.place(id, req.body.sym, req.body.side, req.body.pct);
+  const fill = await broker.place(id, req.body.sym, req.body.side, req.body.pct, req.body.qty);
   return { fill, me: broker.me(id) };
 });
 
-app.post<{ Body: { sym: string; side: string; lev: number; pct: number } }>("/api/futures/open", {
-  schema: { body: { type: "object", required: ["sym", "side", "lev", "pct"], properties: { sym: { type: "string", maxLength: 10 }, side: { type: "string" }, lev: { type: "integer" }, pct: { type: "number" } } } },
+app.post<{ Body: { sym: string; side: string; lev: number; pct: number; qty?: number } }>("/api/futures/open", {
+  schema: { body: { type: "object", required: ["sym", "side", "lev"], properties: { sym: { type: "string", maxLength: 10 }, side: { type: "string" }, lev: { type: "integer" }, pct: { type: "number" }, qty: { type: "number" } } } },
 }, async (req, reply) => {
   const id = userOf(req, reply);
   if (!id) return;
-  const fill = await broker.openFuture(id, req.body.sym, req.body.side, req.body.lev, req.body.pct);
+  const fill = await broker.openFuture(id, req.body.sym, req.body.side, req.body.lev, req.body.pct, req.body.qty);
   return { fill, me: broker.me(id) };
 });
 
@@ -345,8 +346,8 @@ app.post<{ Body: { posId: number; pct: number } }>("/api/futures/close", {
 
 // 지정가: 맞는 호가가 있으면 그만큼 바로 체결되고, 남은 수량은 호가창에 걸린다. kind spot = 현물, fut = 선물 진입 (buy 롱, sell 숏)
 // 선물 종료 지정가: reduce = true(주문 패널, sym·배율로 반대 방향 포지션) 또는 posId(포지션 줄)
-app.post<{ Body: { sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; price: number; pct: number; lev?: number; reduce?: boolean; posId?: number } }>("/api/limit", {
-  schema: { body: { type: "object", required: ["sym", "kind", "side", "price", "pct"], properties: { sym: { type: "string", maxLength: 10 }, kind: { type: "string", enum: ["spot", "fut"] }, side: { type: "string", enum: ["buy", "sell"] }, price: { type: "number" }, pct: { type: "number" }, lev: { type: "integer" }, reduce: { type: "boolean" }, posId: { type: "integer" } } } },
+app.post<{ Body: { sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; price: number; pct: number; qty?: number; lev?: number; reduce?: boolean; posId?: number } }>("/api/limit", {
+  schema: { body: { type: "object", required: ["sym", "kind", "side", "price"], properties: { sym: { type: "string", maxLength: 10 }, kind: { type: "string", enum: ["spot", "fut"] }, side: { type: "string", enum: ["buy", "sell"] }, price: { type: "number" }, pct: { type: "number" }, qty: { type: "number" }, lev: { type: "integer" }, reduce: { type: "boolean" }, posId: { type: "integer" } } } },
 }, async (req, reply) => {
   const id = userOf(req, reply);
   if (!id) return;

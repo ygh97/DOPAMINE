@@ -15,6 +15,10 @@ const type = ref<"market" | "limit">("market");
 const side = ref<"buy" | "sell">("buy");
 const pct = ref(20);
 const custom = ref("");
+// 수량 직접 입력: 넣으면 비중 대신 이 수량으로 주문한다 (비중 버튼을 누르면 지워진다)
+const qtyInput = ref("");
+const qtyVal = computed(() => { const v = Number(qtyInput.value); return v > 0 ? v : 0; });
+function pickPct(p: number) { pct.value = p; custom.value = ""; qtyInput.value = ""; }
 const lev = ref(2);
 // 선물 지정가 "포지션 종료만": 새 포지션 대신 같은 배율의 반대 방향 포지션을 줄인다 (매도 = 롱 종료, 매수 = 숏 종료)
 const reduce = ref(false);
@@ -60,7 +64,12 @@ const est = computed(() => {
   const price = type.value === "limit" ? limitPrice.value : q.price;
   if (!price) return { qty: "-", fee: "-", total: "-", liq: "" };
   const feeRate = type.value === "limit" ? 0 : FEE;
-  if (closing.value) return { qty: fmtQty((targetFree.value * pct.value) / 100), fee: money(0), total: "돈 안 묶임", liq: "" };
+  if (closing.value) return { qty: fmtQty(qtyVal.value || (targetFree.value * pct.value) / 100), fee: money(0), total: "돈 안 묶임", liq: "" };
+  if (qtyVal.value) {
+    const value = qtyVal.value * price, liqP = side.value === "buy" ? price * (1 - 0.9 / lev.value) : price * (1 + 0.9 / lev.value);
+    if (mode.value === "fut") return { qty: fmtQty(qtyVal.value), fee: money(value * feeRate), total: money(value / lev.value + value * feeRate), liq: money(liqP) };
+    return { qty: fmtQty(qtyVal.value), fee: money(value * feeRate), total: money(side.value === "buy" ? value * (1 + feeRate) : value * (1 - feeRate)), liq: "" };
+  }
   if (mode.value === "spot" && side.value === "sell") {
     const qty = (held.value * pct.value) / 100, value = qty * price;
     return { qty: fmtQty(qty), fee: money(value * feeRate), total: money(value * (1 - feeRate)), liq: "" };
@@ -76,22 +85,25 @@ const est = computed(() => {
 });
 const sideLabel = (s: "buy" | "sell") => closing.value ? (s === "sell" ? "롱 종료" : "숏 종료") : mode.value === "fut" ? (s === "buy" ? "롱" : "숏") : s === "buy" ? "매수" : "매도";
 const canOrder = computed(() => !!a.me && !a.busy && (type.value === "market" || limitPrice.value > 0)
-  && (closing.value ? targetFree.value > 0 : mode.value === "fut" ? cash.value >= 1 : side.value === "buy" || held.value > 0));
+  && (closing.value ? targetFree.value > 0 : mode.value === "fut" ? cash.value >= 1 : side.value === "buy" || held.value > 0)
+  && (!qtyInput.value || qtyVal.value > 0));
 const ctaText = computed(() => {
   const sym = m.current?.sym ?? "";
+  const size = qtyVal.value ? `${fmtQty(qtyVal.value)}${unit.value}` : `${pct.value}%`;
   const at = type.value === "limit" ? ` $${limitPrice.value ? fmtPx(limitPrice.value) : "-"} 지정가` : "";
   if (!a.me) return `${sym} ${sideLabel(side.value)} · 참가 후 가능`;
-  if (closing.value) return target.value ? (targetFree.value > 0 ? `${sym} ${lev.value}x ${sideLabel(side.value)} ${pct.value}%${at}` : "이미 전량에 종료 지정가가 걸려 있음") : `닫을 ${side.value === "sell" ? "롱" : "숏"} ${lev.value}x 포지션 없음`;
-  if (mode.value === "fut") return `${sym} ${lev.value}x ${pct.value}%${at} ${sideLabel(side.value)}`;
+  if (closing.value) return target.value ? (targetFree.value > 0 ? `${sym} ${lev.value}x ${sideLabel(side.value)} ${size}${at}` : "이미 전량에 종료 지정가가 걸려 있음") : `닫을 ${side.value === "sell" ? "롱" : "숏"} ${lev.value}x 포지션 없음`;
+  if (mode.value === "fut") return `${sym} ${lev.value}x ${size}${at} ${sideLabel(side.value)}`;
   if (side.value === "sell" && !held.value) return `${sym} 보유 없음`;
-  return `${sym} ${pct.value}%${at} ${sideLabel(side.value)}`;
+  return `${sym} ${size}${at} ${sideLabel(side.value)}`;
 });
 function submit() {
   if (!canOrder.value || !m.current) return;
   const sym = m.current.sym;
-  if (type.value === "limit") void a.limit({ sym, kind: mode.value, side: side.value, price: limitPrice.value, pct: pct.value, lev: mode.value === "fut" ? lev.value : undefined, reduce: closing.value || undefined });
-  else if (mode.value === "fut") void a.openFuture(sym, side.value === "buy" ? "long" : "short", lev.value, pct.value);
-  else void a.order(sym, side.value, pct.value);
+  const qty = qtyVal.value || undefined;
+  if (type.value === "limit") void a.limit({ sym, kind: mode.value, side: side.value, price: limitPrice.value, pct: pct.value, qty, lev: mode.value === "fut" ? lev.value : undefined, reduce: closing.value || undefined });
+  else if (mode.value === "fut") void a.openFuture(sym, side.value === "buy" ? "long" : "short", lev.value, pct.value, qty);
+  else void a.order(sym, side.value, pct.value, qty);
 }
 
 const PCT_KEYS: Record<string, number> = { "1": 10, "2": 20, "3": 50, "4": 100 };
@@ -103,7 +115,7 @@ function onKey(e: KeyboardEvent) {
   const k = e.key.toLowerCase();
   if (k === "b") { side.value = "buy"; e.preventDefault(); }
   else if (k === "s") { side.value = "sell"; e.preventDefault(); }
-  else if (PCT_KEYS[k]) { pct.value = PCT_KEYS[k]; custom.value = ""; e.preventDefault(); }
+  else if (PCT_KEYS[k]) { pickPct(PCT_KEYS[k]); e.preventDefault(); }
 }
 onMounted(() => window.addEventListener("keydown", onKey));
 onUnmounted(() => window.removeEventListener("keydown", onKey));
@@ -154,8 +166,13 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
           <span>{{ closing ? `${fmtQty(targetFree)}${unit}` : mode === "spot" && side === "sell" ? `${fmtQty(held)}${unit}` : money(cash) }}</span>
         </div>
         <div class="chips pct-chips">
-          <button v-for="p in [10, 20, 50, 100]" :key="p" :aria-pressed="pct === p" @click="pct = p; custom = ''">{{ p }}%</button>
-          <input v-model="custom" class="pct-input" inputmode="decimal" placeholder="직접 %" aria-label="비중 직접 입력" @input="setCustom">
+          <button v-for="p in [10, 20, 50, 100]" :key="p" :aria-pressed="!qtyVal && pct === p" @click="pickPct(p)">{{ p }}%</button>
+          <input v-model="custom" class="pct-input" inputmode="decimal" placeholder="직접 %" aria-label="비중 직접 입력" @input="setCustom(); qtyInput = ''">
+        </div>
+        <div class="qty-row">
+          <span class="muted">또는 수량</span>
+          <input id="orderQty" v-model="qtyInput" class="pct-input" inputmode="decimal" :placeholder="fractional ? '예: 0.5' : '예: 10'" aria-label="수량 직접 입력">
+          <span class="muted">{{ unit.trim() || "주" }}</span>
         </div>
       </div>
       <div class="summary">

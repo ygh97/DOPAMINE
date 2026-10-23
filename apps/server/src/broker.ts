@@ -62,6 +62,22 @@ export interface Exposure { spot: number; long: number; short: number; liqs: { p
 const step = qtyUnit;
 const floorTo = (v: number, s: number) => Math.floor(v / s + 1e-9) * s;
 const dirOf = (f: Future) => (f.side === "long" ? 1 : -1);
+/** 수량 표시 (오류 문구용): 코인은 소수 6자리, 나머지는 주 */
+const qtyLabel = (q: number, unit: number) => (unit < 1 ? `${+q.toFixed(6)}개` : `${Math.floor(q + 1e-9).toLocaleString()}주`);
+/**
+ * 주문 수량 정하기: qty(직접 입력)가 있으면 단위로 내려 맞추고 최대치를 넘으면 거절, 없으면 최대치의 pct%.
+ * all = pct 100%일 때 최대치를 그대로 쓸지 (보유 전량 매도처럼 남김 없이)
+ */
+function pickQty(max: number, unit: number, pct: number, qty: number | undefined, tooMuch: string, all = false) {
+  if (qty != null) {
+    if (!Number.isFinite(qty) || qty <= 0) throw new OrderError("수량이 올바르지 않습니다.");
+    const q = floorTo(qty, unit);
+    if (q <= 0) throw new OrderError(`최소 ${qtyLabel(unit, unit)} 단위로 주문할 수 있습니다.`);
+    if (q > max + 1e-9) throw new OrderError(`${tooMuch} (최대 ${qtyLabel(max, unit)})`);
+    return q;
+  }
+  return all && pct >= 100 ? max : floorTo((max * pct) / 100, unit);
+}
 /** 강제 청산 가격: 증거금의 90%를 잃는 지점 */
 export const liqPrice = (f: Pick<Future, "side" | "lev" | "entry">) => f.entry * (1 - (f.side === "long" ? 1 : -1) * LIQ_LOSS / f.lev);
 const pnlOf = (f: Future, price: number, qty = f.qty) => dirOf(f) * qty * (price - f.entry);
@@ -304,6 +320,8 @@ export class Broker {
     this.recent.set(userId, { tick: this.market.tick, count: count + 1 });
     return acc;
   }
+  /** 수량을 직접 넣었으면 비중은 보지 않는다 */
+  private checkAmount(pct: number, qty?: number) { if (qty == null) this.checkPct(pct); }
   private checkPct(pct: number) {
     if (!Number.isFinite(pct) || pct <= 0 || pct > 100) throw new OrderError("비중은 0~100% 사이여야 합니다.");
   }
@@ -352,13 +370,13 @@ export class Broker {
   }
 
   /** 시장가 주문. 바로 체결된다 (Promise는 예전 API 호환). 잘못된 주문은 OrderError를 바로 던진다 */
-  place(userId: number, sym: string, side: string, pct: number): Promise<Fill> {
-    return Promise.resolve(this.placeNow(userId, sym, side, pct));
+  place(userId: number, sym: string, side: string, pct: number, qty?: number): Promise<Fill> {
+    return Promise.resolve(this.placeNow(userId, sym, side, pct, qty));
   }
-  /** 현물 시장가. 매수는 예수금의 pct%, 매도는 보유 수량의 pct% */
-  private placeNow(userId: number, sym: string, side: string, pct: number): Fill {
+  /** 현물 시장가. 매수는 예수금의 pct%, 매도는 보유 수량의 pct%. qty를 주면 그 수량 */
+  private placeNow(userId: number, sym: string, side: string, pct: number, qty?: number): Fill {
     if (side !== "buy" && side !== "sell") throw new OrderError("매수 또는 매도만 할 수 있습니다.");
-    this.checkPct(pct);
+    this.checkAmount(pct, qty);
     const acc = this.admit(userId, sym), q = this.x.quote(sym)!, unit = step(q.market);
     const pos = acc.positions.get(sym) ?? { qty: 0, avg: 0 };
     if (side === "sell" && !pos.qty) throw new OrderError("보유하지 않은 종목입니다.");
@@ -367,8 +385,9 @@ export class Broker {
         const L = this.x.market.liquidity(sym) ?? Infinity, ask = this.x.best(sym).ask ?? q.price;
         const room = floorTo((HOLD_SHARE * L) / ask - pos.qty, unit);
         if (room <= 0) throw new OrderError(`보유 한도(가상 유동성의 20%, 약 $${Math.round(HOLD_SHARE * L).toLocaleString()})에 도달했습니다.`);
-        const budget = (acc.cash * pct) / 100 / (1 + FEE);
-        const want = Math.min(floorTo(this.x.qtyFor(userId, sym, "buy", budget), unit), room);
+        const affordable = floorTo(this.x.qtyFor(userId, sym, "buy", acc.cash / (1 + FEE)), unit);
+        const want = qty != null ? Math.min(pickQty(affordable, unit, pct, qty, "예수금이 부족합니다."), room)
+          : Math.min(floorTo(this.x.qtyFor(userId, sym, "buy", (acc.cash * pct) / 100 / (1 + FEE)), unit), room);
         if (want <= 0) throw new OrderError("예수금이 부족해 1주도 살 수 없습니다.");
         const v = this.takeMarket(acc, sym, "buy", want);
         if (v.qty <= 0) throw new OrderError("호가가 없어 체결되지 않았습니다.");
@@ -379,7 +398,7 @@ export class Broker {
         this.savePosition(acc, sym, pos);
         return this.record(acc, sym, "buy", v.qty, v.price, fee);
       }
-      const want = pct >= 100 ? pos.qty : floorTo((pos.qty * pct) / 100, unit); // 전량은 남김 없이
+      const want = pickQty(pos.qty, unit, pct, qty, "보유 수량보다 많이 팔 수 없습니다.", true); // 전량은 남김 없이
       if (want <= 0) throw new OrderError("팔 수량이 없습니다.");
       const v = this.takeMarket(acc, sym, "sell", want);
       if (v.qty <= 0) throw new OrderError("호가가 없어 체결되지 않았습니다.");
@@ -393,19 +412,21 @@ export class Broker {
     return fill;
   }
 
-  openFuture(userId: number, sym: string, side: string, lev: number, pct: number): Promise<Fill> {
-    return Promise.resolve(this.openNow(userId, sym, side, lev, pct));
+  openFuture(userId: number, sym: string, side: string, lev: number, pct: number, qty?: number): Promise<Fill> {
+    return Promise.resolve(this.openNow(userId, sym, side, lev, pct, qty));
   }
   /** 선물 시장가 진입. 격리 증거금 = 예수금의 pct% (진입 수수료 포함), 명목 = 증거금 × 레버리지 */
-  private openNow(userId: number, sym: string, side: string, lev: number, pct: number): Fill {
+  private openNow(userId: number, sym: string, side: string, lev: number, pct: number, qty?: number): Fill {
     if (side !== "long" && side !== "short") throw new OrderError("롱 또는 숏만 할 수 있습니다.");
-    this.checkPct(pct);
+    this.checkAmount(pct, qty);
     this.checkLev(userId, sym, lev);
     const acc = this.admit(userId, sym), xs: Side = side === "long" ? "buy" : "sell";
     const fill = this.atomic([userId], () => {
-      const margin0 = (acc.cash * pct) / 100 / (1 + lev * FEE);
+      const unit = step(this.x.quote(sym)!.market), all = acc.cash / (1 + lev * FEE);
+      const margin0 = qty != null ? all : (acc.cash * pct) / 100 / (1 + lev * FEE);
       if (margin0 < 1) throw new OrderError("예수금이 부족합니다.");
-      const want = floorTo(this.x.qtyFor(userId, sym, xs, margin0 * lev), step(this.x.quote(sym)!.market));
+      const want = qty != null ? pickQty(floorTo(this.x.qtyFor(userId, sym, xs, all * lev), unit), unit, pct, qty, "증거금이 부족합니다.")
+        : floorTo(this.x.qtyFor(userId, sym, xs, margin0 * lev), unit);
       if (want <= 0) throw new OrderError("증거금이 부족해 1주도 진입할 수 없습니다.");
       const v = this.takeMarket(acc, sym, xs, want);
       if (v.qty <= 0) throw new OrderError("호가가 없어 체결되지 않았습니다.");
@@ -515,12 +536,12 @@ export class Broker {
    * - spot buy: 예수금의 pct%로 살 수 있는 수량, spot sell: 보유 수량의 pct%
    * - fut buy/sell (= 롱/숏 진입): 증거금 = 예수금의 pct%, 명목 = 증거금 × 레버리지
    */
-  limitOrder(userId: number, req: { sym: string; kind: "spot" | "fut"; side: Side; price: number; pct: number; lev?: number; reduce?: boolean; posId?: number }) {
+  limitOrder(userId: number, req: { sym: string; kind: "spot" | "fut"; side: Side; price: number; pct: number; qty?: number; lev?: number; reduce?: boolean; posId?: number }) {
     if (req.kind === "fut" && (req.reduce || req.posId != null)) return this.closeLimit(userId, req);
     const { sym, kind, side, pct } = req;
     if (side !== "buy" && side !== "sell") throw new OrderError("매수 또는 매도만 할 수 있습니다.");
     if (!Number.isFinite(req.price) || req.price <= 0) throw new OrderError("가격이 올바르지 않습니다.");
-    this.checkPct(pct);
+    this.checkAmount(pct, req.qty);
     if (kind === "fut") this.checkLev(userId, sym, req.lev ?? 0);
     const acc = this.admit(userId, sym), q = this.x.quote(sym)!, unit = step(q.market);
     if (this.ordersOf(userId).length >= MAX_OPEN_ORDERS) throw new OrderError(`미체결 주문은 최대 ${MAX_OPEN_ORDERS}개입니다.`);
@@ -530,18 +551,17 @@ export class Broker {
       if (kind === "spot" && side === "buy") {
         const L = this.x.market.liquidity(sym) ?? Infinity, have = acc.positions.get(sym)?.qty ?? 0;
         const room = floorTo((HOLD_SHARE * L) / price - have, unit);
-        it.qty = Math.min(floorTo((acc.cash * pct) / 100 / (price * (1 + FEE)), unit), room);
+        it.qty = Math.min(pickQty(floorTo(acc.cash / (price * (1 + FEE)), unit), unit, pct, req.qty, "예수금이 부족합니다."), room);
         if (it.qty <= 0) throw new OrderError(room <= 0 ? "보유 한도에 도달했습니다." : "예수금이 부족합니다.");
         it.cash = it.qty * price * (1 + FEE); acc.cash -= it.cash; // 바로 체결될 몫의 수수료까지 묶는다
       } else if (kind === "spot") {
         const pos = acc.positions.get(sym);
         if (!pos?.qty) throw new OrderError("보유하지 않은 종목입니다.");
-        it.qty = pct >= 100 ? pos.qty : floorTo((pos.qty * pct) / 100, unit);
+        it.qty = pickQty(pos.qty, unit, pct, req.qty, "보유 수량보다 많이 팔 수 없습니다.", true);
         if (it.qty <= 0) throw new OrderError("팔 수량이 없습니다.");
         it.held = it.qty; it.avg = pos.avg; pos.qty -= it.qty; this.savePosition(acc, sym, pos); // 파는 수량을 보유에서 떼어 둔다
       } else {
-        const budget = (acc.cash * pct) / 100 / (1 + it.lev * FEE);
-        it.qty = floorTo((budget * it.lev) / price, step(q.market));
+        it.qty = pickQty(floorTo(((acc.cash / (1 + it.lev * FEE)) * it.lev) / price, unit), unit, pct, req.qty, "증거금이 부족합니다.");
         if (it.qty <= 0) throw new OrderError("증거금이 부족해 1주도 진입할 수 없습니다.");
         it.cash = ((it.qty * price) / it.lev) * (1 + it.lev * FEE); acc.cash -= it.cash; // 증거금 + 바로 체결될 몫의 수수료
       }
@@ -570,9 +590,9 @@ export class Broker {
    * 선물 종료 지정가. posId 포지션(없으면 sym·배율이 같고 주문과 반대 방향인 포지션)을 price에 닫는 주문을 건다.
    * 수량 = 아직 종료 지정가가 걸리지 않은 수량의 pct%. 돈을 묶지 않고, 걸린 채 체결되면 수수료 0
    */
-  private closeLimit(userId: number, req: { sym: string; side: Side; price: number; pct: number; lev?: number; posId?: number }) {
+  private closeLimit(userId: number, req: { sym: string; side: Side; price: number; pct: number; qty?: number; lev?: number; posId?: number }) {
     if (!Number.isFinite(req.price) || req.price <= 0) throw new OrderError("가격이 올바르지 않습니다.");
-    this.checkPct(req.pct);
+    this.checkAmount(req.pct, req.qty);
     const acc = this.account(userId), want = req.side === "sell" ? "long" : "short";
     const f = req.posId != null ? acc.futures.get(req.posId)
       : [...acc.futures.values()].find(g => g.sym === req.sym && g.side === want && g.lev === req.lev);
@@ -582,7 +602,7 @@ export class Broker {
     const unit = step(this.x.quote(f.sym)!.market), side: Side = f.side === "long" ? "sell" : "buy";
     const free = f.qty - [...this.intents.values()].filter(it => it.reduce && it.posId === f.id).reduce((s, it) => s + it.qty, 0);
     if (free < unit - 1e-12) throw new OrderError("포지션 전량에 이미 종료 지정가가 걸려 있습니다.");
-    const qty = req.pct >= 100 ? free : floorTo((free * req.pct) / 100, unit);
+    const qty = pickQty(free, unit, req.pct, req.qty, "종료 지정가가 걸리지 않은 수량보다 많습니다.", true);
     if (qty <= 0) throw new OrderError("종료할 수량이 1주보다 적습니다. 더 큰 비중으로 거세요.");
     const tickSz = this.x.tickOf(f.sym), price = Math.max(tickSz, Math.round(req.price / tickSz) * tickSz);
     const out = this.atomic([userId], () => {

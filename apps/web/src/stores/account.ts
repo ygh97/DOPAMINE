@@ -78,10 +78,11 @@ export const useAccount = defineStore("account", () => {
     token.value = ""; writeToken(""); me.value = null;
   }
 
-  async function order(sym: string, side: "buy" | "sell", pct: number) {
+  /** 현물 시장가. qty를 주면 비중 대신 그 수량 */
+  async function order(sym: string, side: "buy" | "sell", pct: number, qty?: number) {
     busy.value = true;
     try {
-      const r = await api<{ fill: Fill; me: Me }>("/api/order", { sym, side, pct });
+      const r = await api<{ fill: Fill; me: Me }>("/api/order", { sym, side, pct, qty });
       me.value = r.me;
       if (side === "buy") holdTab.value = "hold";
       void m.loadRanking();
@@ -92,10 +93,10 @@ export const useAccount = defineStore("account", () => {
     finally { busy.value = false; }
   }
 
-  async function openFuture(sym: string, side: "long" | "short", lev: number, pct: number) {
+  async function openFuture(sym: string, side: "long" | "short", lev: number, pct: number, qty?: number) {
     busy.value = true;
     try {
-      const r = await api<{ fill: Fill; me: Me }>("/api/futures/open", { sym, side, lev, pct });
+      const r = await api<{ fill: Fill; me: Me }>("/api/futures/open", { sym, side, lev, pct, qty });
       me.value = r.me;
       holdTab.value = "fut";
       void m.loadRanking();
@@ -107,7 +108,7 @@ export const useAccount = defineStore("account", () => {
   }
 
   /** 지정가: 바로 체결된 몫은 체결 내역에, 남은 수량은 미체결 탭에 */
-  async function limit(req: { sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; price: number; pct: number; lev?: number; reduce?: boolean; posId?: number }) {
+  async function limit(req: { sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; price: number; pct: number; qty?: number; lev?: number; reduce?: boolean; posId?: number }) {
     busy.value = true;
     try {
       const r = await api<{ fills: Fill[]; order: OpenOrder | null; me: Me }>("/api/limit", req);

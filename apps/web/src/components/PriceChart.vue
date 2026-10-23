@@ -229,7 +229,7 @@ function syncPosLines() {
     if (f.stop != null && on.stop) add(f.stop, `스탑로스 ${money(f.stop)}`, cssVar("--muted"), true);
   }
   if (on.orders) for (const o of a.me.orders.filter(x => x.sym === shown)) {
-    const what = o.kind === "fut" ? `${o.side === "buy" ? "롱" : "숏"} ${o.lev}x` : o.side === "buy" ? "매수" : "매도";
+    const what = o.reduce ? `${o.side === "sell" ? "롱" : "숏"} ${o.lev}x 종료` : o.kind === "fut" ? `${o.side === "buy" ? "롱" : "숏"} ${o.lev}x` : o.side === "buy" ? "매수" : "매도";
     add(o.price, `${what} 지정가 ${money(o.price)}`, cssVar(o.side === "buy" ? "--up" : "--down"), true);
   }
   if (on.fills) syncFillMarks(ts);

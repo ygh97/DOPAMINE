@@ -1225,3 +1225,8 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
   .topbar { gap: 12px; }
   .goal { width: 110px; }
 }
+
+/* 수량 직접 입력 (주문 패널) · 표 안의 수량 칸 */
+.qty-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; }
+.qty-row .pct-input { padding: 6px 8px; text-align: right; }
+.stop-input.qty-input { width: 56px; }
