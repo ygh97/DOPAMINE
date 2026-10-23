@@ -702,6 +702,26 @@ test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다�
   assert.ok(Math.abs(s.broker.equity(s.broker.account(whale)) - 5_000_000) < 1, "고래는 $500만으로");
 });
 
+test("단합 받아치기: 2분 안에 사람 3명이 같은 종목을 크게 사면 세력 하나가 반대로 숏을 잡는다, 2명이면 안 한다", async () => {
+  for (const [n, expect] of [[2, false], [3, true]] as const) {
+    const s = setup();
+    const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 0, marketMakers: true, seed: 6 });
+    for (let i = 0; i < 5; i++) bots.tick(s.tick().news);
+    const sym = "ETH", users = Array.from({ length: n }, (_, i) => s.user(`단합${i + 1}`));
+    for (const u of users) await openFut(s, u, sym, "long", 5, 80); // 1명 약 $40만
+    assert.equal(s.broker.crowds().get(sym)?.users, n);
+    const mmIds = new Set(bots.describe().filter(d => d.kind === "mm").map(d => d.userId));
+    let faded = false, short = false;
+    for (let i = 0; i < 80; i++) {
+      bots.tick(s.tick().news);
+      faded ||= bots.describe().some(d => d.job === "fade");
+      for (const id of mmIds) for (const f of s.broker.account(id).futures.values()) if (f.sym === sym && f.side === "short" && f.lev === 2) short = true;
+    }
+    assert.equal(faded, expect, `${n}명: 받아치기 ${expect ? "함" : "안 함"}`);
+    if (expect) assert.ok(short, "세력이 2배 숏을 잡았다");
+  }
+});
+
 test("🤖 봇 교대: 활동 중인 사람만큼 봇이 쉬고, 사람이 빠지면 다시 깨어난다", () => {
   const s = setup();
   let humans = 0;

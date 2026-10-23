@@ -8,7 +8,7 @@ import { ASSETS, LEVERAGE, type NewsItem, type Quote } from "@dopamine/engine";
 /** 봇이 보는 시장: 호가창(Exchange)의 체결가·유동성 */
 export interface MarketView { readonly tick: number; quotes(): Quote[]; quote(sym: string): Quote | null; liquidity(sym: string): number | null; best(sym: string): { bid: number | null; ask: number | null }; crashing(): boolean; insider(within: number): { sym: string; at: number; dir: 1 | -1 }[] }
 type Market = MarketView;
-import { START_CASH, startCash, type AccountKind, type Broker } from "./broker.ts";
+import { CROWD_TICKS, START_CASH, startCash, type AccountKind, type Broker } from "./broker.ts";
 import type { Db } from "./db.ts";
 
 function mulberry32(seed: number) {
@@ -340,7 +340,12 @@ const PAIRS: [string, string][] = [["BTC", "ETH"], ["NVDA", "AMD"], ["AAPL", "MS
  * 갈아타는 시각은 세력마다 달라 정리 매물이 한꺼번에 몰리지 않는다. 🐋 고래는 전략 하나(whale)만 쓴다
  */
 /** BotRunner가 세력에게 맡기는 공동 작업 */
-interface Job { kind: "op" | "shake" | "war" | "front"; sym: string; start: number; ready: boolean; side?: "long" | "short"; dir?: 1 | -1; at?: number }
+interface Job { kind: "op" | "shake" | "war" | "front" | "fade"; sym: string; start: number; ready: boolean; side?: "long" | "short"; dir?: 1 | -1; at?: number; notional?: number; price?: number }
+/**
+ * 단합 받아치기 (2026-10-24): 2분 안에 사람 3명 이상이 같은 종목·같은 방향으로 min 넘게 몰리면 세력 하나가 몰린 금액의 30%를 반대로 잡는다.
+ * 그 종목에 2분 안에 뉴스가 있었으면 빼고, 같은 종목은 10분에 한 번. 단합 전 가격으로 돌아오거나 5분이 지나면 정리
+ */
+const FADE = { users: 3, min: { stock: 300_000, coin: 300_000, venture: 100_000 } as Record<string, number>, share: 0.3, lev: 2, cooldown: 600, hold: 300 };
 
 class MarketMaker extends Agent {
   private cycle: MmStyle[]; private at = 0; private nextSwitch: number;
@@ -406,6 +411,15 @@ class MarketMaker extends Agent {
         if (t === 0) this.mkt(c, () => b.openFuture(me, j.sym, j.dir === 1 ? "long" : "short", this.lev(c, j.sym, 5), 15));
         if (c.tick > j.at! + 90) end();
         return;
+      case "fade": { // 단합 받아치기: 30초 동안 3번에 나눠 반대로 잡는다
+        if (t < 30) {
+          if (t % 10 === 0) { const lev = this.lev(c, j.sym, FADE.lev); if (acc.cash > 0) this.mkt(c, () => b.openFuture(me, j.sym, j.side!, lev, Math.min(100, (j.notional! / 3 / (lev * acc.cash)) * 100))); }
+          return;
+        }
+        const p = c.market.quote(j.sym)?.price ?? 0;
+        if (t >= FADE.hold || (j.side === "short" ? p <= j.price! : p >= j.price!)) end();
+        return;
+      }
     }
   }
 
@@ -742,7 +756,7 @@ export class BotRunner {
     bot.reroll(c.tick);
   }
   /** 계좌 id → 성향 (시뮬레이션 통계용) */
-  describe() { return this.agents.map(a => ({ userId: a.userId, kind: a.kind, label: a.label })); }
+  describe() { return this.agents.map(a => ({ userId: a.userId, kind: a.kind, label: a.label, job: a instanceof MarketMaker ? a.job?.kind ?? null : null })); }
 
   /** 사람이 늘면 봇 하나를 쉬게 하고, 줄면 하나를 깨운다 (한 tick에 1명) */
   private rotate(c: Ctx) {
@@ -757,6 +771,7 @@ export class BotRunner {
     const market = this.getMarket(), broker = this.getBroker();
     this.hist.push(market);
     const c: Ctx = { market, broker, news, hist: this.hist, tick: market.tick };
+    for (const n of news) for (const sym of n.symbols) this.lastNews.set(sym, c.tick);
     this.rotate(c);
     if (!market.crashing()) this.assignJobs(c);
     for (const a of this.agents) a.run(c);
@@ -764,9 +779,11 @@ export class BotRunner {
 
   /**
    * 세력 공동 작업 배정 (2026-10-24): 작전(평균 25분에 한 번, 세력 3), 개미 털기(20분, 세력 1), 세력 전쟁(30분, 세력 2),
-   * 선취매(결과가 정해진 사건 2~4분 전, 세력 1). 이미 일하는 세력과 고래는 빼고 고른다
+   * 선취매(결과가 정해진 사건 2~4분 전, 세력 1), 단합 받아치기(FADE, 세력 1). 이미 일하는 세력과 고래는 빼고 고른다
    */
   private seenInsider = new Set<string>();
+  private lastNews = new Map<string, number>(); // 종목별 마지막 뉴스 tick
+  private lastFade = new Map<string, number>(); // 종목별 마지막 단합 받아치기 tick
   private assignJobs(c: Ctx) {
     const r = this.rand, mms = () => this.agents.filter((a): a is MarketMaker => a instanceof MarketMaker && a.free);
     const take = (n: number) => { const pool = mms(); const out: MarketMaker[] = []; while (out.length < n && pool.length) out.push(pool.splice(Math.floor(r() * pool.length), 1)[0]); return out; };
@@ -797,6 +814,15 @@ export class BotRunner {
       this.seenInsider.add(key);
       const crew = take(1);
       if (crew.length) crew[0].job = job("front", e.sym, { dir: e.dir, at: e.at });
+    }
+    if (c.tick % 10 === 0) for (const [sym, g] of c.broker.crowds()) { // 단합 받아치기 (FADE)
+      const q = c.market.quote(sym);
+      if (!q || g.users < FADE.users || g.notional < FADE.min[q.market]) continue;
+      if (c.tick - (this.lastNews.get(sym) ?? -Infinity) < CROWD_TICKS || c.tick - (this.lastFade.get(sym) ?? -Infinity) < FADE.cooldown) continue;
+      const crew = take(1);
+      if (!crew.length) break;
+      this.lastFade.set(sym, c.tick);
+      crew[0].job = job("fade", sym, { side: g.dir > 0 ? "short" : "long", notional: FADE.share * g.notional, price: c.hist.ago(sym, CROWD_TICKS) });
     }
   }
 }

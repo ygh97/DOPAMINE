@@ -35,12 +35,12 @@ export interface ExchangeOptions {
   backstopL: number;           // 안전 물량 = L × 이 값
   tickBp: number;              // 호가 단위 ≈ 가격 × 이 값 (1·2·5 단계로 반올림)
   recentTrades: number;        // 최근 체결 보관 개수
-  hedgeRate: number;           // tick마다 재고의 이 비율을 기준가로 정리 (1/60 = 약 1분에 63%)
+  hedgeRate: number;           // tick마다 재고의 이 비율을 기준가로 정리 (1/30 = 약 30초에 63%)
 }
 
 export const EXCHANGE_DEFAULTS: ExchangeOptions = {
   levels: 30, spreadSigma: 0.5, skewPerL: 0.5, inventoryCapL: 3, inventoryCut: 0.3,
-  backstop: { stock: 0.1, coin: 0.15, venture: 0.4 }, backstopL: 5, tickBp: 0.0002, recentTrades: 30, hedgeRate: 1 / 60,
+  backstop: { stock: 0.1, coin: 0.15, venture: 0.4 }, backstopL: 5, tickBp: 0.0002, recentTrades: 30, hedgeRate: 1 / 30, // 2026-10-24 1/60 → 1/30 (몰려 밀어 올린 가격이 2배 빨리 빠진다)
 };
 
 /** 호가 단위: 가격의 약 tickBp를 1·2·5 단계로. 예) $219 → 0.05, $94,880 → 20, $0.31 → 0.0001 */

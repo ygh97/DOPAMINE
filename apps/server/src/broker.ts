@@ -25,6 +25,7 @@ const ORDERS_PER_TICK = 2;      // tick(1초)당 계정별 주문 수
 const LIQ_LOSS = 0.9;           // 증거금 손실 90%에서 강제 청산
 const RESET_LOCK_TICKS = 600;   // 다시 시작한 뒤 10분간 5배 초과 레버리지 금지
 const RESET_MAX_LEV = 5;
+export const CROWD_TICKS = 120;  // 단합 감지 구간: 최근 2분
 
 export class OrderError extends Error {}
 
@@ -92,6 +93,7 @@ export class Broker {
   private intents = new Map<number, Intent>();          // 걸어 둔 지정가 (거래소 주문 id → 내용)
   private tickFlows = new Map<string, number>();        // 이번 tick 종목별 순매수 (시장가 쪽, 엔진에 남기고 재생용으로 기록)
   private crowdFlows = new Map<string, number>();       // 그중 세력 계정을 뺀 것
+  private humanFlows: { tick: number; userId: number; sym: string; signed: number }[] = []; // 최근 2분 사람 계정의 순매수 (단합 감지)
   private autoClosed: { type: string; sym: string }[] = [];
   private makerTouched = new Set<string>(); // 지정가가 체결된 종목
   private stuck = new Set<Future>();                    // 호가가 없어 이번 tick 청산하지 못한 포지션
@@ -368,6 +370,26 @@ export class Broker {
     if (!signed) return;
     this.tickFlows.set(sym, (this.tickFlows.get(sym) ?? 0) + signed);
     if (acc.kind !== "mm") this.crowdFlows.set(sym, (this.crowdFlows.get(sym) ?? 0) + signed);
+    if (acc.kind === "user") this.humanFlows.push({ tick: this.market.tick, userId: acc.userId, sym, signed });
+  }
+  /**
+   * 단합 감지: 최근 2분(CROWD_TICKS) 동안 사람 계정의 순매수를 사람마다 합쳐 방향을 정하고,
+   * 종목마다 금액이 큰 쪽 방향의 인원·합계를 돌려준다 (봇·세력·고래는 세지 않는다)
+   */
+  crowds(): Map<string, { dir: 1 | -1; users: number; notional: number }> {
+    const net = new Map<string, Map<number, number>>();
+    for (const f of this.humanFlows) {
+      let m = net.get(f.sym);
+      if (!m) net.set(f.sym, (m = new Map()));
+      m.set(f.userId, (m.get(f.userId) ?? 0) + f.signed);
+    }
+    const out = new Map<string, { dir: 1 | -1; users: number; notional: number }>();
+    for (const [sym, m] of net) {
+      let bu = 0, bn = 0, su = 0, sn = 0;
+      for (const v of m.values()) if (v > 0) { bu++; bn += v; } else if (v < 0) { su++; sn -= v; }
+      out.set(sym, bn >= sn ? { dir: 1, users: bu, notional: bn } : { dir: -1, users: su, notional: sn });
+    }
+    return out;
   }
 
   /** 시장가 주문. 바로 체결된다 (Promise는 예전 API 호환). 잘못된 주문은 OrderError를 바로 던진다 */
@@ -814,6 +836,9 @@ export class Broker {
     });
     this.lastFlows = this.crowdFlows;
     this.tickFlows = new Map(); this.crowdFlows = new Map();
+    let old = 0; // 단합 감지 구간 밖으로 나간 기록을 버린다
+    while (old < this.humanFlows.length && this.humanFlows[old].tick <= tick - CROWD_TICKS) old++;
+    if (old) this.humanFlows.splice(0, old);
     for (const f of this.stuck) f.closing = false;
     this.stuck.clear();
   }
