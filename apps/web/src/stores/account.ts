@@ -14,7 +14,8 @@ export interface FuturePos {
 }
 /** 걸어 둔 지정가. qty = 남은 수량, filled = 체결된 수량. kind fut이면 buy 롱 / sell 숏 진입 */
 /** cash = 묶인 돈, held = 현물 매도로 떼어 둔 수량. 둘 다 총자산에 들어간다 */
-export interface OpenOrder { id: number; sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; lev: number; price: number; qty: number; filled: number; cash: number; held: number }
+/** reduce = 선물 종료 지정가 (posId 포지션만 줄인다) */
+export interface OpenOrder { id: number; sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; lev: number; price: number; qty: number; filled: number; cash: number; held: number; reduce?: boolean; posId?: number | null }
 export interface Me {
   /** grad: 20배 졸업 금액, goal: 100배 전설 금액 */
   name: string; cash: number; equity: number; returnPct: number; goal: number; grad: number;
@@ -106,14 +107,15 @@ export const useAccount = defineStore("account", () => {
   }
 
   /** 지정가: 바로 체결된 몫은 체결 내역에, 남은 수량은 미체결 탭에 */
-  async function limit(req: { sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; price: number; pct: number; lev?: number }) {
+  async function limit(req: { sym: string; kind: "spot" | "fut"; side: "buy" | "sell"; price: number; pct: number; lev?: number; reduce?: boolean; posId?: number }) {
     busy.value = true;
     try {
       const r = await api<{ fills: Fill[]; order: OpenOrder | null; me: Me }>("/api/limit", req);
       me.value = r.me;
       void m.loadRanking();
       const filled = r.fills.reduce((s, f) => s + f.qty, 0), unitOf = m.quotes[req.sym]?.market === "coin" ? "" : "주";
-      const what = req.kind === "fut" ? `${req.lev}x ${req.side === "buy" ? "롱" : "숏"}` : req.side === "buy" ? "매수" : "매도";
+      const closing = req.reduce || req.posId != null;
+      const what = closing ? `${req.side === "sell" ? "롱" : "숏"} 종료` : req.kind === "fut" ? `${req.lev}x ${req.side === "buy" ? "롱" : "숏"}` : req.side === "buy" ? "매수" : "매도";
       if (r.order) {
         holdTab.value = "orders"; // 남은 수량이 걸렸다
         notify(`${req.sym} ${what} 지정가 $${r.order.price.toFixed(r.order.price < 1 ? 4 : 2)} 걸어 둠${filled ? ` (${+filled.toFixed(6)}${unitOf} 바로 체결)` : ""}`);

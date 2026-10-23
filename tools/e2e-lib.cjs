@@ -27,7 +27,7 @@ function startNode(name, args, cwd, env = {}) {
 const E2E_DB = path.join(require("node:os").tmpdir(), `dc-e2e-${process.pid}.db`);
 for (const f of [E2E_DB, `${E2E_DB}-wal`, `${E2E_DB}-shm`]) { try { fs.unlinkSync(f); } catch { /* 없음 */ } }
 const startServer = (env = {}) => startNode("server", ["--disable-warning=ExperimentalWarning", "src/index.ts"], path.join(ROOT, "apps/server"),
-  { PORT: String(API_PORT), DB_FILE: E2E_DB, ...env });
+  { PORT: String(API_PORT), DB_FILE: E2E_DB, SEASON_MS: "28800000", ...env }); // 고정 길이 시즌: 매일 일정(지금 시각에 따라 길이가 바뀜)이면 시세 경로가 실행 시각마다 달라진다
 const startWeb = () => startNode("web", [VITE, "--strictPort", "--port", String(WEB_PORT)], path.join(ROOT, "apps/web"), { API_ORIGIN: API });
 
 async function waitFor(url, ms = 30000) {

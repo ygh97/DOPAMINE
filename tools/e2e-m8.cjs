@@ -67,7 +67,8 @@ const ENV = { ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120, impactK: 20 }) }
 
     // 4) 보유 전량을 최우선 호가 사이(중간)에 매도 지정가로 건다 → 호가창에 내 표시(●)
     const b2 = await (await fetch(`${API}/api/book?sym=NVDA`)).json();
-    const mid = Math.round(((b2.asks[0][0] + b2.bids[0][0]) / 2) / b2.tickSize) * b2.tickSize;
+    // 스프레드가 한 칸이면 중간값이 매수호가로 반올림돼 바로 체결된다: 매수호가보다 한 칸 위(= 최우선 매도호가 이하)에 건다
+    const mid = Math.max(b2.bids[0][0] + b2.tickSize, Math.round(((b2.asks[0][0] + b2.bids[0][0]) / 2) / b2.tickSize) * b2.tickSize);
     await page.waitForTimeout(1100);
     await page.click('[data-s="sell"]');
     await page.click(".pct-chips button:has-text('100%')");

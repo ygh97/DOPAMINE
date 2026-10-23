@@ -8,6 +8,7 @@ const a = useAccount();
 const m = useMarket();
 const stops = reactive<Record<number, string>>({});
 const tps = reactive<Record<number, string>>({});
+const closePx = reactive<Record<number, string>>({});
 
 const SIDE: Record<string, string> = {
   buy: "매수",
@@ -28,7 +29,8 @@ const fillMarketClass = (s: string) => (isSpotSide(s) ? "mkt-spot" : s === "deli
 const sideClass = (s: string) =>
   s === "buy" || s === "long-open" || s === "tp" ? "up" : s === "sell" || s === "short-open" || s === "liquidation" ? "down" : "muted";
 const qtyText = (sym: string, q: number) => (m.quotes[sym]?.market === "coin" || !Number.isInteger(q) ? +q.toFixed(6) : q.toLocaleString());
-const orderSide = (o: { kind: string; side: string }) => (o.kind === "fut" ? (o.side === "buy" ? "롱 진입" : "숏 진입") : o.side === "buy" ? "매수" : "매도");
+const orderSide = (o: { kind: string; side: string; reduce?: boolean }) =>
+  o.reduce ? (o.side === "sell" ? "롱 종료" : "숏 종료") : o.kind === "fut" ? (o.side === "buy" ? "롱 진입" : "숏 진입") : o.side === "buy" ? "매수" : "매도";
 const signedMoney = (v: number) => `${v >= 0 ? "+" : "-"}${money(Math.abs(v))}`;
 
 // 내 거래 실시간 요약 데이터
@@ -67,6 +69,15 @@ async function applyTp(id: number) {
   await a.setTp(id, Number(raw));
   tps[id] = "";
 }
+// 지정가 종료: 아직 종료 지정가가 안 걸린 수량 전부를 그 가격에 건다 (나눠 걸려면 주문 패널의 "포지션 종료만")
+async function closeAtLimit(f: { id: number; sym: string; side: "long" | "short"; lev: number }) {
+  const price = Number((closePx[f.id] ?? "").trim());
+  if (!(price > 0)) return;
+  await a.limit({ sym: f.sym, kind: "fut", side: f.side === "long" ? "sell" : "buy", price, pct: 100, lev: f.lev, posId: f.id });
+  closePx[f.id] = "";
+}
+/** 이 포지션에 걸린 종료 지정가 수량 합 */
+const closingQty = (id: number) => (a.me?.orders ?? []).filter(o => o.reduce && o.posId === id).reduce((s, o) => s + o.qty, 0);
 async function clearTp(id: number) {
   await a.setTp(id, null);
   tps[id] = "";
@@ -168,7 +179,7 @@ async function shareFill(f: Fill) {
     </div>
     <div v-else-if="a.holdTab === 'fut'" class="table-scroll">
       <table v-if="a.futures.length" id="futures" class="grid">
-        <thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>청산가</th><th>증거금</th><th>손익</th><th>익절(TP)</th><th>손절(SL)</th><th>즉시 종료·공유</th></tr></thead>
+        <thead><tr><th>종목</th><th>방향</th><th>수량</th><th>진입가</th><th>현재가</th><th>청산가</th><th>증거금</th><th>손익</th><th>익절(TP)</th><th>손절(SL)</th><th>지정가 종료</th><th>즉시 종료·공유</th></tr></thead>
         <tbody>
           <tr v-for="f in a.futures" :key="f.id" :data-sym="f.sym" :data-id="f.id" class="clickable" @click="m.select(f.sym)">
             <td><b>{{ f.sym }}</b> <small class="muted">{{ f.name }}</small></td>
@@ -188,6 +199,11 @@ async function shareFill(f: Fill) {
               <input v-model="stops[f.id]" class="stop-input" inputmode="decimal" :placeholder="f.stop != null ? money(f.stop) : '손절가'" aria-label="스탑로스 가격" @keydown.enter="applyStop(f.id)">
               <button class="mini-btn" data-act="stop-set" @click="applyStop(f.id)">설정</button>
               <button v-if="f.stop != null" class="mini-btn" data-act="stop-clear" @click="clearStop(f.id)">해제</button>
+            </td>
+            <td class="stop-cell" @click.stop>
+              <input v-model="closePx[f.id]" class="stop-input" inputmode="decimal" :placeholder="money(f.price)" aria-label="종료 지정가" @keydown.enter="closeAtLimit(f)">
+              <button class="mini-btn" data-act="close-limit" :disabled="a.busy" @click="closeAtLimit(f)">걸기</button>
+              <small v-if="closingQty(f.id)" class="muted" title="이 포지션에 걸어 둔 종료 지정가 수량 (미체결 탭)">{{ qtyText(f.sym, closingQty(f.id)) }} 걸림</small>
             </td>
             <td class="act-cell" @click.stop>
               <button class="mini-btn" data-act="close-10" :disabled="a.busy" @click="a.closeFuture(f.id, 10)">10%</button>

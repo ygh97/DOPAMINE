@@ -1212,3 +1212,16 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 @keyframes guidePulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(29, 111, 216, .45); } 50% { box-shadow: 0 0 0 6px rgba(29, 111, 216, 0); } }
 @media (prefers-reduced-motion: reduce) { .guide-top-btn.fresh { animation: none; } }
 @media (max-width: 760px) { .guide-top-btn { font-size: 12px; padding: 3px 9px; } }
+
+/* 주문 패널: 선물 지정가 "포지션 종료만" */
+.reduce-check { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12.5px; cursor: pointer; flex-wrap: wrap; }
+.reduce-check small { margin-left: auto; }
+/* 상단 닉네임 묶음은 한 줄로 (보는 사람 수·가이드 버튼이 늘어 좁아져도 세로로 쌓이지 않게) */
+.top-center-nick { white-space: nowrap; flex: none; }
+/* 상단 바가 넘치면 잘리지 않고 다음 줄로. 1600px 아래에서는 덜 중요한 글자부터 줄인다 */
+.topbar { flex-wrap: wrap; row-gap: 6px; }
+@media (max-width: 1600px) {
+  .logo small, .nick-label { display: none; }
+  .topbar { gap: 12px; }
+  .goal { width: 110px; }
+}

@@ -751,3 +751,40 @@ test("전광판 loud: 사람 청산·졸업은 LIVE 바에, 봇 청산은 증거
   assert.equal(chat.system("[졸업] 🎓 개미1님이 총자산 $2,000,000 달성으로 20배 졸업!").loud, true);
   assert.deepEqual(chat.recent(10).filter(m => m.name === "⚡전광판").map(m => m.loud), [true, false, true, true]);
 });
+
+test("선물 종료 지정가: 포지션만 줄이고 수수료 0, 합계는 포지션 수량까지, 포지션이 줄면 최근 것부터 취소", async () => {
+  const s = setup();
+  const a = s.user("롱잡이"), b = s.user("받는이");
+  await openFut(s, a, "AAPL", "long", 10, 5); // 명목 약 $5만: 받는이 예수금($10만)으로 다 받을 수 있게
+  const f = s.broker.me(a).futures[0], tick = s.exchange.tickOf("AAPL");
+  const cashBefore = s.broker.me(a).cash;
+  // 최우선 매도호가에 전량 종료 지정가 (돈은 안 묶인다)
+  const ask = s.exchange.best("AAPL").ask!;
+  const r = s.broker.limitOrder(a, { sym: "AAPL", kind: "fut", side: "sell", price: ask, pct: 100, posId: f.id });
+  assert.ok(r.order && r.order.reduce && r.order.qty === f.qty, "포지션 전량이 종료 지정가로 걸림");
+  assert.equal(s.broker.me(a).cash, cashBefore, "돈을 묶지 않는다");
+  assert.throws(() => s.broker.limitOrder(a, { sym: "AAPL", kind: "fut", side: "sell", price: ask + tick, pct: 100, posId: f.id }), /이미/, "합계가 포지션을 넘을 수 없다");
+  // 다른 사람이 시장가로 사면 체결 → 포지션 종료, 수수료 0, 새 숏은 생기지 않는다
+  await order(s, b, "AAPL", "buy", 100);
+  const me = s.broker.me(a);
+  assert.equal(me.futures.length, 0, "포지션이 닫힘");
+  assert.equal(me.orders.length, 0);
+  const close = me.fills.find(x => x.side === "long-close")!;
+  assert.equal(close.fee, 0, "걸린 채 체결 수수료 0");
+  assert.ok(me.cash > cashBefore, "증거금 몫 + 손익을 돌려받음");
+
+  // 주문 패널(reduce): 같은 배율의 반대 방향 포지션을 찾는다. 시장가로 일부 닫으면 넘치는 종료 지정가는 최근 것부터 취소
+  await openFut(s, a, "AAPL", "long", 5, 20);
+  const g = s.broker.me(a).futures[0], hi = s.exchange.best("AAPL").ask! * 1.2;
+  assert.throws(() => s.broker.limitOrder(a, { sym: "AAPL", kind: "fut", side: "sell", price: hi, pct: 50, lev: 10, reduce: true }), /10배 포지션이 없습니다/);
+  s.broker.limitOrder(a, { sym: "AAPL", kind: "fut", side: "sell", price: hi, pct: 50, lev: 5, reduce: true }); s.tick();
+  s.broker.limitOrder(a, { sym: "AAPL", kind: "fut", side: "sell", price: hi + tick, pct: 100, lev: 5, reduce: true }); s.tick();
+  assert.equal(s.broker.me(a).orders.reduce((t, o) => t + o.qty, 0), g.qty, "두 주문 합 = 포지션 수량");
+  await closeFut(s, a, g.id, 50);
+  const left = s.broker.me(a);
+  assert.ok(left.orders.reduce((t, o) => t + o.qty, 0) <= left.futures[0].qty, "남은 포지션보다 많이 걸려 있지 않다");
+  assert.equal(left.orders.length, 1, "최근 주문이 취소됨");
+  await closeFut(s, a, g.id, 100);
+  assert.equal(s.broker.me(a).orders.length, 0, "포지션이 없어지면 전부 취소");
+  assert.equal(s.db.prepare("SELECT COUNT(*) AS c FROM open_orders").get()!.c, 0);
+});

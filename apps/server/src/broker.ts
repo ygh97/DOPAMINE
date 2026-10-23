@@ -46,11 +46,13 @@ export interface Fill { id: number; tick: number; at: number; sym: string; side:
 /**
  * 걸어 둔 지정가 하나 (거래소 주문 id = id). qty = 남은 수량.
  * cash = 묶어 둔 돈 (현물 매수 대금, 선물 증거금+수수료), held/avg = 현물 매도로 보유에서 떼어 둔 수량과 그 평단.
- * posId = 선물 지정가가 체결되며 만든 포지션 (같은 주문의 체결은 한 포지션으로 모은다)
+ * posId = 선물 지정가가 체결되며 만든 포지션 (같은 주문의 체결은 한 포지션으로 모은다).
+ * reduce = 선물 종료 지정가: posId 포지션만 줄인다 (새 포지션을 만들지 않고, 돈을 묶지 않는다).
+ * 한 포지션의 종료 지정가 수량 합은 늘 포지션 수량 이하다 (걸 때 막고, 포지션이 줄면 최근 것부터 취소) → 가짜 호가벽을 못 세운다
  */
 interface Intent {
   id: number; userId: number; sym: string; kind: "spot" | "fut"; side: Side; lev: number; price: number; qty: number;
-  cash: number; held: number; avg: number; posId: number | null; seq: number; filled?: number;
+  cash: number; held: number; avg: number; posId: number | null; seq: number; filled?: number; reduce?: boolean;
 }
 export interface RankRow { rank: number; name: string; kind: AccountKind; equity: number; returnPct: number; clearedTick: number | null; gradTick: number | null }
 /** 세력 전략이 보는 종목별 쏠림: 사람·봇의 현물 평가액, 선물 롱·숏 명목, 청산가 목록 */
@@ -118,9 +120,9 @@ export class Broker {
       upsertDrawing: db.prepare("INSERT INTO drawings (user_id, season_id, sym, factor, items, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, season_id, sym) DO UPDATE SET factor = excluded.factor, items = excluded.items, updated_at = excluded.updated_at"),
       clearDrawings: db.prepare("DELETE FROM drawings WHERE user_id = ? AND season_id = ?"),
       updFutOpen: db.prepare("UPDATE futures SET qty = ?, entry = ?, margin = ? WHERE id = ?"),
-      upsertOrder: db.prepare("INSERT INTO open_orders (id, user_id, season_id, sym, kind, side, lev, price, qty, cash, held, avg, pos_id, seq, filled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET qty = excluded.qty, cash = excluded.cash, held = excluded.held, pos_id = excluded.pos_id, filled = excluded.filled"),
+      upsertOrder: db.prepare("INSERT INTO open_orders (id, user_id, season_id, sym, kind, side, lev, price, qty, cash, held, avg, pos_id, seq, filled, reduce) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET qty = excluded.qty, cash = excluded.cash, held = excluded.held, pos_id = excluded.pos_id, filled = excluded.filled"),
       delOrder: db.prepare("DELETE FROM open_orders WHERE id = ?"),
-      selOrders: db.prepare('SELECT id, user_id AS "userId", sym, kind, side, lev, price, qty, cash, held, avg, pos_id, seq, filled FROM open_orders WHERE season_id = ? ORDER BY seq'),
+      selOrders: db.prepare('SELECT id, user_id AS "userId", sym, kind, side, lev, price, qty, cash, held, avg, pos_id, seq, filled, reduce FROM open_orders WHERE season_id = ? ORDER BY seq'),
     };
   }
 
@@ -450,22 +452,38 @@ export class Broker {
       if (qty <= 0) throw new OrderError("종료할 수량이 1주보다 적습니다. 더 큰 비중으로 종료하세요.");
       const v = this.takeMarket(acc, f.sym, f.side === "long" ? "sell" : "buy", qty);
       if (v.qty <= 0) throw new OrderError("호가가 없어 체결되지 않았습니다.");
-      const part = v.qty / f.qty, margin = f.margin * part, fee = v.notional * FEE;
-      const pnl = pnlOf(f, v.price, v.qty);
-      acc.cash += Math.max(0, margin + pnl - fee); // 격리: 증거금보다 더 잃지는 않는다
-      if (part >= 1 - 1e-9) {
-        acc.futures.delete(f.id);
-        this.stmts.delFut.run(f.id);
-      } else {
-        f.qty -= v.qty; f.margin -= margin; // 스탑로스는 남은 포지션에 유지
-        this.stmts.updFutPart.run(f.qty, f.margin, f.id);
-      }
-      if (reason === "liquidation")
-        this.broadcasts.push(`[강제청산] 💥 ${acc.name}님 $${f.sym} ${f.lev}x ${f.side === "long" ? "롱" : "숏"} (증거금 $${Math.round(f.margin).toLocaleString()}) 강제청산!`);
-      if (reason !== "user") this.autoClosed.push({ type: reason, sym: f.sym });
-      const side = reason === "user" ? `${f.side}-close` : reason;
-      return this.record(acc, f.sym, side, v.qty, v.price, fee, pnl);
+      return this.settleClose(acc, f, v.qty, v.price, v.notional * FEE, reason);
     });
+  }
+  /** 선물 포지션 qty만큼 price에 종료됨 (시장가·종료 지정가 공통): 증거금 몫 + 손익을 돌려주고, 줄어든 만큼 종료 지정가를 맞춘다 */
+  private settleClose(acc: Account, f: Future, qty: number, price: number, fee: number, reason: "user" | "liquidation" | "stop" | "tp"): Fill {
+    const part = qty / f.qty, margin = f.margin * part;
+    const pnl = pnlOf(f, price, qty);
+    acc.cash += Math.max(0, margin + pnl - fee); // 격리: 증거금보다 더 잃지는 않는다
+    if (part >= 1 - 1e-9) {
+      acc.futures.delete(f.id);
+      this.stmts.delFut.run(f.id);
+    } else {
+      f.qty -= qty; f.margin -= margin; // 스탑로스는 남은 포지션에 유지
+      this.stmts.updFutPart.run(f.qty, f.margin, f.id);
+    }
+    this.trimCloseOrders(acc, f);
+    if (reason === "liquidation")
+      this.broadcasts.push(`[강제청산] 💥 ${acc.name}님 $${f.sym} ${f.lev}x ${f.side === "long" ? "롱" : "숏"} (증거금 $${Math.round(f.margin).toLocaleString()}) 강제청산!`);
+    if (reason !== "user") this.autoClosed.push({ type: reason, sym: f.sym });
+    return this.record(acc, f.sym, reason === "user" ? `${f.side}-close` : reason, qty, price, fee, pnl);
+  }
+  /** 포지션이 줄거나 없어지면 그 포지션의 종료 지정가 합이 남은 수량을 넘지 않게 최근 것부터 취소한다 */
+  private trimCloseOrders(acc: Account, f: Future) {
+    const mine = [...this.intents.values()].filter(it => it.reduce && it.posId === f.id && it.userId === acc.userId).sort((a, b) => b.seq - a.seq);
+    const room = acc.futures.has(f.id) ? f.qty : 0;
+    let total = mine.reduce((s, it) => s + it.qty, 0);
+    for (const it of mine) {
+      if (total <= room + 1e-9) break;
+      this.x.cancel(acc.userId, it.id);
+      total -= it.qty;
+      this.release(acc, it);
+    }
   }
 
   /** 보유 현물·선물 포지션 일괄 100% 시장가 매도·종료 */
@@ -497,7 +515,8 @@ export class Broker {
    * - spot buy: 예수금의 pct%로 살 수 있는 수량, spot sell: 보유 수량의 pct%
    * - fut buy/sell (= 롱/숏 진입): 증거금 = 예수금의 pct%, 명목 = 증거금 × 레버리지
    */
-  limitOrder(userId: number, req: { sym: string; kind: "spot" | "fut"; side: Side; price: number; pct: number; lev?: number }) {
+  limitOrder(userId: number, req: { sym: string; kind: "spot" | "fut"; side: Side; price: number; pct: number; lev?: number; reduce?: boolean; posId?: number }) {
+    if (req.kind === "fut" && (req.reduce || req.posId != null)) return this.closeLimit(userId, req);
     const { sym, kind, side, pct } = req;
     if (side !== "buy" && side !== "sell") throw new OrderError("매수 또는 매도만 할 수 있습니다.");
     if (!Number.isFinite(req.price) || req.price <= 0) throw new OrderError("가격이 올바르지 않습니다.");
@@ -547,6 +566,46 @@ export class Broker {
     return out;
   }
 
+  /**
+   * 선물 종료 지정가. posId 포지션(없으면 sym·배율이 같고 주문과 반대 방향인 포지션)을 price에 닫는 주문을 건다.
+   * 수량 = 아직 종료 지정가가 걸리지 않은 수량의 pct%. 돈을 묶지 않고, 걸린 채 체결되면 수수료 0
+   */
+  private closeLimit(userId: number, req: { sym: string; side: Side; price: number; pct: number; lev?: number; posId?: number }) {
+    if (!Number.isFinite(req.price) || req.price <= 0) throw new OrderError("가격이 올바르지 않습니다.");
+    this.checkPct(req.pct);
+    const acc = this.account(userId), want = req.side === "sell" ? "long" : "short";
+    const f = req.posId != null ? acc.futures.get(req.posId)
+      : [...acc.futures.values()].find(g => g.sym === req.sym && g.side === want && g.lev === req.lev);
+    if (!f || f.closing) throw new OrderError(req.posId != null ? "선물 포지션을 찾을 수 없습니다." : `닫을 ${want === "long" ? "롱" : "숏"} ${req.lev}배 포지션이 없습니다.`);
+    this.admit(userId, f.sym);
+    if (this.ordersOf(userId).length >= MAX_OPEN_ORDERS) throw new OrderError(`미체결 주문은 최대 ${MAX_OPEN_ORDERS}개입니다.`);
+    const unit = step(this.x.quote(f.sym)!.market), side: Side = f.side === "long" ? "sell" : "buy";
+    const free = f.qty - [...this.intents.values()].filter(it => it.reduce && it.posId === f.id).reduce((s, it) => s + it.qty, 0);
+    if (free < unit - 1e-12) throw new OrderError("포지션 전량에 이미 종료 지정가가 걸려 있습니다.");
+    const qty = req.pct >= 100 ? free : floorTo((free * req.pct) / 100, unit);
+    if (qty <= 0) throw new OrderError("종료할 수량이 1주보다 적습니다. 더 큰 비중으로 거세요.");
+    const tickSz = this.x.tickOf(f.sym), price = Math.max(tickSz, Math.round(req.price / tickSz) * tickSz);
+    const out = this.atomic([userId], () => {
+      const it: Intent = { id: 0, userId, sym: f.sym, kind: "fut", side, lev: f.lev, price, qty, cash: 0, held: 0, avg: 0, posId: f.id, seq: 0, reduce: true };
+      const res = this.x.limitOrder(userId, f.sym, side, price, qty);
+      const fills: Fill[] = [];
+      if (res.trades.length) {
+        this.settleTrades(res.trades);
+        const v = this.vwap(res.trades);
+        this.addFlow(acc, f.sym, side === "buy" ? v.notional : -v.notional);
+        fills.push(this.fillIntent(acc, it, v.qty, v.price, true));
+      }
+      if (res.order) {
+        it.id = res.order.id; it.seq = res.order.seq; it.qty = res.order.qty;
+        this.intents.set(it.id, it);
+        this.saveIntent(it);
+      }
+      return { fills, order: res.order ? this.orderView(it) : null };
+    });
+    this.runTriggers(f.sym);
+    return out;
+  }
+
   /** 걸어 둔 지정가 취소. 묶어 둔 돈·수량을 돌려준다 */
   cancelOrder(userId: number, orderId: number) {
     const it = this.intents.get(orderId);
@@ -571,7 +630,7 @@ export class Broker {
   ordersOf(userId: number) { return [...this.intents.values()].filter(it => it.userId === userId).map(it => this.orderView(it)); }
   private orderView(it: Intent) {
     // cash = 묶어 둔 돈, held = 현물 매도로 떼어 둔 수량 (화면이 총자산에 더한다)
-    return { id: it.id, sym: it.sym, kind: it.kind, side: it.side, lev: it.lev, price: it.price, qty: it.qty, filled: it.filled ?? 0, cash: it.cash, held: it.held };
+    return { id: it.id, sym: it.sym, kind: it.kind, side: it.side, lev: it.lev, price: it.price, qty: it.qty, filled: it.filled ?? 0, cash: it.cash, held: it.held, reduce: !!it.reduce, posId: it.reduce ? it.posId : null };
   }
 
   /**
@@ -594,6 +653,10 @@ export class Broker {
   private fillIntent(acc: Account, it: Intent, qty: number, price: number, taker: boolean): Fill {
     const notional = qty * price, fee = taker ? notional * FEE : 0;
     it.qty -= qty; it.filled = (it.filled ?? 0) + qty;
+    if (it.reduce) {
+      const f = acc.futures.get(it.posId!);
+      if (f) return this.settleClose(acc, f, Math.min(qty, f.qty), price, fee, "user");
+    }
     if (it.kind === "spot" && it.side === "buy") {
       it.cash -= notional + fee;
       const pos = acc.positions.get(it.sym) ?? { qty: 0, avg: 0 };
@@ -627,13 +690,13 @@ export class Broker {
     this.rankCache = null;
   }
   private saveIntent(it: Intent) {
-    this.stmts.upsertOrder.run(it.id, it.userId, this.season.id, it.sym, it.kind, it.side, it.lev, it.price, it.qty, it.cash, it.held, it.avg, it.posId, it.seq, it.filled ?? 0);
+    this.stmts.upsertOrder.run(it.id, it.userId, this.season.id, it.sym, it.kind, it.side, it.lev, it.price, it.qty, it.cash, it.held, it.avg, it.posId, it.seq, it.filled ?? 0, it.reduce ? 1 : 0);
   }
   /** 재시작: DB에 남은 지정가를 거래소에 다시 건다 */
   restoreOrders() {
     this.x.clearPeopleOrders();
-    for (const r of this.stmts.selOrders.all(this.season.id) as unknown as (Intent & { pos_id: number | null })[]) {
-      const it: Intent = { ...r, posId: r.pos_id };
+    for (const r of this.stmts.selOrders.all(this.season.id) as unknown as (Omit<Intent, "reduce"> & { pos_id: number | null; reduce: number })[]) {
+      const it: Intent = { ...r, posId: r.pos_id, reduce: !!r.reduce };
       if (!this.x.restoreOrder({ id: it.id, owner: it.userId, sym: it.sym, side: it.side, price: it.price, qty: it.qty, seq: it.seq })) {
         this.account(it.userId); this.release(this.account(it.userId), it); continue; // 폐지된 종목이면 돌려준다
       }

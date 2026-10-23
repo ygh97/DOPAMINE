@@ -16,6 +16,11 @@ const side = ref<"buy" | "sell">("buy");
 const pct = ref(20);
 const custom = ref("");
 const lev = ref(2);
+// 선물 지정가 "포지션 종료만": 새 포지션 대신 같은 배율의 반대 방향 포지션을 줄인다 (매도 = 롱 종료, 매수 = 숏 종료)
+const reduce = ref(false);
+const closing = computed(() => mode.value === "fut" && type.value === "limit" && reduce.value);
+const target = computed(() => a.futures.find(f => f.sym === m.current?.sym && f.lev === lev.value && f.side === (side.value === "sell" ? "long" : "short")) ?? null);
+const targetFree = computed(() => target.value ? target.value.qty - (a.me?.orders ?? []).filter(o => o.reduce && o.posId === target.value!.id).reduce((s, o) => s + o.qty, 0) : 0);
 const limitText = ref("");
 
 const levels = computed(() => LEVERAGE[m.current?.market ?? "stock"]);
@@ -55,6 +60,7 @@ const est = computed(() => {
   const price = type.value === "limit" ? limitPrice.value : q.price;
   if (!price) return { qty: "-", fee: "-", total: "-", liq: "" };
   const feeRate = type.value === "limit" ? 0 : FEE;
+  if (closing.value) return { qty: fmtQty((targetFree.value * pct.value) / 100), fee: money(0), total: "돈 안 묶임", liq: "" };
   if (mode.value === "spot" && side.value === "sell") {
     const qty = (held.value * pct.value) / 100, value = qty * price;
     return { qty: fmtQty(qty), fee: money(value * feeRate), total: money(value * (1 - feeRate)), liq: "" };
@@ -68,13 +74,14 @@ const est = computed(() => {
     liq: money(side.value === "buy" ? price * (1 - 0.9 / lev.value) : price * (1 + 0.9 / lev.value)),
   };
 });
-const sideLabel = (s: "buy" | "sell") => (mode.value === "fut" ? (s === "buy" ? "롱" : "숏") : s === "buy" ? "매수" : "매도");
+const sideLabel = (s: "buy" | "sell") => closing.value ? (s === "sell" ? "롱 종료" : "숏 종료") : mode.value === "fut" ? (s === "buy" ? "롱" : "숏") : s === "buy" ? "매수" : "매도";
 const canOrder = computed(() => !!a.me && !a.busy && (type.value === "market" || limitPrice.value > 0)
-  && (mode.value === "fut" ? cash.value >= 1 : side.value === "buy" || held.value > 0));
+  && (closing.value ? targetFree.value > 0 : mode.value === "fut" ? cash.value >= 1 : side.value === "buy" || held.value > 0));
 const ctaText = computed(() => {
   const sym = m.current?.sym ?? "";
   const at = type.value === "limit" ? ` $${limitPrice.value ? fmtPx(limitPrice.value) : "-"} 지정가` : "";
   if (!a.me) return `${sym} ${sideLabel(side.value)} · 참가 후 가능`;
+  if (closing.value) return target.value ? (targetFree.value > 0 ? `${sym} ${lev.value}x ${sideLabel(side.value)} ${pct.value}%${at}` : "이미 전량에 종료 지정가가 걸려 있음") : `닫을 ${side.value === "sell" ? "롱" : "숏"} ${lev.value}x 포지션 없음`;
   if (mode.value === "fut") return `${sym} ${lev.value}x ${pct.value}%${at} ${sideLabel(side.value)}`;
   if (side.value === "sell" && !held.value) return `${sym} 보유 없음`;
   return `${sym} ${pct.value}%${at} ${sideLabel(side.value)}`;
@@ -82,7 +89,7 @@ const ctaText = computed(() => {
 function submit() {
   if (!canOrder.value || !m.current) return;
   const sym = m.current.sym;
-  if (type.value === "limit") void a.limit({ sym, kind: mode.value, side: side.value, price: limitPrice.value, pct: pct.value, lev: mode.value === "fut" ? lev.value : undefined });
+  if (type.value === "limit") void a.limit({ sym, kind: mode.value, side: side.value, price: limitPrice.value, pct: pct.value, lev: mode.value === "fut" ? lev.value : undefined, reduce: closing.value || undefined });
   else if (mode.value === "fut") void a.openFuture(sym, side.value === "buy" ? "long" : "short", lev.value, pct.value);
   else void a.order(sym, side.value, pct.value);
 }
@@ -136,11 +143,15 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
         <div class="chips" :style="{ gridTemplateColumns: `repeat(${levels.length}, 1fr)` }">
           <button v-for="l in levels" :key="l" :data-lev="l" :aria-pressed="lev === l" @click="lev = l">{{ l }}x</button>
         </div>
+        <label v-if="type === 'limit'" class="reduce-check" title="새 포지션을 만들지 않고, 같은 배율의 반대 방향 포지션만 줄입니다 (매도 = 롱 종료, 매수 = 숏 종료). 걸린 채 체결되면 수수료 0, 돈은 묶이지 않습니다">
+          <input id="reduceOnly" v-model="reduce" type="checkbox"> 포지션 종료만
+          <small v-if="reduce" class="muted">{{ target ? `${target.side === "long" ? "롱" : "숏"} ${target.lev}x · 종료 가능 ${fmtQty(targetFree)}${unit}` : "닫을 포지션 없음" }}</small>
+        </label>
       </div>
       <div>
         <div class="field-label">
-          <span>{{ mode === "fut" ? "증거금 비중" : side === "buy" ? "예수금 비중" : "보유 비중" }}</span>
-          <span>{{ mode === "spot" && side === "sell" ? `${fmtQty(held)}${unit}` : money(cash) }}</span>
+          <span>{{ closing ? "종료 비중 (남은 포지션 기준)" : mode === "fut" ? "증거금 비중" : side === "buy" ? "예수금 비중" : "보유 비중" }}</span>
+          <span>{{ closing ? `${fmtQty(targetFree)}${unit}` : mode === "spot" && side === "sell" ? `${fmtQty(held)}${unit}` : money(cash) }}</span>
         </div>
         <div class="chips pct-chips">
           <button v-for="p in [10, 20, 50, 100]" :key="p" :aria-pressed="pct === p" @click="pct = p; custom = ''">{{ p }}%</button>
