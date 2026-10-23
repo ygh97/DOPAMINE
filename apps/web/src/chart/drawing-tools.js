@@ -120,9 +120,11 @@ export function register() {
     createPointFigures: ({overlay, coordinates: [c], bounding}) => {
       if (!c) return [];
       const d = overlay.extendData || {}, color = d.color || css("--accent");
+      // drag = 끌어서 가격을 바꿀 수 있는 선(미체결 지정가): 선과 글자가 마우스를 받고, 끄는 동안 글자의 가격이 따라 바뀐다
+      const value = overlay.points[0]?.value, label = d.prefix && value != null ? `${d.prefix} $${value.toFixed(d.decimals ?? 2)} ⇕` : d.label || "";
       return [
-        {type: "line", ignoreEvent: true, attrs: {coordinates: [{x: 0, y: c.y}, {x: bounding.width, y: c.y}]}, styles: {style: d.dashed ? "dashed" : "solid", dashedValue: [4, 4], color, size: 1}},
-        {type: "text", ignoreEvent: true, attrs: {x: 8, y: c.y - 3, text: d.label || "", align: "left", baseline: "bottom"}, styles: {color: "#fff", backgroundColor: color, borderColor: color}},
+        {type: "line", ignoreEvent: !d.drag, attrs: {coordinates: [{x: 0, y: c.y}, {x: bounding.width, y: c.y}]}, styles: {style: d.dashed ? "dashed" : "solid", dashedValue: [4, 4], color, size: d.drag ? 2 : 1}},
+        {type: "text", ignoreEvent: !d.drag, attrs: {x: 8, y: c.y - 3, text: label, align: "left", baseline: "bottom"}, styles: {color: "#fff", backgroundColor: color, borderColor: color}},
       ];
     },
   });

@@ -636,6 +636,23 @@ export class Broker {
     this.x.cancel(userId, orderId);
     this.atomic([userId], () => this.release(this.account(userId), it));
   }
+  /**
+   * 걸어 둔 지정가의 가격 바꾸기 (차트에서 선을 끌어서). 취소하고 남은 수량을 새 가격에 다시 건다 (줄 순서는 그 가격의 맨 뒤).
+   * 새 가격이 반대 호가를 넘으면 그만큼 바로 체결된다. 다시 걸기가 실패하면 원래 가격에 되돌려 건다
+   */
+  amendOrder(userId: number, orderId: number, price: number) {
+    const it = this.intents.get(orderId);
+    if (!it || it.userId !== userId) throw new OrderError("미체결 주문을 찾을 수 없습니다.");
+    if (!Number.isFinite(price) || price <= 0) throw new OrderError("가격이 올바르지 않습니다.");
+    const req = { sym: it.sym, kind: it.kind, side: it.side, pct: 100, qty: it.qty, lev: it.lev, ...(it.reduce ? { posId: it.posId! } : {}) };
+    this.cancelOrder(userId, orderId);
+    try { return this.limitOrder(userId, { ...req, price }); }
+    catch (e) {
+      this.recent.delete(userId);
+      try { this.limitOrder(userId, { ...req, price: it.price }); } catch { /* 원래 주문도 못 걸면 취소된 채로 둔다 (돈·수량은 이미 돌려받음) */ }
+      throw e;
+    }
+  }
   /** 내 미체결 지정가 전체 취소 (한 번의 주문으로 센다). 취소한 개수를 돌려준다 */
   cancelAll(userId: number) {
     const mine = [...this.intents.values()].filter(it => it.userId === userId);

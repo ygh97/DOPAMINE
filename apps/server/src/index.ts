@@ -196,7 +196,7 @@ app.setErrorHandler((err, _req, reply) => {
 });
 
 // 시즌 사이 쉬는 시간(23:58~00:00)에는 시세가 멈춰 있으니 거래도 받지 않는다
-const TRADE_ROUTES = new Set(["/api/order", "/api/futures/open", "/api/futures/close", "/api/limit", "/api/cancel", "/api/stop", "/api/tp", "/api/close-all", "/api/reset"]);
+const TRADE_ROUTES = new Set(["/api/order", "/api/futures/open", "/api/futures/close", "/api/limit", "/api/amend", "/api/cancel", "/api/stop", "/api/tp", "/api/close-all", "/api/reset"]);
 app.addHook("onRequest", async (req, reply) => {
   if (req.method === "POST" && TRADE_ROUTES.has(req.url.split("?")[0]) && Date.now() < season.startedAt)
     return reply.code(400).send({ error: `다음 시즌이 ${new Date(season.startedAt).toTimeString().slice(0, 5)}에 시작합니다.` });
@@ -362,6 +362,16 @@ app.post<{ Body: { id?: number; all?: boolean } }>("/api/cancel", {
   if (!id) return;
   const count = req.body.all ? broker.cancelAll(id) : (broker.cancelOrder(id, req.body.id ?? -1), 1);
   return { count, me: broker.me(id) };
+});
+
+// 걸어 둔 지정가의 가격 바꾸기 (차트에서 선을 끌어서)
+app.post<{ Body: { id: number; price: number } }>("/api/amend", {
+  schema: { body: { type: "object", required: ["id", "price"], properties: { id: { type: "integer" }, price: { type: "number" } } } },
+}, async (req, reply) => {
+  const id = userOf(req, reply);
+  if (!id) return;
+  const r = broker.amendOrder(id, req.body.id, req.body.price);
+  return { ...r, me: broker.me(id) };
 });
 
 // 일정(예고된 발표)·애널리스트 적중률·보고 있는 종목의 의견 분포. 화면은 10초마다

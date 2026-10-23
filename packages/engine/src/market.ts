@@ -41,7 +41,7 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   rescueOdds: [0.3, 0.3], // 유예 중 회생 이벤트 확률: [인수 제안, 유상증자], 나머지는 소식 없음
   maxNewGrowth: Infinity, // 신성장(승격 종목) 최대 개수. 시즌제라 상한 없이 조건(검증 성공 + 시총)만 되면 승격한다 (2026-10-23 전: 10)
   ventureCap: 300,        // 신흥주 소프트 상한: 시작가 대비 이 배수에 가까울수록 검증 성공 상승폭이 줄어든다 (100배 전설 보정으로 100 → 300)
-  ventureSuccess: 0.85,   // 신흥주 검증 성공 확률 (졸업률 보정용, tools/sim-bots.ts. 2026-10-22 보정: 100배 전설 평균 3% 이상 → 약 3.5%)
+  ventureSuccess: 0.7,    // 신흥주 검증 성공 확률 (2026-10-23: 사람 거래의 75%가 신흥주로 쏠려 0.85 → 0.7)
   epsHalfLife: 172_800,   // EPS가 기준값으로 돌아가는 반감기(틱, 2일)
   epsBand: [0.4, 3],      // EPS(= 적정가)는 기준의 0.4~3배 안에서만 움직인다
   // 호가창 두께와 순매수의 영구 몫: 충격 = impactK × σ_일 × √(명목 금액 / 가상 유동성). 호가 봇이 같은 크기로 호가를 깐다
@@ -330,9 +330,10 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const good = rand() < 0.82, src = a.market === "coin" ? NEWS.coin : NEWS.company;
     const tpl: Template = pick(good ? src.good : src.bad);
     // 개별 회사·코인 뉴스는 그 종목에 반응한다 (관련주는 연쇄 뉴스로). 실적 관련 뉴스는 적정가에 더 많이 남는다
+    // 2026-10-23 약 1.4배로 키움 (신흥주 말고 주식·코인에도 큰 기회가 있게)
     const rawMag = a.market === "coin"
-      ? (good ? uni(0.035, 0.09) : -uni(0.12, 0.29))
-      : (good ? uni(0.02, 0.06) : -uni(0.08, 0.18));
+      ? (good ? uni(0.05, 0.13) : -uni(0.16, 0.38))
+      : (good ? uni(0.03, 0.085) : -uni(0.11, 0.25));
     const move = realize(rawMag, good ? PRICED_IN : 0.08);
     hitAsset(a, move, tpl.eps ? 2 * FAIR_SHARE : FAIR_SHARE, good ? 14 : 8);
     publish({ kind: a.market === "coin" ? "코인" : "기업", headline: `${a.name} · ${render(tpl.h, a, { pct: pctOf(move) })}`, body: render(tpl.b, a, { pct: pctOf(move) }), symbols: [a.sym] });
@@ -398,8 +399,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   function earningsResult(sym: string) {
     const a = state[sym];
     if (!a || a.market !== "stock") return;
-    // 깜짝 실적 60% × 3~20% ≈ 쇼크 40% × 5~30%. 주가는 서프라이즈의 40%만큼, 적정가에 2배로 남는다
-    const good = rand() < 0.6, surprise = good ? uni(3, 20) : uni(5, 30), move = (good ? 1 : -1) * surprise / 100 * 0.4;
+    // 깜짝 실적 60% × 3~20% ≈ 쇼크 40% × 5~30%. 주가는 서프라이즈의 60%만큼(2026-10-23 전: 40%), 적정가에 2배로 남는다
+    const good = rand() < 0.6, surprise = good ? uni(3, 20) : uni(5, 30), move = (good ? 1 : -1) * surprise / 100 * 0.6;
     hitAsset(a, move, 2 * FAIR_SHARE, 16);
     const tpl = pick(good ? NEWS.earnings.good : NEWS.earnings.bad), v = { pct: Math.round(surprise) };
     publish({ kind: "실적", headline: render(tpl.h, a, v), body: render(tpl.b, a, v), symbols: [a.sym] });
@@ -418,7 +419,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   function launchResult(t: Extract<Task, { kind: "launch" }>) {
     const a = state[t.sym];
     if (!a) return;
-    const move = t.outcome === "good" ? uni(0.03, 0.07) : t.outcome === "sellNews" ? -uni(0.02, 0.05) : -uni(0.05, 0.1);
+    const move = t.outcome === "good" ? uni(0.05, 0.11) : t.outcome === "sellNews" ? -uni(0.03, 0.07) : -uni(0.07, 0.15); // 2026-10-23 약 1.5배로 키움
     hitAsset(a, move, t.outcome === "sellNews" ? 0 : FAIR_SHARE, 14);
     const tpl = pick(NEWS.launch[t.outcome]);
     publish({ kind: "행사", headline: render(tpl.h, a), body: render(tpl.b, a), symbols: [a.sym], event: { id: t.eventId, index: 1, total: 2, label: "공개" } });
@@ -436,7 +437,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   function etfResult(t: Extract<Task, { kind: "etf" }>) {
     const a = state[t.sym];
     if (!a) return;
-    const move = t.approve ? uni(0.08, 0.18) : -uni(0.05, 0.12);
+    const move = t.approve ? uni(0.12, 0.27) : -uni(0.08, 0.18); // 2026-10-23 약 1.5배로 키움
     hitAsset(a, move, t.approve ? FAIR_SHARE : 0, 16);
     const tpl = pick(t.approve ? NEWS.etf.good : NEWS.etf.bad);
     publish({ kind: "코인", headline: render(tpl.h, a), body: render(tpl.b, a), symbols: [a.sym], event: { id: t.eventId, index: 1, total: 2, label: t.approve ? "승인" : "연기" } });
@@ -473,7 +474,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   function whaleNews() {
     const a = pick(coins());
     if (!a) return noiseNews();
-    const good = rand() < 0.5, move = (good ? 1 : -1) * uni(0.02, 0.06), tpl = pick(good ? NEWS.whale.good : NEWS.whale.bad);
+    const good = rand() < 0.5, move = (good ? 1 : -1) * uni(0.03, 0.09), tpl = pick(good ? NEWS.whale.good : NEWS.whale.bad);
     hitAsset(a, move, FAIR_SHARE / 2, 12);
     const v = { amount: amountOf(a) };
     publish({ kind: "코인", headline: render(tpl.h, a, v), body: render(tpl.b, a, v), symbols: [a.sym] });

@@ -3,6 +3,7 @@
 // - 1분/3분/5분/15분/30분/1시간/4시간 타임프레임
 // - 전체화면(⛶), 전체봉 한눈에 보기(↔ 전체봉), 최신봉 이동(▶ 최신봉), 줌(+/-)
 // - 사용자 직접 차트 설정(⚙️): 캔들 모양(캔들/속빈캔들/바/영역), 상단 수치 표시 방식(모바일 가림 방지), MA 기간 직접 입력, 최고·최저가/현재가선/포지션선/격자선/Y축 안쪽 배치 설정
+import { tickSize } from "@dopamine/engine";
 import { dispose, init, type Chart, type KLineData } from "klinecharts";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { alpha, mount, register, type DrawingController } from "../chart/drawing-tools.js";
@@ -210,6 +211,7 @@ function applyUserConfig() {
 /** 현재 종목의 현물 평단·선물 진입가·청산가·익절·스탑로스·미체결 지정가 수평선을 갱신한다 (설정에서 종류별로 켜고 끈다) */
 function syncPosLines() {
   if (!chart) return;
+  if (draggingOrder) return; // 지정가 선을 끄는 동안에는 다시 그리지 않는다
   for (const id of posIds) chart.removeOverlay(id);
   posIds = [];
   if (!cfg.showPosLines || !base.length || !a.me || !shown) return;
@@ -230,9 +232,28 @@ function syncPosLines() {
   }
   if (on.orders) for (const o of a.me.orders.filter(x => x.sym === shown)) {
     const what = o.reduce ? `${o.side === "sell" ? "롱" : "숏"} ${o.lev}x 종료` : o.kind === "fut" ? `${o.side === "buy" ? "롱" : "숏"} ${o.lev}x` : o.side === "buy" ? "매수" : "매도";
-    add(o.price, `${what} 지정가 ${money(o.price)}`, cssVar(o.side === "buy" ? "--up" : "--down"), true);
+    addOrderLine(ts, o.id, o.price, `${what} 지정가`, cssVar(o.side === "buy" ? "--up" : "--down"));
   }
   if (on.fills) syncFillMarks(ts);
+}
+
+/** 미체결 지정가 선: 끌어서 놓으면 그 가격(호가 단위로 맞춤)으로 주문을 옮긴다 */
+let draggingOrder = false;
+function addOrderLine(ts: number, orderId: number, price: number, prefix: string, color: string) {
+  const tick = tickSize(price), decimals = Math.min(8, Math.max(2, -Math.floor(Math.log10(tick) + 1e-9)));
+  const id = chart!.createOverlay({
+    name: "posLine", groupId: "positions", lock: false, points: [{ timestamp: ts, value: price }],
+    extendData: { prefix, color, dashed: true, drag: true, decimals },
+    onPressedMoveStart: () => { draggingOrder = true; return false; },
+    onPressedMoveEnd: ({ overlay }) => {
+      draggingOrder = false;
+      const v = overlay.points[0]?.value;
+      const next = v != null ? Math.max(tick, Math.round(v / tick) * tick) : price;
+      if (Math.abs(next - price) >= tick / 2) void a.amend(orderId, next); else syncPosLines();
+      return false;
+    },
+  });
+  if (typeof id === "string") posIds.push(id);
 }
 
 /** 체결 방향: 매수·롱 진입·숏 종료 = B, 매도·숏 진입·롱 종료 = S (청산·스탑·익절·정산은 방향을 몰라 뺀다) */
@@ -392,6 +413,7 @@ onMounted(async () => {
   register();
   chart = init(chartEl.value!, { styles: chartStyles(), timezone: "Asia/Seoul" });
   if (!chart) return;
+  if (import.meta.env.DEV) (window as unknown as { __dcChart?: Chart }).__dcChart = chart; // 종단 테스트가 가격 ↔ 화면 좌표를 바꿀 때 쓴다 (개발 서버만)
   chart.setBarSpace(cfg.barSpace);
   chart.setOffsetRightDistance(isMobileInit ? 28 : 50);
   chart.createIndicator({ name: "MA", calcParams: activeMaParams.value }, true, { id: "candle_pane" });

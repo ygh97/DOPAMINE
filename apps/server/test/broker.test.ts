@@ -810,3 +810,23 @@ test("수량 직접 입력: 현물 매수·매도, 지정가 매도, 선물 진�
   assert.equal(c.order!.qty, 5, "종료 지정가 5주만");
   assert.throws(() => s.broker.limitOrder(u, { sym: "NVDA", kind: "fut", side: "sell", price: s.exchange.best("NVDA").ask! * 1.2, pct: 0, qty: 16, posId: f.id }), /최대 15주/);
 });
+
+test("지정가 가격 바꾸기(차트에서 끌기): 남은 수량을 새 가격에 다시 걸고 묶인 돈도 새 가격으로, 종료 지정가는 종료 지정가로 남는다", async () => {
+  const s = setup();
+  const u = s.user("옮기는이");
+  const bid = s.exchange.best("AAPL").bid!, tick = s.exchange.tickOf("AAPL");
+  const r = s.broker.limitOrder(u, { sym: "AAPL", kind: "spot", side: "buy", price: bid - 200 * tick, pct: 0, qty: 10 }); s.tick();
+  const moved = s.broker.amendOrder(u, r.order!.id, bid - 100 * tick);
+  const o = s.broker.me(u).orders;
+  assert.equal(o.length, 1);
+  assert.ok(Math.abs(o[0].price - (bid - 100 * tick)) < 1e-9 && o[0].qty === 10, "새 가격, 같은 수량");
+  assert.ok(Math.abs(o[0].cash - 10 * o[0].price * 1.0005) < 1e-6, "묶인 돈도 새 가격 기준");
+  assert.ok(moved.order);
+  s.tick();
+  await s.broker.openFuture(u, "NVDA", "long", 5, 0, 20); s.tick();
+  const f = s.broker.me(u).futures[0], ask = s.exchange.best("NVDA").ask!;
+  const c = s.broker.limitOrder(u, { sym: "NVDA", kind: "fut", side: "sell", price: ask * 1.2, pct: 0, qty: 8, posId: f.id }); s.tick();
+  s.broker.amendOrder(u, c.order!.id, ask * 1.1); s.tick();
+  const co = s.broker.me(u).orders.find(x => x.sym === "NVDA")!;
+  assert.ok(co.reduce && co.posId === f.id && co.qty === 8, "종료 지정가 그대로, 수량 그대로");
+});

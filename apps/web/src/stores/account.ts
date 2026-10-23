@@ -138,6 +138,17 @@ export const useAccount = defineStore("account", () => {
     } catch (e) { notify((e as Error).message, "error"); }
   }
 
+  /** 걸어 둔 지정가 가격 바꾸기 (차트에서 끌어서) */
+  async function amend(id: number, price: number) {
+    try {
+      const r = await api<{ fills: Fill[]; order: OpenOrder | null; me: Me }>("/api/amend", { id, price });
+      me.value = r.me;
+      const at = (p: number) => `$${p.toFixed(p < 1 ? 4 : 2)}`;
+      notify(r.order ? `지정가를 ${at(r.order.price)}로 옮김${r.fills.length ? " (일부 바로 체결)" : ""}` : "새 가격에서 바로 전부 체결됐습니다.");
+      m.bookEpoch++;
+    } catch (e) { notify((e as Error).message, "error"); }
+  }
+
   async function closeFuture(posId: number, pct: number) {
     busy.value = true;
     try {
@@ -291,5 +302,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchFills, fetchDrawings, syncDrawing, sendChat, share, react, hallMessage, reportChat, adminChat, adminBan, adminHide };
+  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, amend, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchFills, fetchDrawings, syncDrawing, sendChat, share, react, hallMessage, reportChat, adminChat, adminBan, adminHide };
 });

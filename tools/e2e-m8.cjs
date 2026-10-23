@@ -87,6 +87,13 @@ const ENV = { ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120, impactK: 20 }) }
     await join(pageB, "시장가B", "secret2");
     await pageB.click("#watchBody tr[data-sym=NVDA]");
     await pageB.click(".pct-chips button:has-text('100%')");
+    // 그사이 시세가 내려갔을 수 있다: B가 사기 직전에 A의 매도 지정가를 지금 최우선 매도호가로 옮긴다 (가격 바꾸기 API)
+    await page.evaluate(async () => {
+      const tok = localStorage.getItem("dc-token"), h = { "Content-Type": "application/json", Authorization: `Bearer ${tok}` };
+      const me = await (await fetch("/api/me", { headers: h })).json(), o = me.orders[0];
+      const book = await (await fetch("/api/book?sym=NVDA")).json();
+      if (o && book.asks[0][0] < o.price) await fetch("/api/amend", { method: "POST", headers: h, body: JSON.stringify({ id: o.id, price: book.asks[0][0] }) });
+    });
     await pageB.click("#orderBtn");
     await pageB.waitForFunction(() => document.querySelector(".toast")?.textContent.includes("매수"));
 
