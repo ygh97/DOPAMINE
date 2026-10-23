@@ -4,7 +4,7 @@ import { dateText, money, pct } from "../format";
 import { useAccount } from "../stores/account";
 import { useMarket } from "../stores/market";
 import { useUi } from "../stores/ui";
-import RankBadge from "./RankBadge.vue";
+import ProfileBlock from "./ProfileBlock.vue";
 import UpdatesButton from "./UpdatesButton.vue";
 
 const m = useMarket();
@@ -21,8 +21,7 @@ function openGuide() {
   guideSeen.value = true;
   try { localStorage.setItem("dc-guide-seen", "1"); } catch { /* 저장 못 해도 이번엔 열린다 */ }
 }
-/** 내 개미 계급 프로필을 누르면 뉴비 가이드의 LP 설명으로 */
-const myLp = computed(() => (a.me ? m.badges[a.me.name]?.lp ?? 0 : 0));
+/** 프로필 카드의 [LP 가이드]: 뉴비 가이드의 LP 설명으로 */
 function openLpGuide() {
   openGuide();
   setTimeout(() => document.getElementById("guideLp")?.scrollIntoView({ block: "start" }), 50);
@@ -59,17 +58,6 @@ function restart() {
     <button id="guideBtn" type="button" class="icon-btn guide-top-btn" :class="{ fresh: !guideSeen }" @click="openGuide">📘 뉴비 가이드</button>
     <UpdatesButton />
 
-    <div v-if="a.me" id="topUserNick" class="top-center-nick">
-      <button type="button" class="nick-tier" title="개미 계급 · LP 가이드" @click="openLpGuide">
-        <RankBadge :lp="myLp" :frame="m.frameFor(a.me.name)" :size="34" />
-        <span class="nick-stack">
-          <b class="nick-name" :style="m.tierFor(a.me.name)?.nameColor ? { color: m.tierFor(a.me.name)!.color } : undefined">{{ a.me.name }}</b>
-          <small class="nick-lp"><span class="nick-tier-name">{{ m.tierFor(a.me.name)?.name ?? "알개미" }} · </span>{{ myLp.toLocaleString() }} LP</small>
-        </span>
-      </button>
-      <span class="nick-rank">{{ a.me.rank ? `#${a.me.rank}위` : "순위 집계중" }}</span>
-    </div>
-
     <div v-if="a.me" class="account">
       <div class="kv"><span>총자산</span><b id="equity">{{ money(a.equity) }}</b></div>
       <div class="kv"><span>수익률</span><b :class="ret >= 0 ? 'up' : 'down'">{{ pct(ret) }}</b></div>
@@ -86,5 +74,6 @@ function restart() {
       <button class="join-btn" :disabled="a.busy">참가하기</button>
       <button type="button" class="icon-btn" data-act="theme" @click="ui.toggleTheme()">{{ ui.theme === "dark" ? "라이트" : "다크" }}</button>
     </form>
+    <ProfileBlock @guide="openLpGuide" />
   </header>
 </template>

@@ -26,6 +26,13 @@ export interface Me {
   fills: Fill[]; orders: OpenOrder[]; rank: number | null;
 }
 
+/** reason: rank(순위 LP)·out(51위 밖)·loss(손실)·late-reset(23시 이후 다시 시작)·dormant(휴면)·absent(불참) */
+export interface Profile {
+  lp: number; floor: number; rank: number | null; people: number;
+  today: { delta: number; reason: string };
+  history: { season: number; rank: number | null; delta: number; lp: number; reason: string }[];
+}
+
 export const useAccount = defineStore("account", () => {
   const m = useMarket();
   const token = ref(readToken());
@@ -63,6 +70,13 @@ export const useAccount = defineStore("account", () => {
     if (r.status === 401) { token.value = ""; writeToken(""); me.value = null; }
     if (!r.ok) throw new Error(data.error ?? `요청 실패 (${r.status})`);
     return data as T;
+  }
+
+  /** 내 개미 계급 프로필 (/api/profile): LP, 사람끼리 지금 순위, 지금 마감하면 바뀔 LP, 최근 정산 */
+  const profile = ref<Profile | null>(null);
+  async function loadProfile() {
+    if (!token.value) { profile.value = null; return; }
+    try { profile.value = await api<Profile>("/api/profile"); } catch { /* 다음에 다시 */ }
   }
 
   function syncTab(next: Me | null) {
@@ -316,5 +330,5 @@ export const useAccount = defineStore("account", () => {
   // 재연결하면 놓친 체결·정산을 반영
   watch(() => m.connected, on => { if (on) void refresh(); });
 
-  return { token, me, busy, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, amend, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchFills, fetchDrawings, syncDrawing, sendChat, share, react, hallMessage, reportChat, adminChat, adminBan, adminHide };
+  return { token, me, busy, profile, loadProfile, holdTab, toast, positions, futures, equity, holding, notify, refresh, join, logout, order, openFuture, limit, amend, cancel, closeFuture, closeAll, setStop, setTp, reset, fetchFills, fetchDrawings, syncDrawing, sendChat, share, react, hallMessage, reportChat, adminChat, adminBan, adminHide };
 });

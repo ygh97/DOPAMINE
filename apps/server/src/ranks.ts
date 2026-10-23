@@ -32,14 +32,34 @@ export function liveFrames(ranking: RankRow[]): Record<string, number> {
 
 interface Activity { user_id: number; base_equity: number | null; turnover: number; peak_trade: number; late_reset: number }
 interface UserLp { id: number; name: string; lp: number; lp_floor: number; idle_seasons: number }
+type Played = ReturnType<typeof peopleRanks>[number];
 
 /**
- * 시즌 LP 정산. 시즌마다 한 번만 (lp_log에 기록이 있으면 넘어간다). finishSeason의 트랜잭션 안에서 부른다.
+ * 한 사람의 시즌 마감 LP 변화 (정산과 화면의 "오늘 예상"이 같이 쓴다).
  * - 수익 마감(원금 초과)이고 사람끼리 50위 안: 순위별 + LP, 100배 전설이면 +40
  * - 그 밖(51위 밖·손실·마감 1시간 안 다시 시작): 활동한 날만 계급별 감점. 마감 4시간 안에 체결했으면 절반 (0 쪽으로 버림)
  * - 활동 안 한 날: 감점 없음. 휴면 감점이 있는 계급(7단계~)은 비활동이 이어진 날수가 기준을 넘으면 그날부터 깎는다
  * - 강등 보호선(50·120)을 한 번 넘으면 그 아래로 내려가지 않는다
  */
+function lpChange(u: UserLp, p: Played | undefined, a: Activity | undefined) {
+  const tier = tierOf(u.lp);
+  const active = !!a && a.base_equity != null && a.turnover >= ACTIVE_TURNOVER * a.base_equity;
+  const late = !!a?.late_reset;
+  let delta = 0, reason = p ? "out" : "absent";
+  const gain = p && !late && p.equity > START_CASH ? rankLp(p.rank) : 0;
+  if (gain > 0) { delta = gain + (p!.legend ? LEGEND_LP : 0); reason = "rank"; }
+  else if (p && (active || late)) {
+    delta = a!.peak_trade ? Math.trunc(tier.deduction / 2) : tier.deduction;
+    reason = late ? "late-reset" : p.equity > START_CASH ? "out" : "loss";
+  }
+  const idle = active || gain > 0 ? 0 : u.idle_seasons + 1;
+  if (!active && gain === 0 && !late && tier.idleDays && idle >= tier.idleDays) { delta += tier.idlePenalty; reason = "dormant"; }
+  const lp = Math.max(0, u.lp_floor, u.lp + delta);
+  const floor = Math.max(u.lp_floor, ...LP_FLOORS.filter(f => lp >= f));
+  return { lp, floor, idle, reason };
+}
+
+/** 시즌 LP 정산 (규칙은 lpChange). 시즌마다 한 번만 (lp_log에 기록이 있으면 넘어간다). finishSeason의 트랜잭션 안에서 부른다 */
 export function settleLp(db: Db, seasonId: number, ranking: RankRow[]) {
   if (db.prepare("SELECT 1 FROM lp_log WHERE season_id = ? LIMIT 1").get(seasonId)) return;
   const played = new Map(peopleRanks(ranking).map(p => [p.name.toLowerCase(), p]));
@@ -48,23 +68,26 @@ export function settleLp(db: Db, seasonId: number, ranking: RankRow[]) {
   const upd = db.prepare("UPDATE users SET lp = ?, lp_floor = ?, idle_seasons = ?, last_equity = COALESCE(?, last_equity) WHERE id = ?");
   const log = db.prepare("INSERT OR IGNORE INTO lp_log (season_id, user_id, rank, equity, delta, lp, reason) VALUES (?, ?, ?, ?, ?, ?, ?)");
   for (const u of users) {
-    const p = played.get(u.name.toLowerCase()), a = acts.get(u.id), tier = tierOf(u.lp);
-    const active = !!a && a.base_equity != null && a.turnover >= ACTIVE_TURNOVER * a.base_equity;
-    const late = !!a?.late_reset;
-    let delta = 0, reason = p ? "out" : "absent";
-    const gain = p && !late && p.equity > START_CASH ? rankLp(p.rank) : 0;
-    if (gain > 0) { delta = gain + (p!.legend ? LEGEND_LP : 0); reason = "rank"; }
-    else if (p && (active || late)) {
-      delta = a!.peak_trade ? Math.trunc(tier.deduction / 2) : tier.deduction;
-      reason = late ? "late-reset" : p.equity > START_CASH ? "out" : "loss";
-    }
-    const idle = active || gain > 0 ? 0 : u.idle_seasons + 1;
-    if (!active && gain === 0 && !late && tier.idleDays && idle >= tier.idleDays) { delta += tier.idlePenalty; reason = "dormant"; }
-    const lp = Math.max(0, u.lp_floor, u.lp + delta);
-    const floor = Math.max(u.lp_floor, ...LP_FLOORS.filter(f => lp >= f));
+    const p = played.get(u.name.toLowerCase());
+    const { lp, floor, idle, reason } = lpChange(u, p, acts.get(u.id));
     upd.run(lp, floor, idle, p ? p.equity : null, u.id);
     if (p || lp !== u.lp) log.run(seasonId, u.id, p?.rank ?? null, p?.equity ?? null, lp - u.lp, lp, reason);
   }
+}
+
+/**
+ * 내 프로필 (상단 프로필 블록·카드): LP, 사람끼리 지금 순위, 지금 마감하면 바뀔 LP(today), 최근 정산 5번.
+ * ranking은 Broker.ranking(Infinity)
+ */
+export function profileOf(db: Db, seasonId: number, userId: number, ranking: RankRow[]) {
+  const u = db.prepare("SELECT id, name, lp, lp_floor, idle_seasons FROM users WHERE id = ? AND kind = 'user'").get(userId) as UserLp | undefined;
+  if (!u) return null;
+  const people = peopleRanks(ranking), p = people.find(x => x.name.toLowerCase() === u.name.toLowerCase());
+  const a = db.prepare("SELECT user_id, base_equity, turnover, peak_trade, late_reset FROM accounts WHERE season_id = ? AND user_id = ?").get(seasonId, userId) as Activity | undefined;
+  const next = lpChange(u, p, a);
+  const history = db.prepare("SELECT season_id AS season, rank, delta, lp, reason FROM lp_log WHERE user_id = ? ORDER BY season_id DESC LIMIT 5").all(userId) as
+    { season: number; rank: number | null; delta: number; lp: number; reason: string }[];
+  return { lp: u.lp, floor: u.lp_floor, rank: p?.rank ?? null, people: people.length, today: { delta: next.lp - u.lp, reason: next.reason }, history };
 }
 
 /** 이름별 LP (화면 배지용, 사람만) */

@@ -8,7 +8,7 @@ import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { backupDb, openDb } from "../src/db.ts";
-import { liveFrames, peopleRanks, settleLp } from "../src/ranks.ts";
+import { liveFrames, peopleRanks, profileOf, settleLp } from "../src/ranks.ts";
 import { badgesOf, bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot, setTop3Message, touchSeason } from "../src/season.ts";
 
 const T0 = 1_792_000_000_000;
@@ -736,6 +736,8 @@ test("개미 계급 LP 정산: 순위별 +LP·동점·전설·손실·51위 밖�
   assert.equal(lp("구경"), 400, "비활동은 감점 없음");
   settleLp(s.db, sid, ranking);
   assert.equal(lp("전설"), 160, "같은 시즌은 한 번만");
+  const prof = profileOf(s.db, sid, ids["삼등"], ranking)!;
+  assert.deepEqual({ rank: prof.rank, today: prof.today, last: prof.history[0].delta }, { rank: 4, today: { delta: 50, reason: "rank" }, last: 50 }, "프로필: 지금 순위·오늘 예상·최근 정산");
   // 보호선: 120을 넘은 적 있으면 그 아래로 안 내려간다
   set("손실", "lp = ?, lp_floor = ?", 222, 120);
   s.db.prepare("DELETE FROM lp_log").run(); // 다음 날처럼 다시 정산

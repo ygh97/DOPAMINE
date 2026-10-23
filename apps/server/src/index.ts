@@ -10,7 +10,7 @@ import { BotRunner } from "./bots.ts";
 import { Broker, OrderError } from "./broker.ts";
 import { Chat, ChatError, checkWords } from "./chat.ts";
 import { backupDb, openDb } from "./db.ts";
-import { liveFrames } from "./ranks.ts";
+import { liveFrames, profileOf } from "./ranks.ts";
 import { badgesOf, bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, seasonStats, setTop3Message, targetTick, touchSeason } from "./season.ts";
 
 const PORT = Number(process.env.PORT ?? 4810);
@@ -334,6 +334,12 @@ app.get("/api/me", async (req, reply) => {
   const id = userOf(req, reply);
   if (id) announceEntry(id);
   return id && broker.me(id);
+});
+
+// 내 개미 계급 프로필: LP, 사람끼리 지금 순위, 지금 마감하면 바뀔 LP, 최근 정산 기록
+app.get("/api/profile", async (req, reply) => {
+  const id = userOf(req, reply);
+  return id && profileOf(db, season.id, id, broker.ranking(Infinity));
 });
 
 /**

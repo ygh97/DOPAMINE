@@ -752,9 +752,36 @@ dialog#spyDlg::backdrop, dialog#guideDlg::backdrop { background: rgba(0,0,0,.55)
 .release-ver { display: inline-block; padding: 0 6px; margin-right: 4px; border-radius: 6px; background: var(--accent); color: #fff; font-size: 12px; }
 dialog#updatesDlg { width: min(640px, calc(100vw - 16px)); max-height: 85vh; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); }
 dialog#updatesDlg::backdrop { background: rgba(0,0,0,.55); }
-.nick-tier { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; }
-.nick-stack { display: inline-flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
-.nick-lp { font-size: 10.5px; font-weight: 500; color: var(--muted); white-space: nowrap; }
+/* 상단 오른쪽 끝 개미 프로필 + 경험치 바, 누르면 프로필 카드 */
+.profile-block { position: relative; flex: none; }
+.pb-head { display: flex; align-items: center; gap: 8px; padding: 3px 10px 3px 4px; border: 1px solid var(--line); border-radius: 999px; background: var(--accent-soft); color: inherit; cursor: pointer; }
+.pb-head:hover { border-color: var(--accent); }
+.pb-info { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 120px; line-height: 1.15; }
+.pb-line { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pb-name { font-size: 13.5px; color: var(--accent); }
+.pb-rank { font-size: 10.5px; font-weight: 700; padding: 0 5px; border-radius: 99px; background: var(--panel); }
+.pb-tier { font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+.xp-bar { position: relative; display: block; width: 100%; height: 12px; margin-top: 2px; border-radius: 99px; background: var(--line); overflow: hidden; }
+.xp-bar .xp-fill { position: absolute; inset: 0 auto 0 0; border-radius: 99px; }
+.xp-bar.max .xp-fill { background: linear-gradient(90deg, #facc15, #fde68a, #facc15) !important; }
+.xp-bar .xp-preview { position: absolute; top: 0; bottom: 0; }
+.xp-bar .xp-preview.gain { background: repeating-linear-gradient(45deg, rgba(255,255,255,.75) 0 4px, rgba(255,255,255,.35) 4px 8px); }
+.xp-bar .xp-preview.loss { background: repeating-linear-gradient(45deg, rgba(220,38,38,.85) 0 4px, rgba(220,38,38,.5) 4px 8px); }
+.xp-bar .xp-text { position: relative; display: block; text-align: center; font-size: 9.5px; font-weight: 700; line-height: 12px; color: var(--text); text-shadow: 0 0 2px var(--panel), 0 0 2px var(--panel); }
+.xp-bar.big { height: 18px; margin: 8px 0 4px; }
+.xp-bar.big .xp-text { font-size: 12px; line-height: 18px; }
+.profile-card { position: absolute; right: 0; top: calc(100% + 8px); z-index: 250; width: 280px; padding: 16px; display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
+  border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 18px 48px rgba(0,0,0,.3); }
+.profile-card .pc-name { font-size: 16px; margin-top: 4px; }
+.profile-card .pc-tier { font-size: 13px; font-weight: 700; }
+.profile-card .pc-rank, .profile-card .pc-next { font-size: 12px; }
+.profile-card .pc-today { font-size: 12.5px; font-weight: 700; }
+.profile-card .pc-history { display: flex; gap: 6px; font-size: 12px; font-weight: 700; }
+.profile-card .pc-guide { margin-top: 6px; }
+@media (max-width: 760px) {
+  .pb-info { min-width: 76px; }
+  .pb-tier, .pb-rank { display: none; }
+}
 .guide-card p { margin: 0; font-size: 13px; line-height: 1.55; }
 .guide-card code {
   padding: 1px 5px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); font-weight: 700;
@@ -1251,9 +1278,10 @@ html input[type="search"], html input[inputmode], html textarea { cursor: text !
 /* 상단 바가 넘치면 잘리지 않고 다음 줄로. 1600px 아래에서는 덜 중요한 글자부터 줄인다 */
 .topbar { flex-wrap: wrap; row-gap: 6px; }
 @media (max-width: 1600px) {
-  .logo small, .nick-label, .nick-lp { display: none; }
-  .topbar { gap: 12px; }
-  .goal { width: 90px; }
+  .logo small, .nick-label { display: none; }
+  .topbar { gap: 10px; }
+  .goal { width: 72px; }
+  .pb-info { min-width: 96px; }
 }
 
 /* 수량 직접 입력 (주문 패널) · 표 안의 수량 칸 */
