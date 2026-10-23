@@ -169,6 +169,12 @@ abstract class Agent {
 }
 
 const liveSyms = (c: Ctx, kinds: string[] = ["stock", "coin", "venture"]) => c.market.quotes().filter(q => kinds.includes(q.market)).map(q => q.sym);
+/**
+ * 세력이 훑는 종목 (2026-10-24): 코인·신흥주는 전부, 주식은 30%만 무작위로. 주식이 20개라 그냥 훑으면 세력 거래의 75%가 주식으로 갔다
+ */
+const mmScan = (c: Ctx, r: Rand) => c.market.quotes().filter(q => q.market !== "stock" || r() < 0.3).map(q => q.sym);
+/** 시장별 "크게 움직였다" 기준: 신흥주는 원래 많이 흔들려서 더 크게 */
+const bigMove = (market: string, stock: number, coin: number) => (market === "venture" ? coin * 1.6 : market === "coin" ? coin : stock);
 const companyNews = (c: Ctx) => c.news.filter(n => (n.kind === "기업" || n.kind === "코인") && n.symbols.length === 1);
 
 // ---------- 🤖 봇 성향 ----------
@@ -305,17 +311,17 @@ export const MM_NAMES: Record<MmStyle, string> = {
 export interface WhaleDef { name: string; kinds: string[]; lev: number; pct: number; chance: number; hold: [number, number] }
 export const WHALES: WhaleDef[] = [ // chance: 2026-10-22에 2.5배로 올림 (고래가 더 자주)
   { name: "고래", kinds: ["stock", "coin", "venture"], lev: 10, pct: 40, chance: 1 / 480, hold: [30, 120] },
-  { name: "흰수염고래", kinds: ["stock"], lev: 10, pct: 50, chance: 1 / 600, hold: [60, 180] },
+  { name: "흰수염고래", kinds: ["coin"], lev: 10, pct: 50, chance: 1 / 600, hold: [60, 180] }, // 2026-10-24 주식 → 코인
   { name: "혹등고래", kinds: ["coin"], lev: 5, pct: 40, chance: 1 / 400, hold: [30, 120] },
   { name: "향유고래", kinds: ["venture"], lev: 5, pct: 30, chance: 1 / 360, hold: [20, 90] },
   { name: "범고래", kinds: ["stock", "coin", "venture"], lev: 5, pct: 25, chance: 1 / 240, hold: [20, 60] },
-  { name: "밍크고래", kinds: ["stock"], lev: 3, pct: 30, chance: 1 / 320, hold: [60, 240] },
+  { name: "밍크고래", kinds: ["venture"], lev: 3, pct: 30, chance: 1 / 320, hold: [60, 240] }, // 2026-10-24 주식 → 신흥주
   { name: "참고래", kinds: ["coin"], lev: 3, pct: 50, chance: 1 / 480, hold: [120, 480] },
   { name: "귀신고래", kinds: ["stock", "coin"], lev: 10, pct: 20, chance: 1 / 280, hold: [15, 45] },
   { name: "북극고래", kinds: ["stock"], lev: 2, pct: 60, chance: 1 / 800, hold: [300, 900] },
   { name: "보리고래", kinds: ["venture"], lev: 3, pct: 40, chance: 1 / 440, hold: [30, 150] },
 ];
-const WHALE_KINDS: string[][] = [["stock"], ["coin"], ["venture"], ["stock", "coin"], ["stock", "coin", "venture"]];
+const WHALE_KINDS: string[][] = [["coin"], ["venture"], ["coin", "venture"], ["stock", "coin"], ["stock", "coin", "venture"]]; // 리셋 때 다시 뽑는 시장 (코인·신흥주 위주)
 /** 세력이 돌아가며 쓰는 전략 (고래 제외). 세력 이름은 세력1~세력N이라 화면에서는 무슨 전략인지 모른다 */
 export const MM_STRATEGIES = (Object.keys(MM_NAMES) as MmStyle[]).filter(s => s !== "whale");
 /** 한 전략을 쓰는 시간 (tick): 20~40분. 갈아탈 때 지정가를 취소하고 포지션을 정리한다 */
@@ -416,7 +422,7 @@ class MarketMaker extends Agent {
     if (long) { try { c.broker.closeFuture(this.userId, long.id, 50).catch(() => {}); } catch { /* 다음 tick */ } return; }
     const spot = [...acc.positions.keys()][0];
     if (spot) { try { c.broker.place(this.userId, spot, "sell", 50).catch(() => {}); } catch { /* 다음 tick */ } return; }
-    this.open(c, pick(r, liveSyms(c)), "short", 5, 4 * this.k, Math.round(uni(r, 900, 1500)));
+    this.open(c, pick(r, mmScan(c, r)), "short", 5, 4 * this.k, Math.round(uni(r, 900, 1500)));
   }
 
   /** BotRunner가 맡긴 공동 작업 (작전·개미 털기·세력 전쟁·선취매). 맡은 동안은 원래 전략을 쉬고, 끝나면 다 정리한 뒤 돌아간다 */
@@ -484,9 +490,9 @@ class MarketMaker extends Agent {
         break;
       }
       case "momentum": { // 급등·급락에 올라탄다. 고점 대비 1.5% 밀리면 정리
-        if (c.tick % 30 === 0) for (const sym of liveSyms(c, ["stock", "coin"])) {
+        if (c.tick % 30 === 0) for (const sym of mmScan(c, r)) {
           if (this.meta.has(sym)) continue;
-          const q = c.market.quote(sym)!, then = c.hist.ago(sym, 300), th = q.market === "coin" ? 0.05 : 0.03;
+          const q = c.market.quote(sym)!, then = c.hist.ago(sym, 300), th = bigMove(q.market, 0.03, 0.05);
           if (!then) continue;
           const ret = q.price / then - 1;
           if (Math.abs(ret) > th) this.open(c, sym, ret > 0 ? "long" : "short", pick(r, [5, 10]), 10, 900, ret > 0 ? "up" : "down");
@@ -496,9 +502,9 @@ class MarketMaker extends Agent {
         break;
       }
       case "meanRevert": { // 1분에 과하게 튄 가격을 받아친다. 절반 되돌리면 정리
-        if (c.tick % 10 === 0) for (const sym of liveSyms(c, ["stock", "coin"])) {
+        if (c.tick % 10 === 0) for (const sym of mmScan(c, r)) {
           if (this.meta.has(sym)) continue;
-          const q = c.market.quote(sym)!, then = c.hist.ago(sym, 60), th = q.market === "coin" ? 0.06 : 0.04;
+          const q = c.market.quote(sym)!, then = c.hist.ago(sym, 60), th = bigMove(q.market, 0.04, 0.06);
           if (!then) continue;
           const ret = q.price / then - 1;
           if (Math.abs(ret) > th) this.open(c, sym, ret > 0 ? "short" : "long", 2, 5, 600, String(then));
@@ -576,7 +582,7 @@ class MarketMaker extends Agent {
         break;
       }
       case "breakout": { // 돌파 매매: 15틱마다 5분 신고가·신저가를 돌파한 쪽으로 탄다. 고점(저점) 대비 1.5% 되돌리면 정리
-        if (c.tick % 15 === 0) for (const sym of liveSyms(c, ["stock", "coin"])) {
+        if (c.tick % 15 === 0) for (const sym of mmScan(c, r)) {
           if (this.meta.has(sym) || this.meta.size >= 5) continue;
           const p = c.market.quote(sym)!.price, box = c.hist.range(sym, 300, 15);
           if (!box) continue;
@@ -591,10 +597,10 @@ class MarketMaker extends Agent {
         this.cancelStale(c, 300, o => o.side === "buy");
         const acc = c.broker.account(this.userId), orders = c.broker.ordersOf(this.userId);
         for (const [sym, pos] of acc.positions) if (!orders.some(o => o.sym === sym && o.side === "sell")) this.limit(c, sym, "spot", "sell", pos.avg * 1.025, 100);
-        if (c.tick % 20 === 0) for (const sym of liveSyms(c, ["stock", "coin"])) {
+        if (c.tick % 20 === 0) for (const sym of mmScan(c, r)) {
           const q = c.market.quote(sym)!, then = c.hist.ago(sym, 60);
           if (!then || acc.positions.has(sym) || orders.some(o => o.sym === sym)) continue;
-          if (q.price / then - 1 < -(q.market === "coin" ? 0.06 : 0.04)) this.limit(c, sym, "spot", "buy", q.price * 0.99, 6 * this.k);
+          if (q.price / then - 1 < -bigMove(q.market, 0.04, 0.06)) this.limit(c, sym, "spot", "buy", q.price * 0.99, 6 * this.k);
         }
         break;
       }
@@ -781,7 +787,7 @@ export class BotRunner {
       if (best && most > 300_000 && crew.length) crew[0].job = job("shake", best);
     }
     if (r() < 1 / 1800) { // 세력 전쟁: 주식·코인 하나에서 둘이 반대로
-      const pool = quotes.filter(q => q.market !== "venture"), crew = take(2);
+      const pool = quotes.filter(q => q.market !== "stock" || r() < 0.3), crew = take(2); // 코인·신흥주 위주
       if (pool.length && crew.length === 2) { const sym = pick(r, pool).sym; crew[0].job = job("war", sym, { side: "long" }); crew[1].job = job("war", sym, { side: "short" }); }
     }
     for (const e of c.market.insider(240)) { // 선취매: 발표 2~4분 전에 하나씩
