@@ -257,6 +257,8 @@ export class Exchange {
   liquidity(sym: string) { return this.market.liquidity(sym); }
   /** 가상 금융위기 투매 구간인지 (서버의 세력·고래용, 화면으로 내보내지 않는다) */
   crashing() { return this.market.crashing(); }
+  /** 결과가 정해진 예약 사건 (세력 선취매용, 서버 전용) */
+  insider(within: number) { return this.market.insider(within); }
 
   book(sym: string, depth = 10): BookView | null {
     const st = this.st(sym);

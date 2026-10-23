@@ -112,8 +112,10 @@ test("지정가: 걸어 두면 돈이 묶이고, 다른 사람의 시장가에 �
   const locked = START_CASH - s.broker.me(maker).cash;
   assert.ok(locked > 9_000 && locked <= 10_000 + 1e-6, "예수금 10% 묶임");
   assert.ok(Math.abs(s.broker.me(maker).equity - START_CASH) < 1e-6, "묶인 돈도 총자산에 포함");
-  await order(s, taker, "AAPL", "buy", 20);
-  await order(s, taker, "AAPL", "sell", 100); // 최우선 매수호가 = maker 주문 → maker 체결
+  // 같은 tick 안에서 사고 바로 판다 (tick이 넘어가면 시세가 움직여 maker 주문이 최우선이 아닐 수 있다)
+  await s.broker.place(taker, "AAPL", "buy", 20);
+  await s.broker.place(taker, "AAPL", "sell", 100); // 최우선 매수호가 = maker 주문 → maker 체결
+  s.tick();
   const me = s.broker.me(maker);
   assert.ok(me.positions[0]?.qty > 0, "지정가 체결로 보유");
   assert.equal(me.fills.find(f => f.side === "buy")!.fee, 0, "지정가 체결 수수료 0");
@@ -671,13 +673,13 @@ test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭
   s.broker.account(botId).cash = 20_000_000;
   s.broker.account(human).cash = 20_000_000;
   s.tick();
-  assert.ok(!s.broker.drainBroadcasts().some(t => t.includes(bot.name)), "봇은 전광판 알림 없음");
+  assert.ok(!s.broker.drainBroadcasts().some(t => t.includes(bot.name) && /^\[(졸업|전설)\]/.test(t)), "봇은 졸업·전설 전광판 알림 없음 (강제청산 알림은 봇도 나간다)");
   finishSeason(s.db, s.season, s.broker.ranking(Infinity), T0 + s.season.lengthMs + 1000);
   const hall = hallOfFame(s.db).rows;
   assert.deepEqual(hall.map(h => h.name), ["사람1"], "명예의 전당은 사람 전설만");
 });
 
-test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다음엔 직전에 빠진 번호)를 쓰고 $100,000. 🐋 고래는 $100만 아래면 같은 이름으로 $200만", () => {
+test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다음엔 직전에 빠진 번호)를 쓰고 $100,000. 🐋 고래는 시작 자금의 30%($150만) 아래면 같은 이름으로 $500만", () => {
   const s = setup();
   const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 3, marketMakers: true, seed: 4 });
   const num = (n: string) => Number(/봇(\d+)$/.exec(n)![1]);
@@ -694,10 +696,10 @@ test("🤖 봇이 $1만 아래면 새 봇으로: 빈 번호(처음엔 N+1, 다�
   bots.tick(s.tick().news);
   assert.equal(num(nameOf(b2)), 1, "다음은 직전에 빠진 번호");
   const whale = bots.describe().find(d => d.kind === "whale")!.userId, wname = nameOf(whale);
-  s.broker.reset(whale); s.broker.account(whale).cash = 900_000;
+  s.broker.reset(whale); s.broker.account(whale).cash = 1_400_000;
   bots.tick(s.tick().news);
   assert.equal(nameOf(whale), wname, "고래 이름 그대로");
-  assert.ok(Math.abs(s.broker.equity(s.broker.account(whale)) - 2_000_000) < 1, "고래는 $200만으로");
+  assert.ok(Math.abs(s.broker.equity(s.broker.account(whale)) - 5_000_000) < 1, "고래는 $500만으로");
 });
 
 test("🤖 봇 교대: 활동 중인 사람만큼 봇이 쉬고, 사람이 빠지면 다시 깨어난다", () => {

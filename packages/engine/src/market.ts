@@ -134,6 +134,8 @@ export interface Market {
   snapshot(): string;
   /** 가상 금융위기 투매 구간인지 (서버의 세력·고래가 매물을 던진다). 화면·API로 내보내지 않는다 */
   crashing(): boolean;
+  /** 결과가 정해진 채 예약된 종목 사건 (신제품 행사·코인 ETF·루머 확인). 세력의 "선취매"용이라 화면·API로 내보내지 않는다 */
+  insider(within: number): { sym: string; at: number; dir: 1 | -1 }[];
 }
 
 // 내부 상태를 꺼내고 넣을 수 있는 난수 (스냅샷용)
@@ -252,17 +254,38 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     }
     return sum;
   }
-  // 뉴스 반응 모양: 즉시 45~80% → followChance면 나머지가 따라붙고(+ 과열 후 되돌림), 아니면 재료 소진으로 일부 되돌린다.
-  // 첫 반응 뒤 방향을 알 수 없어야 "뉴스 보고 따라 타기"가 확정 수익이 되지 않는다 (tools/sim-bots.ts로 확인)
+  // 뉴스 반응 모양 10가지 (2026-10-24: 모양이 하나뿐이라 몇 판 하면 읽혀서 늘렸다). 첫 1~2분만 보고는 어느 쪽인지 알기 어렵게.
+  // 확률·크기는 예전과 같다: followChance(60%)면 끝내 total만큼 가는 6가지 중 하나, 아니면 재료 소진으로 일부만 남는 4가지 중 하나
   function react(list: Impulse[], total: number) {
-    const now = uni(0.45, 0.8);
-    impulse(list, total * now, Math.round(uni(3, 8)));
+    const T = total, n = (a: number, b: number) => Math.round(uni(a, b));
     if (rand() < cfg.followChance) {
-      const over = rand() < 0.6 ? uni(0.1, 0.5) : 0;
-      impulse(list, total * (1 - now + over), Math.round(uni(20, 40)), 3);
-      if (over) impulse(list, -total * over, Math.round(uni(30, 60)), Math.round(uni(45, 75)));
-    } else {
-      impulse(list, -total * now * uni(0.15, 0.5), Math.round(uni(15, 35)), 3);
+      switch (Math.floor(rand() * 6)) {
+        case 0: { const now = uni(0.85, 1); impulse(list, T * now, n(3, 6)); impulse(list, T * (1 - now), n(10, 20), 6); return; } // 즉시 반응 후 유지
+        case 1: { // 계단식: 2~3번 나눠서, 사이사이 쉰다
+          const k = rand() < 0.5 ? 2 : 3, w = Array.from({ length: k }, () => uni(0.5, 1)), sw = w.reduce((x, y) => x + y, 0);
+          let at = 0;
+          for (const x of w) { impulse(list, (T * x) / sw, n(4, 8), at); at += n(40, 90); }
+          return;
+        }
+        case 2: { const d = n(60, 180); impulse(list, T * 0.1, n(3, 6)); impulse(list, T * 0.9, n(6, 15), d); return; } // 늦은 반응
+        case 3: { const fake = uni(0.15, 0.35); impulse(list, -T * fake, n(4, 8)); impulse(list, T * (1 + fake), n(15, 30), n(20, 50)); return; } // 페이크 아웃
+        case 4: { // 과열 후 안정
+          const now = uni(0.45, 0.8), over = uni(0.2, 0.5);
+          impulse(list, T * now, n(3, 8)); impulse(list, T * (1 - now + over), n(20, 40), 3); impulse(list, -T * over, n(30, 60), n(45, 75));
+          return;
+        }
+        default: impulse(list, T, n(300, 700)); return; // 천천히
+      }
+    }
+    switch (Math.floor(rand() * 4)) {
+      case 0: { const now = uni(0.45, 0.8); impulse(list, T * now, n(3, 8)); impulse(list, -T * now * uni(0.15, 0.5), n(15, 35), 3); return; } // 절반 반납
+      case 1: { const now = uni(0.6, 0.9), left = uni(0.2, 0.4); impulse(list, T * now, n(3, 8)); impulse(list, -T * (now - left), n(40, 90), n(10, 30)); return; } // 뉴스에 팔아라
+      case 2: { // 위아래 흔들기: 올랐다가 출발점 아래로, 다시 조금 위
+        const up = uni(0.5, 0.8), down = up + uni(0.3, 0.6), end = uni(0.3, 0.6);
+        impulse(list, T * up, n(3, 6)); impulse(list, -T * down, n(8, 16), n(10, 25)); impulse(list, T * (end - up + down), n(10, 20), n(40, 70));
+        return;
+      }
+      default: impulse(list, T * uni(0.2, 0.45), n(60, 200), n(5, 30)); return; // 무반응에 가깝게
     }
   }
   // 의도한 충격 → 실제 반영량 (0.3~1.5배, 가끔 반대)
@@ -966,6 +989,13 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     step,
     gameDate: () => gameDate(),
     crashing: () => tick < crashUntil,
+    insider: (within: number) => scheduled.flatMap(t => {
+      if (t.at - tick > within || t.at <= tick) return [];
+      if (t.kind === "launch") return [{ sym: t.sym, at: t.at, dir: t.outcome === "good" ? 1 as const : -1 as const }];
+      if (t.kind === "etf") return [{ sym: t.sym, at: t.at, dir: t.approve ? 1 as const : -1 as const }];
+      if (t.kind === "rumor") return [{ sym: t.sym, at: t.at, dir: t.confirm ? 1 as const : -1 as const }];
+      return [];
+    }),
     quotes: () => live().map(toQuote),
     quote: sym => (state[sym] ? toQuote(state[sym]) : null),
     bars: sym => state[sym]?.bars ?? [],

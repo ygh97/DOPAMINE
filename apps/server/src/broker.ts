@@ -13,7 +13,8 @@ import { tx, type Db } from "./db.ts";
 import type { Season } from "./season.ts";
 
 export const START_CASH = 100_000;
-export const MM_CASH = 2_000_000; // 🏦 세력·🐋 고래 계정 시작 자금
+export const MM_CASH = 10_000_000;  // 🏦 세력 계정 시작 자금 (2026-10-24 전: $200만)
+export const WHALE_CASH = 5_000_000; // 🐋 고래 계정 시작 자금 (2026-10-24 전: $200만)
 export const GRAD = 5_000_000;    // 50배 = 졸업 (2026-10-23 전: 20배)
 export const GOAL = 10_000_000;   // 100배 = 전설 (명예의 전당)
 const FEE = 0.0005;              // 시장가(호가를 먹는 쪽) 수수료. 지정가로 걸어 둔 쪽은 0
@@ -41,7 +42,7 @@ export interface Account {
   /** 🤖 봇 교대로 쉬는 중: 매매하지 않고 랭킹에서 숨는다 (메모리만) */
   resting?: boolean;
 }
-const startCash = (kind: AccountKind) => (kind === "mm" || kind === "whale" ? MM_CASH : START_CASH);
+export const startCash = (kind: AccountKind) => (kind === "mm" ? MM_CASH : kind === "whale" ? WHALE_CASH : START_CASH);
 export interface Fill { id: number; tick: number; at: number; sym: string; side: string; qty: number; price: number; fee: number; pnl?: number }
 /**
  * 걸어 둔 지정가 하나 (거래소 주문 id = id). qty = 남은 수량.
