@@ -829,4 +829,10 @@ test("지정가 가격 바꾸기(차트에서 끌기): 남은 수량을 새 가�
   s.broker.amendOrder(u, c.order!.id, ask * 1.1); s.tick();
   const co = s.broker.me(u).orders.find(x => x.sym === "NVDA")!;
   assert.ok(co.reduce && co.posId === f.id && co.qty === 8, "종료 지정가 그대로, 수량 그대로");
+  s.tick();
+  s.broker.amendOrder(u, co.id, co.price, 12);
+  assert.equal(s.broker.me(u).orders.find(x => x.sym === "NVDA")!.qty, 12, "수량만 바꾸기");
+  s.tick();
+  assert.throws(() => s.broker.amendOrder(u, s.broker.me(u).orders.find(x => x.sym === "NVDA")!.id, co.price, 21), /최대 20주/);
+  assert.equal(s.broker.me(u).orders.find(x => x.sym === "NVDA")!.qty, 12, "실패하면 원래 주문으로 되돌린다");
 });

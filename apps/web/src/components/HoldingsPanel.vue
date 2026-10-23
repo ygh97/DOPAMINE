@@ -11,6 +11,15 @@ const tps = reactive<Record<number, string>>({});
 const closePx = reactive<Record<number, string>>({});
 const closeQty = reactive<Record<number, string>>({});
 const sellPx = reactive<Record<string, string>>({});
+// 미체결 수정: 비운 칸은 지금 값 그대로
+const editPx = reactive<Record<number, string>>({});
+const editQty = reactive<Record<number, string>>({});
+async function editOrder(o: { id: number; price: number; qty: number }) {
+  const price = Number((editPx[o.id] ?? "").trim()) || o.price, qty = Number((editQty[o.id] ?? "").trim()) || o.qty;
+  if (price === o.price && qty === o.qty) return;
+  await a.amend(o.id, price, qty);
+  editPx[o.id] = ""; editQty[o.id] = "";
+}
 const sellQty = reactive<Record<string, string>>({});
 
 const SIDE: Record<string, string> = {
@@ -238,7 +247,7 @@ async function shareFill(f: Fill) {
     </div>
     <div v-else-if="a.holdTab === 'orders'" class="table-scroll">
       <table v-if="a.me.orders.length" id="openOrders" class="grid">
-        <thead><tr><th>종목</th><th>유형</th><th>구분</th><th>지정가</th><th>현재가</th><th>남은 수량</th><th>체결</th><th><button id="cancelAllBtn" class="mini-btn danger" @click="a.cancel()">전체 취소</button></th></tr></thead>
+        <thead><tr><th>종목</th><th>유형</th><th>구분</th><th>지정가</th><th>현재가</th><th>남은 수량</th><th>체결</th><th>가격·수량 수정</th><th><button id="cancelAllBtn" class="mini-btn danger" @click="a.cancel()">전체 취소</button></th></tr></thead>
         <tbody>
           <tr v-for="o in a.me.orders" :key="o.id" :data-id="o.id" :data-sym="o.sym" class="clickable" @click="m.select(o.sym)">
             <td><b>{{ o.sym }}</b></td>
@@ -248,6 +257,11 @@ async function shareFill(f: Fill) {
             <td>{{ money(m.quotes[o.sym]?.price ?? 0) }}</td>
             <td>{{ qtyText(o.sym, o.qty) }}</td>
             <td class="muted">{{ o.filled ? qtyText(o.sym, o.filled) : "—" }}</td>
+            <td class="stop-cell" @click.stop>
+              <input v-model="editPx[o.id]" class="stop-input" inputmode="decimal" :placeholder="money(o.price)" aria-label="새 지정가" @keydown.enter="editOrder(o)">
+              <input v-model="editQty[o.id]" class="stop-input qty-input" inputmode="decimal" :placeholder="String(+o.qty.toFixed(6))" aria-label="새 수량" @keydown.enter="editOrder(o)">
+              <button class="mini-btn" data-act="edit-order" :disabled="a.busy" @click="editOrder(o)">수정</button>
+            </td>
             <td class="act-cell" @click.stop><button class="mini-btn" data-act="cancel" @click="a.cancel(o.id)">취소</button></td>
           </tr>
         </tbody>

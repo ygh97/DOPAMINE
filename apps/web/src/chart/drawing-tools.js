@@ -125,6 +125,9 @@ export function register() {
       return [
         {type: "line", ignoreEvent: !d.drag, attrs: {coordinates: [{x: 0, y: c.y}, {x: bounding.width, y: c.y}]}, styles: {style: d.dashed ? "dashed" : "solid", dashedValue: [4, 4], color, size: d.drag ? 2 : 1}},
         {type: "text", ignoreEvent: !d.drag, attrs: {x: 8, y: c.y - 3, text: label, align: "left", baseline: "bottom"}, styles: {color: "#fff", backgroundColor: color, borderColor: color}},
+        // 지정가 선 오른쪽 끝의 ✕: 누르면 취소 (overlay onClick이 figureKey "cancel"로 받는다)
+        ...(d.drag ? [{key: "cancel", type: "text", attrs: {x: bounding.width - 6, y: c.y, text: "✕", align: "right", baseline: "middle"},
+          styles: {color: "#fff", size: 12, weight: "bold", backgroundColor: color, borderColor: color, borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2}}] : []),
       ];
     },
   });

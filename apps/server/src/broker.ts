@@ -637,19 +637,20 @@ export class Broker {
     this.atomic([userId], () => this.release(this.account(userId), it));
   }
   /**
-   * 걸어 둔 지정가의 가격 바꾸기 (차트에서 선을 끌어서). 취소하고 남은 수량을 새 가격에 다시 건다 (줄 순서는 그 가격의 맨 뒤).
+   * 걸어 둔 지정가의 가격·수량 바꾸기 (차트에서 선을 끌어서, 미체결 탭에서). 취소하고 새 가격에 (qty를 주면 그 수량, 아니면 남은 수량) 다시 건다 (줄 순서는 그 가격의 맨 뒤).
    * 새 가격이 반대 호가를 넘으면 그만큼 바로 체결된다. 다시 걸기가 실패하면 원래 가격에 되돌려 건다
    */
-  amendOrder(userId: number, orderId: number, price: number) {
+  amendOrder(userId: number, orderId: number, price: number, qty?: number) {
     const it = this.intents.get(orderId);
     if (!it || it.userId !== userId) throw new OrderError("미체결 주문을 찾을 수 없습니다.");
     if (!Number.isFinite(price) || price <= 0) throw new OrderError("가격이 올바르지 않습니다.");
-    const req = { sym: it.sym, kind: it.kind, side: it.side, pct: 100, qty: it.qty, lev: it.lev, ...(it.reduce ? { posId: it.posId! } : {}) };
+    if (qty != null && (!Number.isFinite(qty) || qty <= 0)) throw new OrderError("수량이 올바르지 않습니다.");
+    const req = { sym: it.sym, kind: it.kind, side: it.side, pct: 100, lev: it.lev, ...(it.reduce ? { posId: it.posId! } : {}) };
     this.cancelOrder(userId, orderId);
-    try { return this.limitOrder(userId, { ...req, price }); }
+    try { return this.limitOrder(userId, { ...req, price, qty: qty ?? it.qty }); }
     catch (e) {
       this.recent.delete(userId);
-      try { this.limitOrder(userId, { ...req, price: it.price }); } catch { /* 원래 주문도 못 걸면 취소된 채로 둔다 (돈·수량은 이미 돌려받음) */ }
+      try { this.limitOrder(userId, { ...req, price: it.price, qty: it.qty }); } catch { /* 원래 주문도 못 걸면 취소된 채로 둔다 (돈·수량은 이미 돌려받음) */ }
       throw e;
     }
   }

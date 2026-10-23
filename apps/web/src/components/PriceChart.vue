@@ -244,6 +244,7 @@ function addOrderLine(ts: number, orderId: number, price: number, prefix: string
   const id = chart!.createOverlay({
     name: "posLine", groupId: "positions", lock: false, points: [{ timestamp: ts, value: price }],
     extendData: { prefix, color, dashed: true, drag: true, decimals },
+    onClick: ({ figureKey }) => { if (figureKey === "cancel") void a.cancel(orderId); return false; },
     onPressedMoveStart: () => { draggingOrder = true; return false; },
     onPressedMoveEnd: ({ overlay }) => {
       draggingOrder = false;

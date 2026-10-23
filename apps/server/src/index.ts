@@ -364,13 +364,13 @@ app.post<{ Body: { id?: number; all?: boolean } }>("/api/cancel", {
   return { count, me: broker.me(id) };
 });
 
-// 걸어 둔 지정가의 가격 바꾸기 (차트에서 선을 끌어서)
-app.post<{ Body: { id: number; price: number } }>("/api/amend", {
-  schema: { body: { type: "object", required: ["id", "price"], properties: { id: { type: "integer" }, price: { type: "number" } } } },
+// 걸어 둔 지정가의 가격·수량 바꾸기 (차트에서 선을 끌어서, 미체결 탭에서)
+app.post<{ Body: { id: number; price: number; qty?: number } }>("/api/amend", {
+  schema: { body: { type: "object", required: ["id", "price"], properties: { id: { type: "integer" }, price: { type: "number" }, qty: { type: "number" } } } },
 }, async (req, reply) => {
   const id = userOf(req, reply);
   if (!id) return;
-  const r = broker.amendOrder(id, req.body.id, req.body.price);
+  const r = broker.amendOrder(id, req.body.id, req.body.price, req.body.qty);
   return { ...r, me: broker.me(id) };
 });
 
