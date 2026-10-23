@@ -125,9 +125,9 @@ export function register() {
       return [
         {type: "line", ignoreEvent: !d.drag, attrs: {coordinates: [{x: 0, y: c.y}, {x: bounding.width, y: c.y}]}, styles: {style: d.dashed ? "dashed" : "solid", dashedValue: [4, 4], color, size: d.drag ? 2 : 1}},
         {type: "text", ignoreEvent: !d.drag, attrs: {x: 8, y: c.y - 3, text: label, align: "left", baseline: "bottom"}, styles: {color: "#fff", backgroundColor: color, borderColor: color}},
-        // 지정가 선 오른쪽 끝의 ✕: 누르면 취소 (overlay onClick이 figureKey "cancel"로 받는다)
-        ...(d.drag ? [{key: "cancel", type: "text", attrs: {x: bounding.width - 6, y: c.y, text: "✕", align: "right", baseline: "middle"},
-          styles: {color: "#fff", size: 12, weight: "bold", backgroundColor: color, borderColor: color, borderRadius: 3, paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2}}] : []),
+        // 지정가 라벨 바로 오른쪽의 ✕: 누르면 취소 (overlay onClick이 figureKey "cancel"로 받는다)
+        ...(d.drag ? [{key: "cancel", type: "text", attrs: {x: 8 + labelWidth(label) + 4, y: c.y - 3, text: "✕", align: "left", baseline: "bottom"},
+          styles: {color: "#fff", weight: "bold", backgroundColor: "#111827", borderColor: "#111827", borderRadius: 2}}] : []),
       ];
     },
   });
@@ -146,6 +146,15 @@ export function register() {
       ];
     },
   });
+}
+
+/** 차트 글자 라벨의 화면 폭 (KLineChart 기본: 12px Helvetica Neue, 좌우 여백 4px) */
+let measureCtx = null;
+function labelWidth(text) {
+  measureCtx ??= document.createElement("canvas").getContext("2d");
+  if (!measureCtx) return text.length * 7;
+  measureCtx.font = "12px Helvetica Neue, Arial, sans-serif";
+  return Math.ceil(measureCtx.measureText(text).width) + 8;
 }
 
 // 아이콘: 18x18 stroke path
