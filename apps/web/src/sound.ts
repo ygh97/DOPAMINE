@@ -27,3 +27,21 @@ export function playWhisperDing() {
     osc.stop(t + 0.5);
   }
 }
+
+/** 체결 "짤랑": 매수(롱 진입·숏 종료)는 올라가는 두 음, 매도(숏 진입·롱 종료)는 내려가는 두 음 */
+export function playFillSound(buy: boolean) {
+  const c = audio();
+  if (!c || c.state !== "running") return;
+  const t0 = c.currentTime, [a, b] = buy ? [1568, 2093] : [2093, 1568]; // G6 ↔ C7
+  for (const [freq, at, dur] of [[a, 0, 0.12], [b, 0.08, 0.35]] as const) {
+    const t = t0 + at, osc = c.createOscillator(), gain = c.createGain();
+    osc.type = "square";
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.08, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain).connect(c.destination);
+    osc.start(t);
+    osc.stop(t + dur + 0.05);
+  }
+}

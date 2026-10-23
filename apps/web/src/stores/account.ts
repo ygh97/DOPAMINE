@@ -1,6 +1,7 @@
 // 내 계좌: 참가(토큰), 보유종목, 선물 포지션, 체결 내역, 주문. 총자산은 실시간 시세로 화면에서 계산한다.
 import { defineStore } from "pinia";
 import { computed, ref, watch } from "vue";
+import { playFillSound } from "../sound";
 import { useMarket } from "./market";
 
 const TOKEN_KEY = "dc-token";
@@ -29,6 +30,19 @@ export const useAccount = defineStore("account", () => {
   const m = useMarket();
   const token = ref(readToken());
   const me = ref<Me | null>(null);
+  // 체결 알림음: 내 체결 내역에 새 체결이 생기면 (내 주문·걸어 둔 지정가·익절·손절·청산 모두) 한 번 "짤랑".
+  // 처음 받은 내역은 소리 없이 기준으로만 삼는다
+  let lastFillId: number | null = null;
+  const BUY_SIDES = new Set(["buy", "long-open", "short-close"]);
+  watch(() => me.value?.fills, fills => {
+    if (!fills) { lastFillId = null; return; }
+    const top = fills.reduce((m, f) => Math.max(m, f.id), 0);
+    if (lastFillId != null && top > lastFillId) {
+      const newest = fills.find(f => f.id === top)!;
+      playFillSound(BUY_SIDES.has(newest.side));
+    }
+    lastFillId = Math.max(lastFillId ?? 0, top);
+  });
   const busy = ref(false);
   const holdTab = ref<"hold" | "fut" | "orders" | "fills">("hold");
   const toast = ref<{ text: string; kind: "ok" | "error"; id: number } | null>(null);
