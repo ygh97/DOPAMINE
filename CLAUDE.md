@@ -54,7 +54,7 @@ npm run e2e:m8            # 호가창 10단계·지정가 걸기·취소·전체
 
 ## 현재 단계
 
-M0~M8 완료 (SPEC 9장). 운영: 이 PC에서 `npm start` + Cloudflare Quick Tunnel (DEPLOY.md A), `.env`에 `BOTS=100`·`MARKET_MAKERS=1`로 🤖 봇·🏦 세력·🐋 고래가 같이 돈다.
+M0~M8 완료 (SPEC 9장). 운영: 이 PC에서 `npm start` + Tailscale Funnel 고정 주소 `https://desktop-f349cdk.tail24dad6.ts.net` (DEPLOY.md A). 서버는 사용자가 `start-server.cmd`(= `deploy.ps1 -SkipPull`)로 직접 켠다. 꺼져 있던 동안 시세는 멈춘다(`seasons.last_seen_at`).  `.env`에 `BOTS=100`·`MARKET_MAKERS=1`로 🤖 봇·🏦 세력·🐋 고래가 같이 돈다.
 
 알려진 남은 문제:
 - 🏦 세력은 세력1~세력20 이름으로 20~40분마다 전략을 바꾼다 (`bots.ts`의 `MM_STRATEGIES`, `MM_PERIOD`). sim-bots 통계에는 `세력N(지금 전략)`으로 나온다.

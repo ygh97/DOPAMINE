@@ -8,7 +8,7 @@ import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { backupDb, openDb } from "../src/db.ts";
-import { badgesOf, bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot, setTop3Message } from "../src/season.ts";
+import { badgesOf, bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot, setTop3Message, touchSeason } from "../src/season.ts";
 
 const T0 = 1_792_000_000_000;
 const FAST = { ticksPerBar: 10, warmupBars: 200 };
@@ -260,6 +260,22 @@ test("스냅샷 + 이후 주문 흐름으로 복원해도 같은 시세", async 
   assert.ok(boot.fromSnapshot);
   assert.ok(boot.replayed < elapsed, `스냅샷 뒤 ${boot.replayed} tick만 재생`);
   assert.deepEqual(boot.market.quotes(), s.market.quotes());
+});
+
+test("서버가 꺼져 있던 동안은 시세가 멈춘다: 켜면 꺼져 있던 시간만큼 시즌 시작·종료를 미루고 마지막 tick에서 이어진다", () => {
+  const s = setup(11);
+  for (let i = 0; i < 50; i++) s.tick();
+  const lastSeen = T0 + (s.market.tick - 2000) * 1000 + 300; // 마지막 tick 시각 (tick 사이 어딘가)
+  touchSeason(s.db, s.season, lastSeen);
+  saveSnapshot(s.db, s.season, s.exchange);
+  const off = 3 * 3600_000; // 3시간 꺼짐
+  const later = currentSeason(s.db, 1, 1000, 7 * 86_400_000, lastSeen + off);
+  assert.equal(later.id, s.season.id, "시즌 그대로");
+  assert.equal(later.startedAt, T0 + off, "시즌 시작(과 종료)이 꺼져 있던 시간만큼 밀린다");
+  const boot = bootMarket(s.db, later, FAST, lastSeen + off);
+  assert.equal(boot.replayed, 0, "꺼져 있던 동안의 시세는 만들지 않는다");
+  assert.deepEqual(boot.market.quotes(), s.market.quotes());
+  assert.equal(currentSeason(s.db, 1, 1000, 7 * 86_400_000, lastSeen + off + 500).startedAt, T0 + off, "1 tick 안의 재시작은 그대로");
 });
 
 test("엔진이 바뀌어 스냅샷을 못 읽어도 시즌은 이어진다: 처음부터 재생해 지금 tick까지", () => {

@@ -10,7 +10,7 @@ import { BotRunner } from "./bots.ts";
 import { Broker, OrderError } from "./broker.ts";
 import { Chat, ChatError, checkWords } from "./chat.ts";
 import { backupDb, openDb } from "./db.ts";
-import { badgesOf, bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, seasonStats, setTop3Message, targetTick } from "./season.ts";
+import { badgesOf, bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, seasonStats, setTop3Message, targetTick, touchSeason } from "./season.ts";
 
 const PORT = Number(process.env.PORT ?? 4810);
 const HOST = process.env.HOST ?? "127.0.0.1";
@@ -139,6 +139,7 @@ const loop = setInterval(() => {
     assetsChanged ||= result.assetsChanged;
     if (market.tick % SNAPSHOT_EVERY === 0) saveSnapshot(db, season, exchange);
   }
+  touchSeason(db, season); // 꺼졌다 켜면 이 시각부터 꺼져 있던 시간만큼 시즌 시계를 미룬다
   // 이번 interval에 자동 종료된 포지션(강제 청산·스탑·익절)과 체결된 지정가 종목: 해당 화면이 계좌를 다시 받는다
   const auto = broker.drainAuto();
   settled.push(...auto.closed, ...auto.makers.map(sym => ({ type: "order", sym })));
@@ -184,14 +185,17 @@ function userOf(req: FastifyRequest, reply: FastifyReply): number | null {
 }
 
 /**
- * 요청한 사람의 IP. Cloudflare 터널(cloudflared)은 같은 PC에서 접속하므로 모두 127.0.0.1로 보인다.
- * 그때만 cloudflared가 넣는 CF-Connecting-IP를 믿는다. 밖에서 직접 온 요청은 이 헤더를 꾸밀 수 있어 무시한다
+ * 요청한 사람의 IP. 터널(Tailscale Funnel, cloudflared)은 같은 PC에서 접속하므로 모두 127.0.0.1로 보인다.
+ * 그때만 X-Forwarded-For의 마지막 값을 믿는다: Funnel은 이 헤더를 접속한 IP 하나로 덮어쓰고, Cloudflare는 맨 뒤에 붙인다.
+ * CF-Connecting-IP는 쓰지 않는다: Funnel은 이 헤더를 지우지 않아 방문자가 꾸밀 수 있다. 밖에서 직접 온 요청은 헤더를 무시한다
  */
 function clientIp(req: FastifyRequest): string {
   const peer = req.socket.remoteAddress ?? "";
-  const cf = req.headers["cf-connecting-ip"];
   const loopback = peer === "127.0.0.1" || peer === "::1" || peer === "::ffff:127.0.0.1";
-  return loopback && typeof cf === "string" && cf ? cf : req.ip;
+  if (!loopback) return req.ip;
+  const xff = req.headers["x-forwarded-for"];
+  const last = (typeof xff === "string" ? xff : "").split(",").pop()?.trim();
+  return last || req.ip;
 }
 
 // 참가 시도 속도 제한: IP당 1분에 10번

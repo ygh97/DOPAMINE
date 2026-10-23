@@ -1,6 +1,7 @@
 // 시즌: 시작·엔진 복원·스냅샷·종료와 명예의 전당.
-// tick은 벽시계 기준(시즌 시작 뒤 지난 시간 / tickMs). 서버를 다시 켜면 최신 스냅샷에서 시작해,
-// 그 뒤로 기록된 주문 흐름(flows)을 넣으며 지금 시각까지 재생한다. 서버가 꺼져 있던 동안의 시세도 채워진다.
+// tick은 벽시계 기준(시즌 시작 뒤 지난 시간 / tickMs). 서버가 꺼져 있던 동안은 시세가 멈춘다:
+// 켤 때 꺼져 있던 시간만큼 시즌 시작(started_at)을 미뤄, 시즌 시계가 마지막 tick에서 이어진다 (currentSeason).
+// 그다음 최신 스냅샷에서 시작해 그 뒤로 기록된 주문 흐름(flows)을 넣으며 마지막 tick까지 재생한다.
 // 주의: 스냅샷 이후 구간은 재생이라, 시즌 중에 엔진 코드를 바꾸면 그 구간 경로가 달라질 수 있다.
 import { randomInt } from "node:crypto";
 import { ASSETS, Exchange, SECTORS, SPARES, createMarket, type ExchangeOptions, type MarketOptions } from "@dopamine/engine";
@@ -8,15 +9,22 @@ import type { RankRow } from "./broker.ts";
 import { tx, type Db } from "./db.ts";
 
 export interface Season { id: number; seed: number; startedAt: number; tickMs: number; lengthMs: number }
-interface SeasonRow { id: number; seed: number; started_at: number; tick_ms: number; length_ms: number }
+interface SeasonRow { id: number; seed: number; started_at: number; tick_ms: number; length_ms: number; last_seen_at: number | null }
 const toSeason = (r: SeasonRow): Season => ({ id: r.id, seed: r.seed, startedAt: r.started_at, tickMs: r.tick_ms, lengthMs: r.length_ms });
 
-/** 진행 중인 시즌. 없으면 지금 시작한다. 시즌 길이 설정이 바뀌었으면 진행 중 시즌에도 맞춘다 (이미 지났으면 다음 tick에 종료) */
+/**
+ * 진행 중인 시즌. 없으면 지금 시작한다. 시즌 길이 설정이 바뀌었으면 진행 중 시즌에도 맞춘다 (이미 지났으면 다음 tick에 종료).
+ * 서버가 꺼져 있었으면 그 시간(마지막 tick 시각 last_seen_at부터 지금까지)만큼 시즌 시작을 미룬다: 아무도 못 들어오는 동안 시세가 돌지 않는다
+ */
 export function currentSeason(db: Db, seed: number, tickMs: number, lengthMs: number, now = Date.now()): Season {
-  const row = db.prepare("SELECT id, seed, started_at, tick_ms, length_ms FROM seasons WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1").get() as SeasonRow | undefined;
+  const row = db.prepare("SELECT id, seed, started_at, tick_ms, length_ms, last_seen_at FROM seasons WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1").get() as SeasonRow | undefined;
   if (row && row.length_ms !== lengthMs) {
     db.prepare("UPDATE seasons SET length_ms = ? WHERE id = ?").run(lengthMs, row.id);
     row.length_ms = lengthMs;
+  }
+  if (row && row.last_seen_at != null && now - row.last_seen_at > row.tick_ms) {
+    row.started_at += now - row.last_seen_at;
+    db.prepare("UPDATE seasons SET started_at = ?, last_seen_at = ? WHERE id = ?").run(row.started_at, now, row.id);
   }
   if (row) return toSeason(row);
   const id = Number(db.prepare("INSERT INTO seasons (seed, started_at, tick_ms, length_ms) VALUES (?, ?, ?, ?)").run(seed, now, tickMs, lengthMs).lastInsertRowid);
@@ -55,6 +63,11 @@ export function bootMarket(db: Db, season: Season, options: Partial<MarketOption
 export function saveSnapshot(db: Db, season: Season, exchange: Exchange) {
   db.prepare("INSERT INTO snapshots (season_id, tick, data, exchange, saved_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO UPDATE SET tick = excluded.tick, data = excluded.data, exchange = excluded.exchange, saved_at = excluded.saved_at")
     .run(season.id, exchange.market.tick, exchange.market.snapshot(), exchange.snapshot(), Date.now());
+}
+
+/** tick을 돌린 시각을 남긴다. 다음에 켤 때 이 시각부터 꺼져 있던 시간을 잰다 */
+export function touchSeason(db: Db, season: Season, now = Date.now()) {
+  db.prepare("UPDATE seasons SET last_seen_at = ? WHERE id = ?").run(now, season.id);
 }
 
 /** 지금 시각에 엔진이 도달해야 하는 tick */

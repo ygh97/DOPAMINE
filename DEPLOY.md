@@ -2,7 +2,7 @@
 
 도파민 센터 서버를 혼자 켜고, 업데이트하고, 지키는 방법이다. 명령은 모두 프로젝트 폴더(`dopamine-center`)에서 실행한다.
 
-지금 운영 방식은 **A. 이 PC + Cloudflare Quick Tunnel**이다. 서버가 이 PC에서 돌고, `cloudflared`가 `https://….trycloudflare.com` 주소로 밖에 연결해 준다. 클라우드 서버(Oracle 등)로 옮기려면 **B. Docker**를 본다.
+지금 운영 방식은 **A. 이 PC + Tailscale Funnel**이다. 서버가 이 PC에서 돌고, Tailscale Funnel이 고정 주소 `https://desktop-f349cdk.tail24dad6.ts.net`으로 밖에 연결해 준다. 재부팅해도 주소는 그대로다. 클라우드 서버(Oracle 등)로 옮기려면 **B. Docker**를 본다.
 
 ---
 
@@ -12,7 +12,8 @@
 |---|---|
 | Node.js 24 이상 | `node -v`로 확인. 없으면 nodejs.org에서 LTS(24) 설치 |
 | Git | `git -v`로 확인 |
-| cloudflared | `cloudflared -v`로 확인. 없으면 `winget install Cloudflare.cloudflared` |
+| Tailscale | `winget install Tailscale.Tailscale` → `tailscale up`으로 로그인 → `tailscale funnel --bg 4810` (처음이면 나오는 링크에서 Funnel을 허용하고 다시 실행). 설정은 tailscaled 서비스가 기억해 재부팅 뒤에도 켜진다. 명령 위치는 `C:\Program Files\Tailscale\tailscale.exe` |
+| 서버 켜기 | 프로젝트 폴더의 `start-server.cmd`를 더블클릭 (= `deploy.ps1 -SkipPull`). 자동으로 켜지지 않는다 |
 | 코드 받기 | `git clone https://github.com/ygh97/DOPAMINE.git dopamine-center` (이미 있으면 생략) |
 | 운영자 키 | 프로젝트 폴더에 `.env` 파일을 만들고 한 줄: `ADMIN_KEY=16자이상아무문자열`. git에 안 올라간다. 키가 없으면 운영자 기능(백업·새 시즌·채팅 관리)이 꺼진다 |
 
@@ -29,19 +30,19 @@
 
 ---
 
-## A. 이 PC + Cloudflare Quick Tunnel (지금 방식)
+## A. 이 PC + Tailscale Funnel (지금 방식)
 
 ### 한 번에: `tools\deploy.ps1`
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1            # 배포 (엔진을 바꿔도 시즌은 그대로 이어진다)
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -NewSeason # 배포 + 지금 시즌을 끝내고 새 시즌 (원할 때만)
-powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel    # 터널이 꺼져 있으면 켜고 새 주소 출력
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel    # Funnel이 꺼져 있으면 켠다
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -FreshStart  # 계정·명예의 전당만 남기고 전부 지운 뒤 새 시즌 (아래 "새로 시작")
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만 끄기 (끄기 전 스냅샷·백업)
 ```
 
-옵션은 같이 쓸 수 있다. 예: 재부팅 뒤 같은 PC에서 → `deploy.ps1 -SkipPull -Tunnel`.
+옵션은 같이 쓸 수 있다. 재부팅 뒤에는 `start-server.cmd`(= `deploy.ps1 -SkipPull`)로 직접 켠다.
 
 스크립트가 하는 일:
 1. `git pull` (최신 코드. `-SkipPull`이면 건너뜀)
@@ -51,7 +52,7 @@ powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만
 5. 서버를 창 없이 켠다 (이 창을 닫아도 안 꺼진다). 로그는 `data\server.log`. 끌 때는 `-Stop`
 6. `/api/health`가 응답할 때까지 기다린다 (재생 때문에 몇 초 걸릴 수 있다)
 7. `-NewSeason`을 붙였을 때만 지금 시즌을 끝내고 새 시즌을 연다
-8. 터널 상태와 주소를 알려 준다. 터널은 서버만 다시 켜면 그대로라 주소도 안 바뀐다. `-Tunnel`로 켠 터널도 창 없이 돌고, 주소·로그는 `data\tunnel.log`. 터널만 끄려면 `Stop-Process -Name cloudflared`
+8. Funnel 상태와 주소를 알려 준다 (`tailscale funnel status`). Funnel을 끄려면 `tailscale funnel --bg 4810 off`
 
 ### 배포해도 시즌은 이어진다
 - 엔진(시세·호가창·뉴스)을 바꾼 배포도 시즌·계좌·차트가 그대로 이어지고, 바뀐 규칙은 그 순간부터 적용된다.
@@ -73,8 +74,8 @@ powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop      # 서버만
 npm install
 npm run build
 npm start --workspace @dopamine/server          # 이 창이 서버. 닫으면 서버가 꺼진다
-# 다른 창에서
-cloudflared tunnel --url http://127.0.0.1:4810  # 출력에 나오는 https://….trycloudflare.com 이 접속 주소
+# Funnel은 한 번만 켜 두면 된다 (재부팅 뒤에도 유지)
+tailscale funnel --bg 4810                      # 고정 주소 https://desktop-f349cdk.tail24dad6.ts.net
 ```
 
 새 시즌을 직접 열 때 (PowerShell):
@@ -85,9 +86,11 @@ Invoke-RestMethod -Method Post http://127.0.0.1:4810/api/admin/new-season -Heade
 ```
 
 ### 알아 둘 것
-- **Quick Tunnel 주소는 cloudflared를 다시 켤 때마다 바뀐다.** 서버만 다시 켜면 주소는 그대로다. PC를 재부팅했으면 `-Tunnel`로 켜고 새 주소를 공지한다. 고정 주소가 필요하면 Cloudflare 계정에서 Named Tunnel + 도메인을 쓴다.
-- PC가 꺼지거나 절전에 들어가면 게임도 멈춘다. 다시 켜면 서버가 꺼져 있던 시간만큼 시세를 채운다 (tick은 벽시계 기준).
-- `trycloudflare.com` 주소에서는 화면이 SSE 대신 1초 폴링(`/api/poll`)을 자동으로 쓴다.
+- **주소는 고정이다.** 서버나 PC를 다시 켜도 `https://desktop-f349cdk.tail24dad6.ts.net` 그대로다. 주소는 Tailscale 관리 화면의 기기 이름(`desktop-f349cdk`)에서 나온다. 기기 이름을 바꾸면 주소도 바뀐다.
+- 서버는 직접 켠다 (`start-server.cmd`). Funnel은 PC가 켜지면 같이 켜지지만, 서버를 켜기 전에는 502가 난다.
+- 예전 Quick Tunnel도 쓸 수 있다: `cloudflared tunnel --url http://127.0.0.1:4810`. 주소는 켤 때마다 바뀐다.
+- 서버가 꺼져 있던 동안은 시세도 멈춘다. 다시 켜면 마지막 tick에서 이어지고, 시즌 끝나는 시각도 꺼져 있던 시간만큼 늦춰진다. (절전은 서버를 안 끄므로 깨어날 때 그 시간만큼 시세를 채운다.)
+- Funnel 주소에서는 SSE가 그대로 된다. `trycloudflare.com` 주소에서만 화면이 SSE 대신 1초 폴링(`/api/poll`)을 자동으로 쓴다.
 - `npm run dev:server`(`--watch`)는 개발용이다. 실제 DB로 켜 둔 채 서버 파일을 고치면 바로 다시 떠서 시즌이 꼬일 수 있다. 운영은 `npm start`(스크립트)로 한다.
 
 ---
@@ -139,7 +142,7 @@ curl -X POST -H "x-admin-key: 키" http://127.0.0.1:4810/api/admin/new-season
 
 | 증상 | 확인·해결 |
 |---|---|
-| 접속이 안 됨 | `curl http://127.0.0.1:4810/api/health`. 응답이 없으면 서버가 꺼진 것 → `deploy.ps1 -SkipPull`. 응답이 있으면 터널 문제 → `cloudflared` 창 확인, 필요하면 끄고 `deploy.ps1 -SkipPull -Tunnel` |
+| 접속이 안 됨 | `curl http://127.0.0.1:4810/api/health`. 응답이 없으면 서버가 꺼진 것 → `deploy.ps1 -SkipPull`. 응답이 있으면 터널 문제 → `tailscale funnel status` 확인, 꺼져 있으면 `deploy.ps1 -SkipPull -Tunnel` |
 | 서버가 안 켜짐 | `data\server.log` 끝부분 (`Get-Content data\server.log -Tail 30 -Encoding UTF8`). 포트를 다른 프로그램이 쓰면 `Get-NetTCPConnection -LocalPort 4810`으로 누가 쓰는지 본다 |
 | 시세가 멈춤 | `/api/health`의 `tick`이 1초마다 오르는지 본다. 안 오르면 서버를 다시 켠다 |
 | `npm install`·빌드 실패 | Node 버전(24 이상) 확인. 이 PC는 한글 사용자 경로라 Node의 `fs.rmSync`가 죽는 문제가 있다: `node_modules`를 지울 때는 탐색기나 `Remove-Item -Recurse -Force`를 쓴다 |

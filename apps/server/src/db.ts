@@ -17,7 +17,8 @@ export function openDb(file: string): Db {
       started_at INTEGER NOT NULL,
       tick_ms INTEGER NOT NULL,
       length_ms INTEGER NOT NULL DEFAULT 604800000,
-      ended_at INTEGER
+      ended_at INTEGER,
+      last_seen_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY,
@@ -160,6 +161,7 @@ export function openDb(file: string): Db {
   for (const sql of [
     "ALTER TABLE seasons ADD COLUMN length_ms INTEGER NOT NULL DEFAULT 604800000",
     "ALTER TABLE seasons ADD COLUMN ended_at INTEGER",
+    "ALTER TABLE seasons ADD COLUMN last_seen_at INTEGER", // 서버가 마지막으로 tick을 돌린 시각. 꺼져 있던 시간만큼 시즌 시계를 미룬다
     "ALTER TABLE users ADD COLUMN banned INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE fills ADD COLUMN pnl REAL",
     "ALTER TABLE futures ADD COLUMN tp REAL",

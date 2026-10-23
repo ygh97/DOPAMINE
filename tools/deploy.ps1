@@ -1,8 +1,8 @@
-﻿# 도파민 센터: 이 PC에서 서버 업데이트·재시작 (Cloudflare Quick Tunnel 운영용). 사용법은 DEPLOY.md.
+﻿# 도파민 센터: 이 PC에서 서버 업데이트·재시작 (Tailscale Funnel 고정 주소 운영용). 사용법은 DEPLOY.md.
 #
 #   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1         # 최신 코드 받기 → 설치 → 화면 빌드 → 서버 재시작 (시즌은 그대로 이어진다)
 #   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop   # 서버만 끈다
-#   -SkipPull: git pull 안 함 / -Tunnel: 터널이 꺼져 있으면 새로 켜고 주소를 보여 준다 / -NewSeason: 지금 시즌을 끝내고 새 시즌
+#   -SkipPull: git pull 안 함 / -Tunnel: Funnel이 꺼져 있으면 켠다 / -NewSeason: 지금 시즌을 끝내고 새 시즌
 #   -FreshStart: 계정·명예의 전당만 남기고 전부 지운 뒤 새 시즌 (tools/fresh-start.ts, 지우기 전 백업)
 param([switch]$NewSeason, [switch]$FreshStart, [switch]$Stop, [switch]$SkipPull, [switch]$Tunnel, [int]$Port = 4810)
 
@@ -19,17 +19,11 @@ function AdminKey {
   if (-not $line) { return $null }
   return $line.Substring(10).Trim()
 }
-# 창 없이, 이 PowerShell 창과 완전히 분리해서 띄운다 (WMI). 이 창을 닫거나 Ctrl+C를 눌러도 서버·터널이 안 꺼진다
+# 창 없이, 이 PowerShell 창과 완전히 분리해서 띄운다 (WMI). 이 창을 닫거나 Ctrl+C를 눌러도 서버가 안 꺼진다
 function Detached($commandLine) {
   $si = New-CimInstance -ClassName Win32_ProcessStartup -Property @{ ShowWindow = [uint16]0 } -ClientOnly
   $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $commandLine; CurrentDirectory = $Root; ProcessStartupInformation = $si }
   if ($r.ReturnValue -ne 0) { throw "프로세스를 띄우지 못했습니다 (코드 $($r.ReturnValue)): $commandLine" }
-}
-function TunnelUrl($log) {
-  if (-not (Test-Path $log)) { return $null }
-  $m = Select-String -Path $log -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | Select-Object -Last 1
-  if ($m) { return $m.Matches[0].Value }
-  return $null
 }
 function ServerPid {
   $c = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -95,20 +89,13 @@ if ($NewSeason) {
   Write-Host "시즌 $($r.ended) 종료 → 시즌 $($r.season) 시작"
 }
 
-Step "터널 (cloudflared)"
-$cf = Get-Process cloudflared -ErrorAction SilentlyContinue
-$tlog = Join-Path $Root "data\tunnel.log"
-if ($cf) {
-  $url = TunnelUrl $tlog
-  if ($url) { Write-Host "터널 켜져 있음, 주소 그대로: $url" -ForegroundColor Green } else { Write-Host "터널 켜져 있음 (서버만 다시 켰으니 주소는 그대로)" }
-} elseif ($Tunnel) {
-  if (Test-Path $tlog) { Remove-Item $tlog }
-  $exe = (Get-Command cloudflared -ErrorAction Stop).Source
-  Detached "`"$exe`" tunnel --url $Api --logfile `"$tlog`"" # 경로에 공백·한글이 있어 따옴표
-  $url = $null
-  for ($i = 0; $i -lt 60 -and -not $url; $i++) { Start-Sleep -Seconds 1; $url = TunnelUrl $tlog }
-  if ($url) { Write-Host "새 주소: $url" -ForegroundColor Green } else { Write-Host "주소를 아직 못 찾았습니다. data\tunnel.log를 보세요." -ForegroundColor Yellow }
-} else {
-  Write-Host "터널이 꺼져 있습니다. -Tunnel을 붙여 다시 실행하거나 직접: cloudflared tunnel --url $Api" -ForegroundColor Yellow
-}
+Step "고정 주소 (Tailscale Funnel)"
+# Funnel 설정은 tailscaled가 기억해서 재부팅해도 같은 주소로 다시 켜진다. 처음 한 번만 로그인·Funnel 허용이 필요하다 (DEPLOY.md A)
+$ts = "C:\Program Files\Tailscale\tailscale.exe"
+if (-not (Test-Path $ts)) { throw "Tailscale이 없습니다: winget install Tailscale.Tailscale" }
+$funnel = (& $ts funnel status 2>&1 | Out-String)
+if ($Tunnel -and $funnel -notmatch "Funnel on") { & $ts funnel --bg $Port | Out-Null; $funnel = (& $ts funnel status 2>&1 | Out-String) }
+$m = [regex]::Match($funnel, "https://[a-z0-9.-]+\.ts\.net")
+if ($funnel -match "Funnel on" -and $m.Success) { Write-Host "주소: $($m.Value)" -ForegroundColor Green }
+else { Write-Host "Funnel이 꺼져 있습니다. -Tunnel을 붙여 다시 실행하거나 직접: tailscale funnel --bg $Port" -ForegroundColor Yellow }
 Write-Host "`n완료" -ForegroundColor Green

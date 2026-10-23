@@ -17,11 +17,12 @@ $100,000로 시작해 20배면 **졸업**, 100배면 **전설**. 시즌은 8시�
 | [CLAUDE.md](CLAUDE.md) | 개발 규칙·코드 구조·명령 (AI 작업자와 개발자용) |
 | [docs/](docs/) | 지난 설계·작업 기록 (M8 호가창 설계서, 2026-10-22 수정 계획). 구현 완료, 참고용 |
 
-## 배포 (이 PC + Cloudflare 터널)
+## 배포 (이 PC + Tailscale Funnel, 고정 주소 https://desktop-f349cdk.tail24dad6.ts.net)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1          # 코드 받기 → 빌드 → 서버 재시작 (시즌은 그대로 이어짐)
-powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel  # 터널이 꺼져 있으면 켜고 접속 주소 출력
+powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel  # Funnel이 꺼져 있으면 켠다
+start-server.cmd                                                   # 더블클릭으로 켜기 (= deploy.ps1 -SkipPull). 꺼져 있던 동안 시세는 멈춘다
 ```
 
 자세한 건 [DEPLOY.md](DEPLOY.md).
