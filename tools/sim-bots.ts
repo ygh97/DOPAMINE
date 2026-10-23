@@ -35,7 +35,7 @@ if (seeds.length > 1) {
 }
 
 function run(seed: number) {
-  const t0 = performance.now(), T0 = 1.79e12, SEASON_MS = 28_800_000;
+  const t0 = performance.now(), T0 = 1.79e12, SEASON_MS = Number(process.env.SEASON_MS ?? 28_800_000); // 운영 시즌(매일 00:00~23:58) 보정은 SEASON_MS=86280000
   const db = openDb(":memory:");
   const season = currentSeason(db, seed, 1000, SEASON_MS, T0);
   const { market, exchange } = bootMarket(db, season, JSON.parse(OPT), T0);

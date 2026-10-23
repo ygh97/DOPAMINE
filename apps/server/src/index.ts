@@ -16,7 +16,8 @@ const PORT = Number(process.env.PORT ?? 4810);
 const HOST = process.env.HOST ?? "127.0.0.1";
 const SEED = Number(process.env.SEED ?? 20261021);
 const TICK_MS = Number(process.env.TICK_MS ?? 1000);
-const SEASON_MS = Number(process.env.SEASON_MS ?? 360 * 80 * TICK_MS); // 시즌 = 게임 1년 (360일 × 80틱, 1초 tick이면 8시간). 진행 중 시즌에도 바로 적용
+// 시즌: 기본은 매일 00:00~23:58 (서버 PC 현지 시각, 2분 쉬고 다음 시즌). SEASON_MS를 주면 고정 길이(테스트용), 진행 중 시즌에도 바로 적용
+const SEASON_MS = process.env.SEASON_MS ? Number(process.env.SEASON_MS) : null;
 const SNAPSHOT_EVERY = 600; // tick마다 엔진 스냅샷 저장 (10분)
 const DB_FILE = process.env.DB_FILE ?? fileURLToPath(new URL("../../../data/dopamine.db", import.meta.url));
 const BACKUP_DIR = process.env.BACKUP_DIR ?? join(dirname(DB_FILE), "backups");
@@ -64,7 +65,7 @@ function rollover() {
   const prev = season.id;
   backupDb(db, BACKUP_DIR, `season${prev}-end`).catch(e => app.log.error(e)); // 명예의 전당 기록 전 상태
   app.log.info({ season: prev, ...seasonStats(broker.ranking(Infinity)) }, "시즌 통계");
-  season = finishSeason(db, season, broker.ranking(Infinity));
+  season = finishSeason(db, season, broker.ranking(Infinity), Date.now(), SEASON_MS);
   ({ market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS, Date.now(), EXCHANGE_OPTIONS));
   broker = new Broker(db, season, exchange);
   cachedTick = -1;
@@ -175,6 +176,13 @@ app.setErrorHandler((err, _req, reply) => {
   if (status >= 400 && status < 500) return reply.code(status).send({ error: "요청 형식이 올바르지 않습니다." }); // 예: 본문 없는 POST의 Content-Type (415)
   app.log.error(err);
   return reply.code(500).send({ error: "서버 오류가 났습니다." });
+});
+
+// 시즌 사이 쉬는 시간(23:58~00:00)에는 시세가 멈춰 있으니 거래도 받지 않는다
+const TRADE_ROUTES = new Set(["/api/order", "/api/futures/open", "/api/futures/close", "/api/limit", "/api/cancel", "/api/stop", "/api/tp", "/api/close-all", "/api/reset"]);
+app.addHook("onRequest", async (req, reply) => {
+  if (req.method === "POST" && TRADE_ROUTES.has(req.url.split("?")[0]) && Date.now() < season.startedAt)
+    return reply.code(400).send({ error: `다음 시즌이 ${new Date(season.startedAt).toTimeString().slice(0, 5)}에 시작합니다.` });
 });
 
 function userOf(req: FastifyRequest, reply: FastifyReply): number | null {

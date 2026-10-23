@@ -39,7 +39,7 @@ npm run e2e:m8            # 호가창 10단계·지정가 걸기·취소·전체
 - Node 24 타입 스트리핑으로 서버·엔진을 빌드 없이 실행한다. **erasable 문법만** 쓴다 (enum, namespace, 생성자 파라미터 프로퍼티 금지). 상대 import는 `.ts` 확장자를 붙인다.
 - TypeScript는 6.x에 고정. 7.x는 vue-tsc가 쓰는 JS API가 없어 web 타입체크가 깨진다.
 - 엔진의 숨은 상태(대기 충격, 국면, 앵커, EPS, 기준가)와 호가 봇 재고는 `Quote`·`Bar`·`NewsItem`·`/api/book` 밖으로 내보내지 않는다. 엔진 테스트 "숨은 상태가 없다"가 이를 지킨다.
-- 서버 환경 변수: `PORT` 4810, `TICK_MS` 1000, `SEASON_MS` 게임 1년(8시간), `SEED`, `DB_FILE`, `ADMIN_KEY`(16자 이상, 없으면 운영자 기능 꺼짐), `BOTS`·`MARKET_MAKERS`, `ENGINE_OPTIONS`·`EXCHANGE_OPTIONS`(테스트용 JSON). `dev`·`start`는 루트 `.env`(git 제외)를 자동으로 읽는다.
+- 서버 환경 변수: `PORT` 4810, `TICK_MS` 1000, `SEASON_MS`(없으면 매일 00:00~23:58 일정, 주면 고정 길이), `SEED`, `DB_FILE`, `ADMIN_KEY`(16자 이상, 없으면 운영자 기능 꺼짐), `BOTS`·`MARKET_MAKERS`, `ENGINE_OPTIONS`·`EXCHANGE_OPTIONS`(테스트용 JSON). `dev`·`start`는 루트 `.env`(git 제외)를 자동으로 읽는다.
 - 엔진·호가창 상태를 바꾸는 필드를 추가하면 `snapshot()`/`restore()`에도 넣는다. 예전 스냅샷에서 기본값으로 이어갈 수 있으면 `restore()`에서 채우고, 안 되면 `SNAPSHOT_VERSION`을 올린다. 예약 작업은 함수가 아니라 `Task` 데이터로 둔다 (스냅샷에 담기게).
 - 주문 경로는 하나다: 사람·봇·세력 모두 `Broker` → `Exchange`. 체결 수량은 주식·신흥주 1주, 코인 0.000001 단위(`qtyUnit`). 호가 봇 물량도 같은 단위라 체결이 늘 단위의 배수다.
 - GameLoop tick 순서: `broker.endTick()` → `exchange.step()` → `refundCancelled` → `settleTrades`(가격이 지나간 지정가를 호가 봇이 받은 체결) → `applyActions` → `runTriggers` → 봇. `tools/sim-bots.ts`와 서버 테스트의 `tick()`도 같은 순서로 맞춘다.

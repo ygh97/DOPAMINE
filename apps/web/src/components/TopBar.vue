@@ -16,7 +16,9 @@ const ret = computed(() => (a.equity / START - 1) * 100);
 // 시즌 남은 시간 (tick마다 다시 계산)
 const left = computed(() => {
   void m.tick;
-  const ms = (m.season?.endsAt ?? 0) - Date.now();
+  const now = Date.now();
+  if (m.season && now < m.season.startedAt) return `다음 시즌 ${new Date(m.season.startedAt).toTimeString().slice(0, 5)} 시작`;
+  const ms = (m.season?.endsAt ?? 0) - now;
   if (ms <= 0) return "시즌 마감 중";
   const h = Math.floor(ms / 3_600_000), d = Math.floor(h / 24), min = Math.floor((ms % 3_600_000) / 60_000);
   return d ? `${d}일 ${h % 24}시간 남음` : h ? `${h}시간 ${min}분 남음` : `${min}분 ${Math.floor((ms % 60_000) / 1000)}초 남음`;

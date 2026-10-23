@@ -278,6 +278,24 @@ test("서버가 꺼져 있던 동안은 시세가 멈춘다: 켜면 꺼져 있�
   assert.equal(currentSeason(s.db, 1, 1000, 7 * 86_400_000, lastSeen + off + 500).startedAt, T0 + off, "1 tick 안의 재시작은 그대로");
 });
 
+test("매일 일정: 00:00 시작·23:58 종료, 끝나면 다음 00:00까지 쉬고, 꺼져 있던 동안 멈춰도 종료 시각은 그대로", () => {
+  const at = (h: number, m = 0, day = 23) => new Date(2026, 9, day, h, m).getTime();
+  const db = openDb(":memory:");
+  // 낮에 처음 열면 지금부터 오늘 23:58까지
+  const s1 = currentSeason(db, 1, 1000, null, at(19, 30));
+  assert.equal(s1.startedAt, at(19, 30));
+  assert.equal(s1.startedAt + s1.lengthMs, at(23, 58));
+  // 1시간 꺼졌다 켜면 시작은 밀리고 종료는 그대로
+  touchSeason(db, s1, at(20));
+  const back = currentSeason(db, 1, 1000, null, at(21));
+  assert.equal(back.startedAt, at(20, 30));
+  assert.equal(back.startedAt + back.lengthMs, at(23, 58));
+  // 23:58에 끝나면 다음 시즌은 00:00부터 23:58까지
+  const s2 = finishSeason(db, back, [], at(23, 58), null);
+  assert.equal(s2.startedAt, at(0, 0, 24));
+  assert.equal(s2.startedAt + s2.lengthMs, at(23, 58, 24));
+});
+
 test("엔진이 바뀌어 스냅샷을 못 읽어도 시즌은 이어진다: 처음부터 재생해 지금 tick까지", () => {
   const s = setup(10);
   for (let i = 0; i < 50; i++) s.tick();

@@ -4,7 +4,8 @@
 #   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Stop   # 서버만 끈다
 #   -SkipPull: git pull 안 함 / -Tunnel: Funnel이 꺼져 있으면 켠다 / -NewSeason: 지금 시즌을 끝내고 새 시즌
 #   -FreshStart: 계정·명예의 전당만 남기고 전부 지운 뒤 새 시즌 (tools/fresh-start.ts, 지우기 전 백업)
-param([switch]$NewSeason, [switch]$FreshStart, [switch]$Stop, [switch]$SkipPull, [switch]$Tunnel, [int]$Port = 4810)
+#   -FreshStart -WipeHall: 명예의 전당도 지우고 S1부터 (계정만 남김)
+param([switch]$NewSeason, [switch]$FreshStart, [switch]$WipeHall, [switch]$Stop, [switch]$SkipPull, [switch]$Tunnel, [int]$Port = 4810)
 
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
@@ -60,8 +61,13 @@ Step "서버 끄기"
 StopServer
 
 if ($FreshStart) {
-  Step "새로 시작 (계정·명예의 전당만 남김)"
-  node --disable-warning=ExperimentalWarning tools/fresh-start.ts
+  if ($WipeHall) {
+    Step "새로 시작 (계정만 남기고 S1부터)"
+    node --disable-warning=ExperimentalWarning tools/fresh-start.ts --hall
+  } else {
+    Step "새로 시작 (계정·명예의 전당만 남김)"
+    node --disable-warning=ExperimentalWarning tools/fresh-start.ts
+  }
   if ($LASTEXITCODE -ne 0) { throw "새로 시작 실패. 서버는 꺼진 상태입니다. data\backups의 fresh-start 백업으로 되돌릴 수 있습니다." }
 }
 

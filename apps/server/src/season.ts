@@ -1,6 +1,8 @@
 // 시즌: 시작·엔진 복원·스냅샷·종료와 명예의 전당.
+// 운영 시즌은 매일 고정 일정이다: 00:00 시작, 23:58 종료, 2분 쉬고 다음 시즌 (서버 PC의 현지 시각). SEASON_MS를 주면 고정 길이(테스트용).
 // tick은 벽시계 기준(시즌 시작 뒤 지난 시간 / tickMs). 서버가 꺼져 있던 동안은 시세가 멈춘다:
 // 켤 때 꺼져 있던 시간만큼 시즌 시작(started_at)을 미뤄, 시즌 시계가 마지막 tick에서 이어진다 (currentSeason).
+// 매일 일정에서는 종료 시각(23:58)은 그대로 두고 시즌 길이를 그만큼 줄인다.
 // 그다음 최신 스냅샷에서 시작해 그 뒤로 기록된 주문 흐름(flows)을 넣으며 마지막 tick까지 재생한다.
 // 주의: 스냅샷 이후 구간은 재생이라, 시즌 중에 엔진 코드를 바꾸면 그 구간 경로가 달라질 수 있다.
 import { randomInt } from "node:crypto";
@@ -12,23 +14,48 @@ export interface Season { id: number; seed: number; startedAt: number; tickMs: n
 interface SeasonRow { id: number; seed: number; started_at: number; tick_ms: number; length_ms: number; last_seen_at: number | null }
 const toSeason = (r: SeasonRow): Season => ({ id: r.id, seed: r.seed, startedAt: r.started_at, tickMs: r.tick_ms, lengthMs: r.length_ms });
 
+/** 매일 일정: t가 속한 날의 시즌 종료 시각 (현지 23:58) */
+export function dailyEnd(t: number) {
+  const d = new Date(t);
+  d.setHours(23, 58, 0, 0);
+  return d.getTime();
+}
+/** 매일 일정: t 이후 시즌이 열리는 시각. 오늘 종료 전이면 지금, 아니면 다음 날 00:00 */
+export function dailyStart(t: number) {
+  if (t < dailyEnd(t)) return t;
+  const d = new Date(t);
+  d.setHours(24, 0, 0, 0);
+  return d.getTime();
+}
+/** 새 시즌의 시작·길이. lengthMs가 null이면 매일 일정, 숫자면 지금부터 그 길이 */
+export function scheduleSeason(now: number, lengthMs: number | null) {
+  if (lengthMs != null) return { startedAt: now, lengthMs };
+  const startedAt = dailyStart(now);
+  return { startedAt, lengthMs: dailyEnd(startedAt) - startedAt };
+}
+
 /**
- * 진행 중인 시즌. 없으면 지금 시작한다. 시즌 길이 설정이 바뀌었으면 진행 중 시즌에도 맞춘다 (이미 지났으면 다음 tick에 종료).
- * 서버가 꺼져 있었으면 그 시간(마지막 tick 시각 last_seen_at부터 지금까지)만큼 시즌 시작을 미룬다: 아무도 못 들어오는 동안 시세가 돌지 않는다
+ * 진행 중인 시즌. 없으면 일정대로 연다. lengthMs가 null이면 매일 일정(00:00~23:58), 숫자면 고정 길이:
+ * 고정 길이 설정이 바뀌었으면 진행 중 시즌에도 맞춘다 (이미 지났으면 다음 tick에 종료).
+ * 서버가 꺼져 있었으면 그 시간(마지막 tick 시각 last_seen_at부터 지금까지)만큼 시즌 시작을 미룬다: 아무도 못 들어오는 동안 시세가 돌지 않는다.
+ * 매일 일정에서는 종료 시각을 지키려고 길이도 그만큼 줄인다
  */
-export function currentSeason(db: Db, seed: number, tickMs: number, lengthMs: number, now = Date.now()): Season {
+export function currentSeason(db: Db, seed: number, tickMs: number, lengthMs: number | null, now = Date.now()): Season {
   const row = db.prepare("SELECT id, seed, started_at, tick_ms, length_ms, last_seen_at FROM seasons WHERE ended_at IS NULL ORDER BY id DESC LIMIT 1").get() as SeasonRow | undefined;
-  if (row && row.length_ms !== lengthMs) {
+  if (row && lengthMs != null && row.length_ms !== lengthMs) {
     db.prepare("UPDATE seasons SET length_ms = ? WHERE id = ?").run(lengthMs, row.id);
     row.length_ms = lengthMs;
   }
   if (row && row.last_seen_at != null && now - row.last_seen_at > row.tick_ms) {
-    row.started_at += now - row.last_seen_at;
-    db.prepare("UPDATE seasons SET started_at = ?, last_seen_at = ? WHERE id = ?").run(row.started_at, now, row.id);
+    const off = now - row.last_seen_at;
+    row.started_at += off;
+    if (lengthMs == null) row.length_ms -= off;
+    db.prepare("UPDATE seasons SET started_at = ?, length_ms = ?, last_seen_at = ? WHERE id = ?").run(row.started_at, row.length_ms, now, row.id);
   }
   if (row) return toSeason(row);
-  const id = Number(db.prepare("INSERT INTO seasons (seed, started_at, tick_ms, length_ms) VALUES (?, ?, ?, ?)").run(seed, now, tickMs, lengthMs).lastInsertRowid);
-  return { id, seed, startedAt: now, tickMs, lengthMs };
+  const s = scheduleSeason(now, lengthMs);
+  const id = Number(db.prepare("INSERT INTO seasons (seed, started_at, tick_ms, length_ms) VALUES (?, ?, ?, ?)").run(seed, s.startedAt, tickMs, s.lengthMs).lastInsertRowid);
+  return { id, seed, tickMs, ...s };
 }
 
 /**
@@ -82,11 +109,13 @@ export const emblemOf = (season: number) => SEASON_EMBLEMS[(season - 1) % SEASON
 
 /**
  * 시즌을 닫고 다음 시즌을 연다. 명예의 전당: 100배 전설을 달성한 사람 전원 + 시즌 최종 순위 사람 1·2·3등(TOP 3).
- * 다음 시즌은 이전 시즌이 끝난 시각에 이어서 시작한다 (서버가 오래 꺼져 있었거나 운영자가 일찍 끝냈으면 지금부터).
+ * 다음 시즌: 매일 일정(lengthMs null)이면 다음 00:00 (그날 23:58 전에 끝냈으면 지금부터).
+ * 고정 길이면 이전 시즌이 끝난 시각에 이어서 (서버가 오래 꺼져 있었거나 운영자가 일찍 끝냈으면 지금부터).
  */
-export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = Date.now()): Season {
+export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = Date.now(), lengthMs: number | null = season.lengthMs): Season {
   const end = season.startedAt + season.lengthMs;
-  const start = now >= end && now - end < season.lengthMs ? end : now; // 일찍 끝냈으면(운영자 새 시즌) 지금부터
+  const next = lengthMs == null ? scheduleSeason(now, null)
+    : { startedAt: now >= end && now - end < lengthMs ? end : now, lengthMs }; // 일찍 끝냈으면(운영자 새 시즌) 지금부터
   const seed = randomInt(1, 2 ** 31);
   return tx(db, () => {
     const add = db.prepare("INSERT OR IGNORE INTO hall_of_fame (season_id, rank, name, equity, return_pct, cleared_tick) VALUES (?, ?, ?, ?, ?, ?)");
@@ -98,8 +127,8 @@ export function finishSeason(db: Db, season: Season, ranking: RankRow[], now = D
     db.prepare("UPDATE seasons SET ended_at = ? WHERE id = ?").run(now, season.id);
     db.prepare("DELETE FROM snapshots WHERE season_id = ?").run(season.id);
     db.prepare("DELETE FROM open_orders WHERE season_id = ?").run(season.id); // 지정가는 시즌 끝까지만
-    const id = Number(db.prepare("INSERT INTO seasons (seed, started_at, tick_ms, length_ms) VALUES (?, ?, ?, ?)").run(seed, start, season.tickMs, season.lengthMs).lastInsertRowid);
-    return { id, seed, startedAt: start, tickMs: season.tickMs, lengthMs: season.lengthMs };
+    const id = Number(db.prepare("INSERT INTO seasons (seed, started_at, tick_ms, length_ms) VALUES (?, ?, ?, ?)").run(seed, next.startedAt, season.tickMs, next.lengthMs).lastInsertRowid);
+    return { id, seed, tickMs: season.tickMs, ...next };
   });
 }
 
