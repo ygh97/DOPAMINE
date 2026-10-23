@@ -207,7 +207,7 @@ test("코인 섹터 동조화·개별 기업 뉴스 단독 반응", () => {
     sxy += dx * dy; sx += dx * dx; sy += dy * dy;
   }
   const coinCorr = sxy / Math.sqrt(sx * sy);
-  assert.ok(coinCorr > 0.45, `코인 섹터 동조화 상관계수 ${coinCorr.toFixed(2)}`);
+  assert.ok(coinCorr > 0.4, `코인 섹터 동조화 상관계수 ${coinCorr.toFixed(2)}`); // 2026-10-23 코인 개별 뉴스를 키워 0.45 → 0.4
 
   // 개별 기업·코인 뉴스는 오직 해당 1개 종목만 대상으로 한다
   for (const item of m.news) {

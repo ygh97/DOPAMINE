@@ -110,6 +110,8 @@ export interface MarketOptions {
   ticksPerDay: number;
   /** 화면 달력(gameDate)의 하루 길이(틱). 0이면 ticksPerDay. 가격·뉴스 규칙에는 안 쓴다 */
   calendarDayTicks: number;
+  /** 화면 달력이 시즌 시작에 이미 지나 있는 틱 (날짜를 실제 시각에 맞춘다) */
+  calendarOffsetTicks: number;
   prevResetDays: number;
   /** 시즌 동안 적정가가 오르는 배수 [최소, 최대]. 시즌마다 이 안에서 하나를 뽑는다 */
   seasonGrowth: [number, number];

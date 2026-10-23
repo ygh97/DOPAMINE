@@ -39,7 +39,13 @@ const chat = new Chat(db);
 // 시즌이 바뀌면 아래 넷을 통째로 갈아 끼운다
 const bootStart = performance.now();
 let season = currentSeason(db, SEED, TICK_MS, SEASON_MS);
-let { market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS, Date.now(), EXCHANGE_OPTIONS);
+/** 시즌별 엔진 설정: 매일 일정이면 화면 날짜가 실제 시각에 맞게 (00:00 = 1월 1일, 4분 = 하루), 시즌이 늦게 시작했으면 그 시각의 날짜부터 */
+function engineOptions(s: typeof season) {
+  if (SEASON_MS != null) return ENGINE_OPTIONS;
+  const midnight = new Date(s.startedAt); midnight.setHours(0, 0, 0, 0);
+  return { ...ENGINE_OPTIONS, calendarOffsetTicks: Math.max(0, Math.round((s.startedAt - midnight.getTime()) / TICK_MS)) };
+}
+let { market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, engineOptions(season), Date.now(), EXCHANGE_OPTIONS);
 let broker = new Broker(db, season, exchange);
 broker.loadAll();
 broker.restoreOrders(); // 걸어 둔 지정가를 호가창에 다시 건다
@@ -70,7 +76,7 @@ function rollover() {
   backupDb(db, BACKUP_DIR, `season${prev}-end`).catch(e => app.log.error(e)); // 명예의 전당 기록 전 상태
   app.log.info({ season: prev, ...seasonStats(broker.ranking(Infinity)) }, "시즌 통계");
   season = finishSeason(db, season, broker.ranking(Infinity), Date.now(), SEASON_MS);
-  ({ market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, ENGINE_OPTIONS, Date.now(), EXCHANGE_OPTIONS));
+  ({ market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, engineOptions(season), Date.now(), EXCHANGE_OPTIONS));
   broker = new Broker(db, season, exchange);
   cachedTick = -1;
   saveSnapshot(db, season, exchange);

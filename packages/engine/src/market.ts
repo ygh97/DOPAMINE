@@ -13,6 +13,7 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   ticksPerBar: 60,        // 1분봉 = 60틱(1초 tick)
   ticksPerDay: 80,        // 게임 하루 (실적·심사·등락률 같은 규칙의 하루)
   calendarDayTicks: 0,    // 화면 달력의 하루 (0이면 ticksPerDay). 서버가 시즌 하나 = 달력 1년이 되게 넣는다. 규칙에는 안 쓴다
+  calendarOffsetTicks: 0, // 화면 달력이 시즌 시작에 이미 지나 있는 틱 (매일 시즌: 그날 00:00부터 시즌 시작까지). 날짜가 실제 시각에 맞는다
   prevResetDays: 1,       // 등락률 기준가(prev) 초기화 주기 = 게임 하루(80틱)
   seasonGrowth: [1.5, 3], // 우상향은 여기서만 만든다: 시즌 동안 적정가가 1.5~3배 (시즌마다 하나를 뽑음)
   seasonTicks: 28_800,    // 시즌 = 게임 1년 (360일 × 80틱 = 실제 8시간)
@@ -31,7 +32,7 @@ export const DEFAULT_OPTIONS: MarketOptions = {
   srLookback: 60,         // 전고점·전저점을 볼 봉 수
   srBand: 0.004,          // 지지·저항이 작동하는 거리 (0.4%)
   srWeight: 0.35,         // 지지·저항 기울기 최대치 = 개별 σ의 35%
-  gradCap: 3e9,           // 신흥주 → 주식 승격: 검증 성공 gradSuccesses회 이상 + 시총 30억 달러
+  gradCap: 5e9,           // 신흥주 → 주식 승격: 검증 성공 gradSuccesses회 이상 + 시총 50억 달러 (2026-10-23 전: 30억)
   gradSuccesses: 2,
   gradCooldown: 0,        // 승격 사이 평균 간격(±30%). 0이면 시즌 ÷ (maxNewGrowth + 1): 상한이 없으면 0 = 조건이 되는 순간 바로 승격
   gradPER: 15,
@@ -248,7 +249,9 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   // 시즌 달력은 과거 차트(warmup)가 끝난 시점부터 1년차 1월 1일. 그 전은 year 0 = "시즌 전"
   const seasonStartTick = cfg.warmupBars * cfg.ticksPerBar;
   const gameDate = (t = tick): GameDate => {
-    const d = Math.floor((t - seasonStartTick) / (cfg.calendarDayTicks || cfg.ticksPerDay));
+    if (t < seasonStartTick) return { year: 0, month: 0, day: 0 };
+    const raw = Math.floor((t - seasonStartTick + cfg.calendarOffsetTicks) / (cfg.calendarDayTicks || cfg.ticksPerDay));
+    const d = cfg.calendarDayTicks ? Math.min(359, raw) : raw; // 매일 시즌의 달력은 1년(12월 30일)에서 멈춘다
     if (d < 0) return { year: 0, month: 0, day: 0 };
     return { year: Math.floor(d / 360) + 1, month: Math.floor((d % 360) / 30) + 1, day: (d % 30) + 1 };
   };
