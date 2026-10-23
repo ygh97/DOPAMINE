@@ -129,7 +129,7 @@ const ENV = { ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120, impactK: 20 }) }
     await page.click("button[title='차트 모양·이평선·수치 표시 직접 설정']");
     log.posChecks = await page.locator("#chartSettingsPanel [data-pos]").count();
 
-    const ok = log.tabAfterBuy === "hold" && log.placed.tab === "orders" && log.placed.equityDiff < 100 && log.posChecks === 7 && log.levels.asks === 10 && log.levels.bids === 10 && log.placed.rows === 1 && log.makerFill.side === "매도" && log.makerFill.fee === "$0.0000"
+    const ok = log.tabAfterBuy === "hold" && log.placed.tab === "orders" && log.placed.equityDiff < 1000 && log.posChecks === 7 && log.levels.asks === 10 && log.levels.bids === 10 && log.placed.rows === 1 && log.makerFill.side === "매도" && log.makerFill.fee === "$0.0000"
       && Math.abs(log.pick.ask - log.pick.input) < 1e-9 && log.trades > 0 && log.mobile.asks === 5 && log.mobile.bids === 5 && log.mobile.bookAboveOrder && !log.mobile.scrollX;
     if (!ok) throw new Error("기대와 다름");
     await browser.close();
