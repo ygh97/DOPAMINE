@@ -37,7 +37,9 @@ export const useMarket = defineStore("market", () => {
   const barsEpoch = ref<Record<string, number>>({});
   /** 시즌 랭킹 (5 tick마다) */
   const ranking = ref<RankRow[]>([]);
-  const players = ref(0);
+  const players = ref(0); // 랭킹 탭의 사람 수 (봇 제외)
+  const botRanking = ref<RankRow[]>([]); // 🤖 봇 탭
+  const botCount = ref(0);
   /** 🏦 세력 계정 (수익률 순, 랭킹과 따로) */
   const mmRanking = ref<RankRow[]>([]);
   /** 🐋 고래 (별도 탭) */
@@ -120,7 +122,7 @@ export const useMarket = defineStore("market", () => {
   }
   const spyTarget = ref<string | null>(null);
   const orderPreset = ref<OrderPreset | null>(null);
-  const socialTab = ref<"chat" | "rank" | "mm" | "whale" | "hall" | "analyst">("chat"); // 처음 들어오면 채팅부터
+  const socialTab = ref<"chat" | "rank" | "bot" | "mm" | "whale" | "hall" | "analyst">("chat"); // 처음 들어오면 채팅부터
   const research = ref<Research | null>(null);
   const badges = ref<Record<string, Badges>>({});
   async function loadBadges() {
@@ -315,8 +317,8 @@ export const useMarket = defineStore("market", () => {
     });
   }
 
-  function applyRanking(d: { rows: RankRow[]; players: number; mm?: RankRow[]; whales?: RankRow[]; frames?: Record<string, number> }) {
-    ranking.value = d.rows; players.value = d.players; mmRanking.value = d.mm ?? []; whaleRanking.value = d.whales ?? []; frames.value = d.frames ?? {};
+  function applyRanking(d: { rows: RankRow[]; players: number; bots?: RankRow[]; botCount?: number; mm?: RankRow[]; whales?: RankRow[]; frames?: Record<string, number> }) {
+    ranking.value = d.rows; players.value = d.players; botRanking.value = d.bots ?? []; botCount.value = d.botCount ?? 0; mmRanking.value = d.mm ?? []; whaleRanking.value = d.whales ?? []; frames.value = d.frames ?? {};
   }
   /** 강제청산 알림에 누군가 반응함 → 버튼 숨김 (전광판 배너도) */
   function markReacted(id: number) {
@@ -348,6 +350,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, viewers, direction, lastBars, barsEpoch, ranking, players, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, frames, tierFor, frameFor, list, current,
+  return { quotes, sectors, date, news, tick, connected, viewers, direction, lastBars, barsEpoch, ranking, players, botRanking, botCount, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, frames, tierFor, frameFor, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

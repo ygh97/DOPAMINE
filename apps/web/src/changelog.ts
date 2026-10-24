@@ -4,6 +4,13 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.7.0", date: "2026-10-24", title: "봇 탭",
+    items: [
+      "랭킹 탭은 사람만 보입니다. 내 순위도 사람끼리 순위",
+      "🤖 봇 탭을 따로 만들었습니다 (봇끼리 총자산 순, 이름을 누르면 포지션 스캔)",
+    ],
+  },
+  {
     version: "1.6.1", date: "2026-10-24", title: "신흥주 PER 표시 수정",
     items: [
       "신흥주 실적 발표 뒤 PER이 새로고침 전까지 예전 값(적자)으로 남던 문제 수정",

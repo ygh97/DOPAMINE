@@ -39,19 +39,20 @@ watch([() => m.socialTab, hallLive], ([tab, live]) => { // 진행 중 시즌은 
 // 애널리스트: 적중률 순 (채점된 리포트가 3건 미만이면 아래로)
 const analystRows = computed(() => [...(m.research?.analysts ?? [])].sort((x, y) =>
   Number(y.total >= 3) - Number(x.total >= 3) || y.hits / Math.max(1, y.total) - x.hits / Math.max(1, x.total)));
-// 랭킹은 20명까지 보여 주고, 펼치면 전체를 받아 5초마다 갱신한다
+// 랭킹(사람)·🤖 봇 탭은 20명까지 보여 주고, 펼치면 전체를 받아 5초마다 갱신한다
 const rankOpen = ref(false);
-const rankAll = ref<typeof m.ranking | null>(null);
+const rankAll = ref<{ rows: typeof m.ranking; bots: typeof m.ranking } | null>(null);
 const RANK_TOP = 20;
 async function loadRankAll() {
-  try { const d = await (await fetch("/api/ranking?limit=500")).json(); rankAll.value = d.rows; } catch { /* 다음에 */ }
+  try { const d = await (await fetch("/api/ranking?limit=500")).json(); rankAll.value = { rows: d.rows, bots: d.bots ?? [] }; } catch { /* 다음에 */ }
 }
 let rankTimer = 0;
 watch([rankOpen, () => m.socialTab], ([open, tab]) => {
   clearInterval(rankTimer);
-  if (open && tab === "rank") { void loadRankAll(); rankTimer = window.setInterval(loadRankAll, 5000); }
+  if (open && (tab === "rank" || tab === "bot")) { void loadRankAll(); rankTimer = window.setInterval(loadRankAll, 5000); }
 });
-const rankRows = computed(() => (rankOpen.value && rankAll.value ? rankAll.value : m.ranking.slice(0, RANK_TOP)));
+const rankRows = computed(() => (rankOpen.value && rankAll.value ? rankAll.value.rows : m.ranking.slice(0, RANK_TOP)));
+const botRows = computed(() => (rankOpen.value && rankAll.value ? rankAll.value.bots : m.botRanking.slice(0, RANK_TOP)));
 const myRank = computed(() => a.me?.rank ?? null);
 const text = ref("");
 const whisperTo = ref<string | null>(null);
@@ -271,6 +272,7 @@ async function toggleBan(name: string, banned: boolean) {
           <span v-if="m.unreadWhispers > 0" class="whisper-tab-badge">🔒{{ m.unreadWhispers }}</span>
         </button>
         <button role="tab" data-c="rank" :aria-selected="m.socialTab === 'rank'" @click="m.socialTab = 'rank'">랭킹</button>
+        <button v-if="m.botCount" role="tab" data-c="bot" :aria-selected="m.socialTab === 'bot'" @click="m.socialTab = 'bot'">🤖 봇</button>
         <button v-if="m.mmRanking.length" role="tab" data-c="mm" :aria-selected="m.socialTab === 'mm'" @click="m.socialTab = 'mm'">🏦 세력</button>
         <button v-if="m.whaleRanking.length" role="tab" data-c="whale" :aria-selected="m.socialTab === 'whale'" @click="m.socialTab = 'whale'">🐋 고래</button>
         <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">🏆 전당</button>
@@ -280,13 +282,12 @@ async function toggleBan(name: string, banned: boolean) {
       <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>
     </div>
     <div v-if="m.socialTab === 'rank'" class="table-scroll">
-      <div class="rank-hint muted">참가 <b>{{ m.players }}명</b><template v-if="myRank"> · 내 순위 <b>{{ myRank }}위</b></template> · 이름을 누르면 보유 종목·레버리지·<b>청산가</b>를 볼 수 있습니다 🔍</div>
+      <div class="rank-hint muted">사람 <b>{{ m.players }}명</b><template v-if="myRank"> · 내 순위 <b>{{ myRank }}위</b></template> · 이름을 누르면 보유 종목·레버리지·<b>청산가</b>를 볼 수 있습니다 🔍 (🤖 봇은 옆 탭)</div>
       <table v-if="m.ranking.length" id="ranking" class="grid rank-table">
         <tbody>
           <tr v-for="r in rankRows" :key="r.name" class="rank-row clickable" :class="{ mine: r.name === a.me?.name }" @click="m.spyTarget = r.name">
             <td>{{ r.rank }}</td>
             <td class="rk-name">
-              <span v-if="kindBadge(r.kind)" class="kind-badge" :title="r.kind === 'bot' ? '봇' : '세력'">{{ kindBadge(r.kind) }}</span>
               <b :class="{ 'champ-name': m.isChamp(r.name) }" :style="tierName(r.name)">{{ r.name }}</b>
               <NameBadges :name="r.name" />
               <span v-if="r.clearedTick" class="stage legend">전설</span>
@@ -302,8 +303,28 @@ async function toggleBan(name: string, banned: boolean) {
         {{ rankOpen ? "접기 ▴" : `펼치기 ▾ (전체 ${m.players}명)` }}
       </button>
     </div>
+    <div v-else-if="m.socialTab === 'bot'" class="table-scroll">
+      <div class="rank-hint muted">🤖 봇 <b>{{ m.botCount }}명</b>: 사람과 같은 호가창에서 거래하는 참가자 ($100,000으로 시작, 사람이 들어오면 그만큼 쉼). 랭킹·개미 계급·명예의 전당에서 빠진다</div>
+      <table id="botRanking" class="grid rank-table">
+        <tbody>
+          <tr v-for="r in botRows" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">
+            <td>{{ r.rank }}</td>
+            <td class="rk-name">
+              <span class="kind-badge">{{ kindBadge(r.kind) }}</span> <b>{{ r.name }}</b>
+              <span v-if="r.clearedTick" class="stage legend">전설</span>
+              <span v-else-if="r.gradTick" class="stage grad">졸업</span>
+            </td>
+            <td>{{ money(r.equity) }}</td>
+            <td :class="r.returnPct >= 0 ? 'up' : 'down'">{{ pct(r.returnPct) }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <button v-if="m.botCount > RANK_TOP" type="button" class="rank-more" :aria-expanded="rankOpen" @click="rankOpen = !rankOpen">
+        {{ rankOpen ? "접기 ▴" : `펼치기 ▾ (전체 ${m.botCount}명)` }}
+      </button>
+    </div>
     <div v-else-if="m.socialTab === 'mm'" class="table-scroll">
-      <div class="rank-hint muted">🏦 세력: 시장을 움직이고 거래를 채우는 큰손 계정 (봇, $200만으로 시작). 자금 규모가 달라 수익률 순이고 순위·졸업·명예의 전당에서 빠진다</div>
+      <div class="rank-hint muted">🏦 세력: 시장을 움직이고 거래를 채우는 큰손 계정 (봇, $1,000만으로 시작). 자금 규모가 달라 수익률 순이고 순위·졸업·명예의 전당에서 빠진다</div>
       <table id="mmRanking" class="grid rank-table">
         <tbody>
           <tr v-for="(r, i) in m.mmRanking" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">
@@ -316,7 +337,7 @@ async function toggleBan(name: string, banned: boolean) {
       </table>
     </div>
     <div v-else-if="m.socialTab === 'whale'" class="table-scroll">
-      <div class="rank-hint muted">🐋 고래: 큰 자금($200만)으로 가끔 시장을 크게 흔드는 거래자 (봇). 졸업·명예의 전당 제외</div>
+      <div class="rank-hint muted">🐋 고래: 큰 자금($500만)으로 가끔 시장을 크게 흔드는 거래자 (봇). 졸업·명예의 전당 제외</div>
       <table id="whaleRanking" class="grid rank-table">
         <tbody>
           <tr v-for="r in m.whaleRanking" :key="r.name" class="rank-row clickable" @click="m.spyTarget = r.name">

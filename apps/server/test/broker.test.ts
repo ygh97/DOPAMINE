@@ -653,7 +653,7 @@ test("수익인증 공유 문구는 서버가 실제 계좌로 만든다", async
   assert.throws(() => s.broker.shareText(u, { type: "spot", sym: "AMD" }), /보유하지 않은/);
 });
 
-test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭킹 밖 자기 탭, 명예의 전당은 사람 전설만", () => {
+test("봇·세력·고래: 같은 주문 경로로 매매, 랭킹 탭은 사람만·봇·세력·고래는 각자 탭, 명예의 전당은 사람 전설만", () => {
   const s = setup();
   const human = s.user("사람1");
   const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 12, marketMakers: true, seed: 3 });
@@ -665,6 +665,11 @@ test("봇·세력·고래: 같은 주문 경로로 매매, 세력·고래는 랭
   assert.ok(mm.length === 20 && mm.every(r => r.kind === "mm"), "세력 20");
   assert.ok(whales.length === 10 && whales.every(r => r.kind === "whale"), "🐋 고래 10마리는 별도");
   assert.equal(s.broker.players, 13);
+  // 화면 랭킹은 사람만, 🤖 봇은 따로 탭. 내 순위도 사람끼리
+  assert.deepEqual(s.broker.peopleRanking(Infinity).map(r => [r.name, r.rank]), [["사람1", 1]], "랭킹 탭은 사람만");
+  assert.ok(s.broker.botRanking(Infinity).length === 12 && s.broker.botRanking(Infinity).every((r, i) => r.kind === "bot" && r.rank === i + 1), "봇 탭은 봇끼리 순위");
+  assert.deepEqual(s.broker.counts, { people: 1, bots: 12 });
+  assert.equal(s.broker.me(human).rank, 1, "내 순위는 사람끼리");
   const fills = s.db.prepare("SELECT COUNT(*) AS c FROM fills f JOIN users u ON u.id = f.user_id WHERE u.kind != 'user'").get() as { c: number };
   assert.ok(fills.c > 20, `봇·세력이 실제로 체결 (${fills.c}건)`);
   assert.throws(() => s.auth.join(rows.find(r => r.kind === "bot")!.name, "secret1"), /봇·세력 계정 이름/);

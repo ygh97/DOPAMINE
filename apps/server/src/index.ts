@@ -96,8 +96,14 @@ function rollover() {
   send("season", seasonInfo());
 }
 const seasonInfo = () => ({ id: season.id, startedAt: season.startedAt, endsAt: season.startedAt + season.lengthMs });
-/** 랭킹(사람 + 🤖) 상위 20명, 참가자 수, 🏦 세력, 실시간 순위 테두리(사람끼리 50위 안·원금 초과: 이름 → 순위) */
-const rankingInfo = (rows = broker.ranking(20)) => ({ rows, players: broker.players, mm: broker.mmRanking(), whales: broker.whaleRanking(), frames: liveFrames(broker.ranking(Infinity)) });
+/**
+ * 랭킹 탭(사람만) 상위 20명과 사람 수, 🤖 봇 탭 상위 20명과 봇 수, 🏦 세력, 🐋 고래, 실시간 순위 테두리(사람끼리 50위 안·원금 초과: 이름 → 순위).
+ * limit을 주면 사람·봇 목록을 그만큼 (펼치기)
+ */
+const rankingInfo = (limit = 20) => {
+  const c = broker.counts;
+  return { rows: broker.peopleRanking(limit), players: c.people, bots: broker.botRanking(limit), botCount: c.bots, mm: broker.mmRanking(), whales: broker.whaleRanking(), frames: liveFrames(broker.ranking(Infinity)) };
+};
 
 // JSON 크기를 줄이려고 유효숫자 7자리로 자른다 ($94,880.10, $0.3121 모두 충분)
 const r7 = (v: number) => Number(v.toPrecision(7));
@@ -194,11 +200,11 @@ const loop = setInterval(() => {
     if (settledLog.length > 200) settledLog.splice(0, settledLog.length - 200);
     send("settled", settled);
   }
-  const rankRows = market.tick % 5 === 0 ? broker.ranking(20) : null;
+  const sendRanking = market.tick % 5 === 0;
   for (const text of broker.drainBroadcasts()) send("chat", chat.system(text));
   if (!clients.size) return;
   send("tick", { tick: market.tick, date: market.gameDate(), viewers: viewers(), bars: cachedBars });
-  if (rankRows) send("ranking", rankingInfo(rankRows));
+  if (sendRanking) send("ranking", rankingInfo());
 }, Math.max(10, Math.min(250, TICK_MS / 2)));
 
 // ---------- HTTP ----------
@@ -317,7 +323,7 @@ app.post<{ Body: { season: number; text: string } }>("/api/hall/message", {
 });
 
 // limit: 기본 20명 (SSE·폴링과 같음). 화면에서 "펼치기"를 누르면 전체(최대 500명)를 받는다
-app.get<{ Querystring: { limit?: string } }>("/api/ranking", async req => rankingInfo(broker.ranking(Math.min(500, Math.max(1, Number(req.query.limit) || 20)))));
+app.get<{ Querystring: { limit?: string } }>("/api/ranking", async req => rankingInfo(Math.min(500, Math.max(1, Number(req.query.limit) || 20))));
 
 app.post<{ Body: { name: string; password: string } }>("/api/join", {
   schema: { body: { type: "object", required: ["name", "password"], properties: { name: { type: "string", maxLength: 40 }, password: { type: "string", maxLength: 64 } } } },

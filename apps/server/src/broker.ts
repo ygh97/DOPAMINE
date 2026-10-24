@@ -102,7 +102,7 @@ export class Broker {
   private broadcasts: string[] = [];
   private legendAnnounced = new Set<number>();           // 이번 시즌 [전설] 전광판 알림을 이미 띄운 사람
   private recent = new Map<number, { tick: number; count: number }>(); // 주문 속도 제한
-  private rankCache: { tick: number; rows: RankRow[]; mm: RankRow[]; whales: RankRow[]; rankByUser: Map<string, number> } | null = null;
+  private rankCache: { tick: number; rows: RankRow[]; people: RankRow[]; bots: RankRow[]; mm: RankRow[]; whales: RankRow[]; rankByUser: Map<string, number> } | null = null;
   /** 직전 정산의 종목별 순매수 명목 (세력 계정 주문 제외). 유동성 공급 세력이 반대편을 받는 데 쓴다 */
   lastFlows = new Map<string, number>();
   private stmts;
@@ -953,9 +953,12 @@ export class Broker {
     const rows = ranked(raw.filter(r => r.kind === "user" || r.kind === "bot").sort(order));
     const mm = ranked(raw.filter(r => r.kind === "mm").sort(byReturn));
     const whales = ranked(raw.filter(r => r.kind === "whale").sort(byReturn));
+    // 화면 랭킹은 사람끼리, 🤖 봇은 따로 (2026-10-24). 순위 숫자(내 순위·포지션 스캔)도 각자 안에서
+    const rerank = (rs: RankRow[]) => rs.map((r, i) => ({ ...r, rank: i + 1 }));
+    const people = rerank(rows.filter(r => r.kind === "user")), bots = rerank(rows.filter(r => r.kind === "bot"));
     const rankByUser = new Map<string, number>();
-    for (const r of rows) rankByUser.set(r.name, r.rank);
-    this.rankCache = { tick: this.market.tick, rows, mm, whales, rankByUser };
+    for (const r of [...people, ...bots]) rankByUser.set(r.name, r.rank);
+    this.rankCache = { tick: this.market.tick, rows, people, bots, mm, whales, rankByUser };
     return this.rankCache;
   }
 
@@ -963,6 +966,16 @@ export class Broker {
   ranking(limit = 50): RankRow[] {
     return this.ensureRankCache().rows.slice(0, limit);
   }
+  /** 화면 랭킹: 사람만 (총자산 순, 사람끼리 순위) */
+  peopleRanking(limit = 50): RankRow[] {
+    return this.ensureRankCache().people.slice(0, limit);
+  }
+  /** 🤖 봇 탭: 봇만 (총자산 순, 쉬는 봇 제외) */
+  botRanking(limit = 50): RankRow[] {
+    return this.ensureRankCache().bots.slice(0, limit);
+  }
+  /** 화면에 보이는 사람·봇 수 */
+  get counts() { const c = this.ensureRankCache(); return { people: c.people.length, bots: c.bots.length }; }
   /** 🏦 세력 계정 (수익률 순) */
   mmRanking(): RankRow[] {
     return this.ensureRankCache().mm;

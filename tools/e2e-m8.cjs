@@ -103,8 +103,8 @@ const ENV = { ENGINE_OPTIONS: JSON.stringify({ warmupBars: 120, impactK: 20 }) }
     log.makerFill = { side: first[3], price: first[5], fee: first[6] };
 
     // 6) 호가를 누르면 지정가 가격으로 들어간다, 최근 체결 탭
-    const askPx = await page.locator("#orderBook .lvl.ask[data-price]").last().getAttribute("data-price");
-    await page.locator("#orderBook .lvl.ask[data-price]").last().click();
+    // 가격 읽기와 클릭을 한 번에 (사이에 호가창이 다시 그려지면 다른 가격을 누르게 된다)
+    const askPx = await page.locator("#orderBook .lvl.ask[data-price]").last().evaluate(el => { el.click(); return el.getAttribute("data-price"); });
     log.pick = { ask: Number(askPx), input: Number(await page.inputValue("#limitPrice")) };
     await page.click('[data-b="trades"]');
     await page.waitForSelector("#recentTrades li.up, #recentTrades li.down");
