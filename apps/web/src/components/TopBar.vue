@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { dateText, money, pct } from "../format";
 import { useAccount } from "../stores/account";
 import { useMarket } from "../stores/market";
@@ -27,11 +27,17 @@ function openLpGuide() {
   setTimeout(() => document.getElementById("guideLp")?.scrollIntoView({ block: "start" }), 50);
 }
 const ret = computed(() => (a.equity / START - 1) * 100);
-// 시즌 남은 시간 (tick마다 다시 계산)
+// 시즌 남은 시간. 시즌 사이 쉬는 2분(23:58~00:00)에는 tick이 멈추므로 1초 시계로 다시 계산하고, 다음 시즌까지 초 단위로 센다
+const clockNow = ref(Date.now());
+let clockTimer = 0;
+onMounted(() => { clockTimer = window.setInterval(() => (clockNow.value = Date.now()), 1000); });
+onUnmounted(() => clearInterval(clockTimer));
+const mmss = (ms: number) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const breakLeft = computed(() => (m.season && clockNow.value < m.season.startedAt ? m.season.startedAt - clockNow.value : 0));
 const left = computed(() => {
   void m.tick;
-  const now = Date.now();
-  if (m.season && now < m.season.startedAt) return `다음 시즌 ${new Date(m.season.startedAt).toTimeString().slice(0, 5)} 시작`;
+  const now = clockNow.value;
+  if (breakLeft.value > 0) return `시즌 마감 · 다음 시즌까지 ${mmss(breakLeft.value)}`;
   const ms = (m.season?.endsAt ?? 0) - now;
   if (ms <= 0) return "시즌 마감 중";
   const h = Math.floor(ms / 3_600_000), d = Math.floor(h / 24), min = Math.floor((ms % 3_600_000) / 60_000);
@@ -53,7 +59,7 @@ function restart() {
 <template>
   <header class="topbar">
     <div class="logo"><b>도파민 <i>센터</i></b><small>DOPAMINE CENTER</small></div>
-    <div class="clock" :title="left">S{{ m.season?.id ?? 1 }} · <b>{{ dateText(m.date) }}</b> <small id="seasonLeft" class="muted">{{ left }}</small></div>
+    <div class="clock" :title="left">S{{ m.season?.id ?? 1 }} · <b>{{ dateText(m.date) }}</b> <small id="seasonLeft" :class="breakLeft > 0 ? 'season-break' : 'muted'">{{ left }}</small></div>
     <span class="conn" :class="{ on: m.connected }" :title="m.connected ? `지금 ${m.viewers}명이 보고 있습니다 (손님 포함, 탭마다 1명, 5분 동안 조작이 없으면 빠짐)` : undefined">{{ m.connected ? "실시간" : "재연결 중" }}<b v-if="m.connected && m.viewers" id="viewerCount" class="viewers"> · {{ m.viewers }}명 보는 중</b></span>
     <button id="guideBtn" type="button" class="icon-btn guide-top-btn" :class="{ fresh: !guideSeen }" @click="openGuide">📘 뉴비 가이드</button>
     <UpdatesButton />
