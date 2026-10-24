@@ -5,7 +5,7 @@
 // - 시장가는 호가를 먹으며 바로 체결된다. 수수료 0.05%. 슬리피지는 없다(스프레드·호가 두께가 대신한다).
 // - 지정가는 맞는 호가가 있으면 그만큼 바로 체결(시장가 수수료)하고, 남은 수량은 호가창에 건다(체결 때 수수료 0).
 //   걸어 둔 동안 필요한 돈·수량은 묶어 둔다. 1인 최대 20개, 시즌 끝까지 유효.
-// - 현물: 매수는 예수금의 pct%, 매도는 보유 수량의 pct%. 종목당 보유 한도는 가상 유동성 L의 20%.
+// - 현물: 매수는 예수금의 pct%, 매도는 보유 수량의 pct%. 종목당 보유 한도는 없다 (2026-10-25 전: 가상 유동성 L의 20%). 큰 주문은 호가창을 먹으며 비싸진다.
 // - 선물: 격리 증거금 = 예수금의 pct% (진입 수수료 포함). 명목 = 증거금 × 레버리지.
 //   증거금의 90%를 잃는 가격에서 강제 청산. 강제 청산·스탑·익절은 가격이 움직일 때마다 바로 시장가로 나간다 (연쇄 가능).
 import { LEVERAGE, MAKER, qtyUnit, type CorporateAction, type Exchange, type Market, type MarketKind, type Side, type Trade } from "@dopamine/engine";
@@ -20,7 +20,6 @@ export const GOAL = 10_000_000;   // 100배 = 전설 (명예의 전당)
 const FEE = 0.0005;              // 시장가(호가를 먹는 쪽) 수수료. 지정가로 걸어 둔 쪽은 0
 const MAX_OPEN_ORDERS = 20;      // 1인 미체결 지정가 최대
 const MAX_CASCADE = 50;          // 한 번에 이어서 처리하는 강제 청산·스탑 최대 건수
-const HOLD_SHARE = 0.2;
 const ORDERS_PER_TICK = 2;      // tick(1초)당 계정별 주문 수
 const LIQ_LOSS = 0.9;           // 증거금 손실 90%에서 강제 청산
 const RESET_LOCK_TICKS = 600;   // 다시 시작한 뒤 10분간 10배 레버리지 금지 (2026-10-24 하루 없앴다가 되돌림, 기준은 5배 초과 → 10배)
@@ -416,12 +415,9 @@ export class Broker {
     if (side === "sell" && !pos.qty) throw new OrderError("보유하지 않은 종목입니다.");
     const fill = this.atomic([userId], () => {
       if (side === "buy") {
-        const L = this.x.market.liquidity(sym) ?? Infinity, ask = this.x.best(sym).ask ?? q.price;
-        const room = floorTo((HOLD_SHARE * L) / ask - pos.qty, unit);
-        if (room <= 0) throw new OrderError(`보유 한도(가상 유동성의 20%, 약 $${Math.round(HOLD_SHARE * L).toLocaleString()})에 도달했습니다.`);
         const affordable = floorTo(this.x.qtyFor(userId, sym, "buy", acc.cash / (1 + FEE)), unit);
-        const want = qty != null ? Math.min(pickQty(affordable, unit, pct, qty, "예수금이 부족합니다."), room)
-          : Math.min(floorTo(this.x.qtyFor(userId, sym, "buy", (acc.cash * pct) / 100 / (1 + FEE)), unit), room);
+        const want = qty != null ? pickQty(affordable, unit, pct, qty, "예수금이 부족합니다.")
+          : floorTo(this.x.qtyFor(userId, sym, "buy", (acc.cash * pct) / 100 / (1 + FEE)), unit);
         if (want <= 0) throw new OrderError("예수금이 부족해 1주도 살 수 없습니다.");
         const v = this.takeMarket(acc, sym, "buy", want);
         if (v.qty <= 0) throw new OrderError("호가가 없어 체결되지 않았습니다.");
@@ -583,10 +579,8 @@ export class Broker {
     const out = this.atomic([userId], () => {
       const it: Intent = { id: 0, userId, sym, kind, side, lev: req.lev ?? 1, price, qty: 0, cash: 0, held: 0, avg: 0, posId: null, seq: 0 };
       if (kind === "spot" && side === "buy") {
-        const L = this.x.market.liquidity(sym) ?? Infinity, have = acc.positions.get(sym)?.qty ?? 0;
-        const room = floorTo((HOLD_SHARE * L) / price - have, unit);
-        it.qty = Math.min(pickQty(floorTo(acc.cash / (price * (1 + FEE)), unit), unit, pct, req.qty, "예수금이 부족합니다."), room);
-        if (it.qty <= 0) throw new OrderError(room <= 0 ? "보유 한도에 도달했습니다." : "예수금이 부족합니다.");
+        it.qty = pickQty(floorTo(acc.cash / (price * (1 + FEE)), unit), unit, pct, req.qty, "예수금이 부족합니다.");
+        if (it.qty <= 0) throw new OrderError("예수금이 부족합니다.");
         it.cash = it.qty * price * (1 + FEE); acc.cash -= it.cash; // 바로 체결될 몫의 수수료까지 묶는다
       } else if (kind === "spot") {
         const pos = acc.positions.get(sym);

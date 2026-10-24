@@ -4,6 +4,10 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.7.3", date: "2026-10-25", title: "현물 보유 한도 해제",
+    items: ["현물 종목당 보유 한도(가상 유동성의 20%)를 없앴습니다. 크게 살수록 호가를 먹어 평단이 비싸집니다"],
+  },
+  {
     version: "1.7.2", date: "2026-10-25", title: "시즌 사이 카운트다운",
     items: ["시즌이 끝나고 쉬는 2분 동안 왼쪽 위에 다음 시즌까지 남은 시간을 초 단위로 셉니다"],
   },

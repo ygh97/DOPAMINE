@@ -182,14 +182,16 @@ test("잘못된 주문과 너무 빠른 주문은 거절된다", () => {
   s.tick();
 });
 
-test("종목당 보유 한도: 가상 유동성의 20%", async () => {
+test("종목당 보유 한도 없음 (2026-10-25): 시총이 가장 작은 신흥주도 예전 한도의 몇 배를 산다, 크게 사면 호가를 먹어 평단이 오른다", async () => {
   const s = setup();
   const u = s.user("whale");
   const venture = s.market.quotes().filter(q => q.market === "venture").sort((x, y) => (x.cap ?? 0) - (y.cap ?? 0))[0].sym;
-  const limit = 0.2 * s.market.liquidity(venture)!;
-  const fill = await order(s, u, venture, "buy", 100);
-  assert.ok(fill.qty * fill.price <= limit * 1.0001, `한도 $${limit.toFixed(0)} 이하`);
-  if (fill.qty * fill.price > limit * 0.9) await assert.rejects(order(s, u, venture, "buy", 100), OrderError);
+  const limit = 0.2 * s.market.liquidity(venture)!, before = s.exchange.best(venture).ask!;
+  s.broker.account(u).cash = 10 * limit; // 예전 한도의 10배
+  const fill = await order(s, u, venture, "buy", 70);
+  assert.ok(fill.qty * fill.price > 5 * limit, `예전 한도 $${limit.toFixed(0)}를 넘어 체결 ($${(fill.qty * fill.price).toFixed(0)})`);
+  assert.ok(fill.price > before, "큰 주문은 호가를 먹어 평단이 첫 매도호가보다 높다");
+  assert.ok((await order(s, u, venture, "buy", 100)).qty > 0, "이미 많이 들고 있어도 남은 예수금으로 더 산다");
 });
 
 test("주식병합 정산: 수량 ÷ratio, 평단 ×ratio, 단주는 현금", async () => {
