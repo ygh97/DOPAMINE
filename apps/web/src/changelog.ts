@@ -4,6 +4,13 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.6.1", date: "2026-10-24", title: "신흥주 PER 표시 수정",
+    items: [
+      "신흥주 실적 발표 뒤 PER이 새로고침 전까지 예전 값(적자)으로 남던 문제 수정",
+      "실적 뉴스의 이익률을 소수 첫째 자리까지 (예: +0.3%)",
+    ],
+  },
+  {
     version: "1.6.0", date: "2026-10-24", title: "신흥주 실적·테마 업종",
     items: [
       "신흥주에도 매출과 PER: 적자면 PER이 음수로 (예: -42배 적자)",

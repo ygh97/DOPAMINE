@@ -216,3 +216,22 @@ test("코인 섹터 동조화·개별 기업 뉴스 단독 반응", () => {
     }
   }
 });
+
+test("신흥주 실적: 발표하면 시세 목록이 바뀐 것으로 알리고(화면이 새 PER을 받게), PER 부호가 이익률을 따른다", () => {
+  const m = make(31);
+  let seen = 0;
+  for (let i = 0; i < 30000 && seen < 3; i++) {
+    const before = m.assetsVersion, r = m.step();
+    for (const n of r.news) {
+      if (n.kind !== "실적" || !n.symbols.length) continue;
+      const q = m.quote(n.symbols[0]);
+      if (q?.market !== "venture") continue;
+      seen++;
+      assert.ok(m.assetsVersion > before, "신흥주 실적 뒤 assetsVersion 증가");
+      if (/흑자 전환/.test(n.headline)) assert.ok((q.per ?? -1) > 0, `흑자 전환인데 PER ${q.per}`);
+      if (/적자 (전환|확대|축소)/.test(n.headline)) assert.ok((q.per ?? 1) < 0, `적자인데 PER ${q.per}`);
+      assert.ok(!/이익률 [+-]?0%/.test(n.headline), `이익률 표시: ${n.headline}`);
+    }
+  }
+  assert.ok(seen >= 3, `신흥주 실적 ${seen}번`);
+});

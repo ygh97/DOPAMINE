@@ -490,6 +490,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const before = a.margin!, growth = uni(-0.05, 0.25);
     a.revenue! *= 1 + growth;
     a.margin = Math.min(0.35, Math.max(-0.8, before + 0.6 * (a.outlook! - before) + gauss() * 0.05));
+    if (Math.abs(a.margin) < 0.001) a.margin = before < 0 ? 0.001 : -0.001; // 정확히 0이면 PER이 없어진다: 방향만 남긴다
     const after = a.margin, kind = before < 0 && after >= 0 ? "turnaround" : before >= 0 && after < 0 ? "toLoss"
       : after > before + 0.02 || growth > 0.15 ? "better" : after < before - 0.02 ? "worse" : "inline";
     const move = kind === "turnaround" ? uni(0.15, 0.4) : kind === "toLoss" ? -uni(0.2, 0.4) : kind === "better" ? uni(0.05, 0.2)
@@ -497,8 +498,10 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     a.anchor *= Math.exp(move);
     react(a.pending, move);
     a.volBoost = 16;
+    assetsVersion++; // PER이 바뀌었다: 화면은 tick마다 가격 비율로만 PER을 고치므로 새 시세 목록을 보내게 한다
     const tpl = pick(NEWS.ventureEarnings[kind]);
-    const v = { margin: `${after < 0 ? "-" : ""}${Math.abs(Math.round(after * 100))}%`, growth: `${Math.round(growth * 100)}%` };
+    // 이익률: 10% 미만은 소수 첫째 자리까지 (0.3% 흑자가 "0%"로 보이지 않게). 흑자는 +, 적자는 -
+    const mp = Math.abs(after * 100), v = { margin: `${after < 0 ? "-" : "+"}${mp < 10 ? mp.toFixed(1) : Math.round(mp)}%`, growth: `${Math.round(growth * 100)}%` };
     publish({ kind: "실적", headline: render(tpl.h, a, v), body: render(tpl.b, a, v), symbols: [a.sym] });
   }
   function launchAnnounce() {
