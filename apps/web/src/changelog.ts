@@ -4,6 +4,13 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.7.1", date: "2026-10-24", title: "차트 가격축 수정",
+    items: [
+      "가격축을 끌어 범위를 바꾼 뒤 가격대가 다른 종목으로 바꾸면 봉이 화면 밖에 그려지던 문제 수정 (종목·주기를 바꾸면 가격축이 다시 자동 맞춤)",
+      "최신 봉을 보고 있는데 가격이 화면 범위 밖으로 나가면 가격축을 자동으로 다시 맞춥니다",
+    ],
+  },
+  {
     version: "1.7.0", date: "2026-10-24", title: "봇 탭",
     items: [
       "랭킹 탭은 사람만 보입니다. 내 순위도 사람끼리 순위",

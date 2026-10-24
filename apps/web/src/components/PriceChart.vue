@@ -4,7 +4,7 @@
 // - 전체화면(⛶), 전체봉 한눈에 보기(↔ 전체봉), 최신봉 이동(▶ 최신봉), 줌(+/-)
 // - 사용자 직접 차트 설정(⚙️): 캔들 모양(캔들/속빈캔들/바/영역), 상단 수치 표시 방식(모바일 가림 방지), MA 기간 직접 입력, 최고·최저가/현재가선/포지션선/격자선/Y축 안쪽 배치 설정
 import { tickSize } from "@dopamine/engine";
-import { dispose, init, type Chart, type KLineData } from "klinecharts";
+import { YAxisType, dispose, init, type Chart, type KLineData } from "klinecharts";
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { alpha, mount, register, type DrawingController } from "../chart/drawing-tools.js";
 import { change, money, pct } from "../format";
@@ -297,8 +297,28 @@ function syncFillMarks(lastTs: number) {
   }
 }
 
+/**
+ * 가격축을 다시 자동 맞춤으로. 가격축을 끌거나 늘리면 KLineChart가 자동 맞춤을 끄고 그 범위를 고정하는데,
+ * 종목·주기를 바꿔도 그대로라 $1 종목 범위로 $10만 종목을 그려 봉이 화면 밖으로 나갔다. (yAxis.type을 주면 자동 맞춤이 다시 켜진다)
+ */
+function autoFitPrice() { chart?.setStyles({ yAxis: { type: YAxisType.Normal } }); }
+
+/**
+ * 가격축을 고정해 둔 채(끌어서 범위를 바꾼 뒤) 오래 보고 있으면 가격이 그 범위 밖으로 나가 봉이 혼자 사라진 것처럼 보였다.
+ * 최신 봉을 보고 있는데 그 종가가 캔들 영역 밖으로 나가면 가격축을 다시 자동 맞춤으로 (지난 구간을 보고 있을 때는 그대로)
+ */
+function keepLatestInView(bar: KLineData) {
+  if (!chart) return;
+  const range = chart.getVisibleRange(), count = chart.getDataList().length;
+  if (range.realTo < count) return; // 최신 봉이 화면에 없다: 사용자가 지난 구간을 보는 중
+  const y = chart.convertToPixel({ timestamp: bar.timestamp, value: bar.close }, { paneId: "candle_pane" }) as { y?: number };
+  const h = chart.getSize("candle_pane")?.height ?? 0;
+  if (y?.y != null && h && (y.y < 0 || y.y > h)) autoFitPrice();
+}
+
 function redraw() {
   if (!chart) return;
+  autoFitPrice();
   const price = base[base.length - 1]?.close ?? 1;
   chart.setPriceVolumePrecision(price < 1 ? 4 : 2, 0);
   chart.resize();
@@ -320,6 +340,7 @@ function fitAllBars() {
   chart.setOffsetRightDistance(16);
   chart.setBarSpace(space);
   chart.scrollToRealTime();
+  autoFitPrice();
 }
 
 /** 기본 배율 및 최신 봉 위치로 복귀 */
@@ -328,6 +349,7 @@ function resetToLatest() {
   chart.setOffsetRightDistance(isMobileInit ? 28 : 50);
   chart.setBarSpace(cfg.barSpace);
   chart.scrollToRealTime();
+  autoFitPrice();
 }
 
 function zoomBy(delta: number) {
@@ -386,6 +408,7 @@ watch(() => m.lastBars, bars => {
   latestBar.value = bar;
   chart.updateData(bar);
   if (markedTs.has(bar.timestamp)) syncPosLines(); // 체결 표시가 있는 봉의 고가·저가가 바뀌었다
+  keepLatestInView(bar);
 });
 watch(() => m.selected, sym => void show(sym)); // 새 종목은 show() → redraw()가 최신 봉으로 옮긴다
 watch(() => m.chartJump, () => { if (m.selected === shown) resetToLatest(); }); // 보고 있던 종목을 다시 눌러도 최신 봉으로
