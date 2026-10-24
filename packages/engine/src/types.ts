@@ -15,6 +15,8 @@ export interface AssetDef {
   parValue?: number;
   /** 코인의 가상 유동성 (게임 하루 거래대금). 주식·신흥주는 시총에서 계산 */
   liquidity?: number;
+  /** 주 업종 말고 같이 움직이는 테마 업종 (SECTORS의 키). 신흥주는 없으면 기술 분야(tech)로 정한다 */
+  themes?: string[];
 }
 
 /** 신흥주 예비 목록 항목. 상장할 때 가격·시총은 엔진이 정한다. */
@@ -89,6 +91,10 @@ export interface Quote {
   parValue: number | null;
   /** 시즌 시작 뒤 누적 주식병합 배수. 차트 그림을 새 가격으로 옮길 때 쓴다 */
   splitFactor: number;
+  /** 신흥주 연 매출 ($, 실적 발표 때 바뀐다). 주식·코인은 null */
+  revenue?: number | null;
+  /** 같이 움직이는 테마 업종 (SECTORS의 키) */
+  themes?: string[];
 }
 
 /** 보유 정산이 필요한 상장 변화. split: 수량 ÷ ratio·평단 × ratio, delist: price로 청산 */

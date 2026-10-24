@@ -31,7 +31,7 @@ test("시작가는 설정값과 정확히 같고, 주식 PER은 적정 PER", () 
 test("밖으로 나가는 시세·뉴스에 숨은 상태가 없다", () => {
   const m = make(2);
   run(m, 2000);
-  const quoteKeys = ["cap", "market", "name", "parValue", "per", "prev", "price", "sector", "splitFactor", "stage", "sym"];
+  const quoteKeys = ["cap", "market", "name", "parValue", "per", "prev", "price", "revenue", "sector", "splitFactor", "stage", "sym", "themes"]; // revenue: 신흥주 발표 매출, themes: 테마 업종 (2026-10-24)
   for (const q of m.quotes()) assert.deepEqual(Object.keys(q).sort(), quoteKeys);
   const allowed = new Set(["id", "tick", "at", "date", "kind", "headline", "body", "symbols", "priceAt", "sector", "event", "delisted", "report"]);
   for (const n of m.news) for (const k of Object.keys(n)) assert.ok(allowed.has(k), `뉴스 필드 ${k}`);
@@ -152,7 +152,7 @@ test("승격에 상한이 없고, 예비 기업이 바닥나면 이름을 지어
   run(m, 100); // 빈자리 상장 (40~80틱 뒤)
   const qs = m.quotes();
   assert.ok(grads >= 12, `승격 ${grads}개 (상한 10 넘음)`);
-  assert.equal(qs.filter(q => q.market === "venture").length, 10, "신흥주는 늘 10개");
+  assert.equal(qs.filter(q => q.market === "venture").length, 10, `신흥주는 늘 10개 (${qs.filter(q => q.market === "venture").map(q => q.sym + ":" + q.stage).join(",")})`);
   assert.ok(qs.some(q => q.market === "venture" && !known.has(q.sym)), "지어 낸 신흥주가 상장됨");
 });
 

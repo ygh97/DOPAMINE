@@ -760,7 +760,9 @@ test("단합 받아치기: 2분 안에 사람 3명이 같은 종목을 크게 �
     const s = setup();
     const bots = new BotRunner(s.db, () => s.broker, () => s.exchange, { bots: 0, marketMakers: true, seed: 6 });
     for (let i = 0; i < 5; i++) bots.tick(s.tick().news);
-    const sym = "ETH", users = Array.from({ length: n }, (_, i) => s.user(`단합${i + 1}`));
+    // 뉴스 직후 몰림은 받아치지 않으므로, 앞으로 3분 안에 뉴스가 없을 코인을 고른다 (같은 seed라 미리 돌려 본다)
+    const quiet = (sym: string) => { const probe = setup(); for (let i = 0; i < 185; i++) probe.tick(); return !probe.market.news.some(x => x.symbols.includes(sym) && x.tick > s.market.tick - 130); };
+    const sym = ["ETH", "SOL", "XRP", "BTC", "DOGE"].find(quiet)!, users = Array.from({ length: n }, (_, i) => s.user(`단합${i + 1}`));
     for (const u of users) await openFut(s, u, sym, "long", 5, 80); // 1명 약 $40만
     assert.equal(s.broker.crowds().get(sym)?.users, n);
     const mmIds = new Set(bots.describe().filter(d => d.kind === "mm").map(d => d.userId));

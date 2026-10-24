@@ -12,22 +12,47 @@ export const SECTORS: Record<string, string> = {
   newgrowth: "신성장",
   crypto: "코인",
   venture: "신흥주",
+  // 테마 업종 (2026-10-24): 종목의 주 업종과 별개로 themes에 들어간다. 업종 뉴스는 주 업종·테마 종목을 함께 움직인다
+  ai: "AI",
+  quantum: "양자컴퓨터",
+  mobility: "모빌리티",
 };
+
+/**
+ * 신흥주 기술 분야 → 테마 업종. 예비·새로 지어낸 신흥주도 이걸로 정한다 (맞는 게 없으면 성장주).
+ * 앞에서부터 맞는 규칙을 모두 모은다
+ */
+const TECH_THEMES: [RegExp, string[]][] = [
+  [/양자/, ["quantum", "semi"]],
+  [/칩/, ["semi"]],
+  [/배터리|전해질|전고체/, ["energy", "mobility"]],
+  [/태양|핵융합|원자로|지열|송전|연료|발전|담수|수소|탄소|열에너지|폐기물/, ["energy"]],
+  [/위성|우주|홀로그램|디스플레이/, ["bigtech"]],
+  [/뇌|AI|로보|로봇|휴머노이드|뉴로모픽/, ["ai"]],
+  [/유전자 치료|신약|단백질|뇌|바이오|헬스|치료제|신경|냉동 보존/, ["bio"]],
+  [/열차|항공|모빌리티|드론|자율/, ["mobility"]],
+  [/배양육|작물|플라스틱|식품|농장|농업|물 수확/, ["consumer"]],
+];
+export function themesOfTech(tech = ""): string[] {
+  const out = new Set<string>();
+  for (const [re, keys] of TECH_THEMES) if (re.test(tech)) keys.forEach(k => out.add(k));
+  return out.size ? [...out] : ["growth"];
+}
 
 // 시즌 시작가·시총·적정 PER은 실제 미국 증시 시가총액 상위 20대 종목 밸류에이션을 기반으로 초기화.
 // 주식만 적정 PER(fairPER)을 가지며, 코인은 PER 없이 시총·유동성만 가진다.
 export const ASSETS: AssetDef[] = [
   // 기존 10개 미국 대형 기술·성장주
-  { sym: "NVDA", name: "엔비디아", market: "stock", sector: "semi", price: 219.43, cap: 5.27e12, fairPER: 36.5, product: "AI 가속기", parValue: 1 },
+  { sym: "NVDA", name: "엔비디아", market: "stock", sector: "semi", price: 219.43, cap: 5.27e12, fairPER: 36.5, product: "AI 가속기", parValue: 1, themes: ["ai"] },
   { sym: "AMD", name: "AMD", market: "stock", sector: "semi", price: 172.66, cap: 2.8e11, fairPER: 31.2, product: "서버 CPU", parValue: 0.5 },
   { sym: "AAPL", name: "애플", market: "stock", sector: "bigtech", price: 242.1, cap: 3.64e12, fairPER: 31.8, product: "스마트폰", parValue: 1 },
-  { sym: "MSFT", name: "마이크로소프트", market: "stock", sector: "bigtech", price: 534.24, cap: 3.95e12, fairPER: 33.4, product: "클라우드", parValue: 1 },
+  { sym: "MSFT", name: "마이크로소프트", market: "stock", sector: "bigtech", price: 534.24, cap: 3.95e12, fairPER: 33.4, product: "클라우드", parValue: 1, themes: ["ai", "quantum"] },
   { sym: "AMZN", name: "아마존", market: "stock", sector: "bigtech", price: 228.75, cap: 2.41e12, fairPER: 35.0, product: "물류·클라우드", parValue: 1 },
-  { sym: "GOOGL", name: "알파벳", market: "stock", sector: "platform", price: 361.29, cap: 4.34e12, fairPER: 23.6, product: "검색 광고", parValue: 1 },
-  { sym: "META", name: "메타", market: "stock", sector: "platform", price: 712.4, cap: 1.79e12, fairPER: 26.4, product: "광고 플랫폼", parValue: 1 },
+  { sym: "GOOGL", name: "알파벳", market: "stock", sector: "platform", price: 361.29, cap: 4.34e12, fairPER: 23.6, product: "검색 광고", parValue: 1, themes: ["quantum"] },
+  { sym: "META", name: "메타", market: "stock", sector: "platform", price: 712.4, cap: 1.79e12, fairPER: 26.4, product: "광고 플랫폼", parValue: 1, themes: ["ai"] },
   { sym: "NFLX", name: "넷플릭스", market: "stock", sector: "platform", price: 1120.3, cap: 4.79e11, fairPER: 38.2, product: "스트리밍", parValue: 5 },
-  { sym: "TSLA", name: "테슬라", market: "stock", sector: "growth", price: 405.12, cap: 1.3e12, fairPER: 88.5, product: "전기차", parValue: 1 },
-  { sym: "PLTR", name: "팔란티어", market: "stock", sector: "growth", price: 148.9, cap: 3.51e11, fairPER: 96.0, product: "데이터 분석 소프트웨어", parValue: 0.5 },
+  { sym: "TSLA", name: "테슬라", market: "stock", sector: "growth", price: 405.12, cap: 1.3e12, fairPER: 88.5, product: "전기차", parValue: 1, themes: ["mobility"] },
+  { sym: "PLTR", name: "팔란티어", market: "stock", sector: "growth", price: 148.9, cap: 3.51e11, fairPER: 96.0, product: "데이터 분석 소프트웨어", parValue: 0.5, themes: ["ai"] },
   // 추가 10개 미국 시가총액 상위 종목 (총 20종목)
   { sym: "AVGO", name: "브로드컴", market: "stock", sector: "semi", price: 236.4, cap: 1.11e12, fairPER: 34.8, product: "맞춤형 AI 칩·네트워크", parValue: 1 },
   { sym: "BRK", name: "버크셔 해서웨이", market: "stock", sector: "finance", price: 468.2, cap: 1.01e12, fairPER: 21.5, product: "보험·지주 포트폴리오", parValue: 5 },
@@ -37,7 +62,7 @@ export const ASSETS: AssetDef[] = [
   { sym: "V", name: "비자", market: "stock", sector: "finance", price: 318.9, cap: 6.32e11, fairPER: 29.5, product: "글로벌 결제 네트워크", parValue: 0.5 },
   { sym: "UNH", name: "유나이티드헬스", market: "stock", sector: "bio", price: 588.4, cap: 5.42e11, fairPER: 20.4, product: "헬스케어·보험 서비스", parValue: 1 },
   { sym: "XOM", name: "엑슨모빌", market: "stock", sector: "energy", price: 118.2, cap: 5.18e11, fairPER: 14.2, product: "원유·천연가스", parValue: 1 },
-  { sym: "ORCL", name: "오라클", market: "stock", sector: "bigtech", price: 186.5, cap: 5.15e11, fairPER: 32.0, product: "클라우드 데이터베이스", parValue: 0.5 },
+  { sym: "ORCL", name: "오라클", market: "stock", sector: "bigtech", price: 186.5, cap: 5.15e11, fairPER: 32.0, product: "클라우드 데이터베이스", parValue: 0.5, themes: ["ai"] },
   { sym: "COST", name: "코스트코", market: "stock", sector: "consumer", price: 978.0, cap: 4.34e11, fairPER: 52.4, product: "회원제 창고형 할인점", parValue: 1 },
   // 코인 5종 (PER 없음)
   { sym: "BTC", name: "비트코인", market: "coin", sector: "crypto", price: 94880.1, cap: 1.88e12, liquidity: 3e7 },

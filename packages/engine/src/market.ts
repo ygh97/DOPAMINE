@@ -6,6 +6,7 @@
 // 뉴스: 시장·업종·기업·코인·신흥주 검증·연쇄·루머·공시·고래 지갑·밈, 예고 뒤 발표(지표·실적·신제품·ETF), 애널리스트 리포트(채점)
 // 세력 패턴(개미털기·스퀴즈·설거지·스탑헌팅)은 엔진이 아니라 🏦 세력 계좌가 실제 주문으로 만든다 (apps/server/src/bots.ts).
 // 숨은 상태(대기 충격, 국면, 앵커, EPS)는 이 모듈 밖으로 나가지 않는다. 밖으로는 Quote·Bar·NewsItem만.
+import { themesOfTech } from "./catalog.ts";
 import { ANALYSTS, NEWS, RELATED, type Template } from "./news-templates.ts";
 import type { AnalystStat, AnalystView, AssetDef, Bar, Consensus, CorporateAction, GameDate, MarketKind, MarketOptions, NewsItem, Opinion, Quote, SpareDef, StepResult, Upcoming } from "./types.ts";
 
@@ -54,9 +55,11 @@ export const DEFAULT_OPTIONS: MarketOptions = {
 
 const KIND: Record<MarketKind, { sigma: number; betaM: number; betaS: number; jump: number }> = {
   stock: { sigma: 0.00085, betaM: 1.0, betaS: 1.45, jump: 0 },
-  coin: { sigma: 0.00095, betaM: 0.75, betaS: 2.15, jump: 0 },
-  venture: { sigma: 0.0032, betaM: 0.5, betaS: 0.9, jump: 0.002 },
+  coin: { sigma: 0.00095, betaM: 1.0, betaS: 2.15, jump: 0 },       // 2026-10-24 시장 베타 0.75 → 1.0 (위험자산 심리를 따라간다)
+  venture: { sigma: 0.0032, betaM: 1.3, betaS: 1.2, jump: 0.002 },  // 2026-10-24 시장 0.5 → 1.3, 업종 0.9 → 1.2 (소형 테마주는 과하게 반응)
 };
+/** 테마 업종 반응: 주 업종 반응(betaS)에 곱한다. 주식은 여러 테마에 걸쳐 있어 약하게, 신흥주는 테마가 곧 업종이라 그대로 */
+const THEME_W: Record<MarketKind, number> = { stock: 0.6, coin: 0, venture: 1 };
 
 interface Impulse { total: number; w: number[]; i: number; delay: number }
 
@@ -92,6 +95,11 @@ interface AssetState extends AssetDef {
   watchUntil: number | null;
   par: number | null; // 액면가 (AssetDef.parValue는 시즌 시작 값)
   splitFactor: number;
+  themes: string[];
+  /** 신흥주 실적 (2026-10-24): 연 매출($), 발표된 이익률(적자면 음수), 다음 발표 때 다가갈 숨은 이익률(검증 결과가 움직인다). 주식·코인은 null */
+  revenue: number | null;
+  margin: number | null;
+  outlook: number | null;
 }
 
 export interface CreateMarketInput {
@@ -217,6 +225,11 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
   let state: Record<string, AssetState> = {};
   const live = () => Object.values(state);
 
+  /** 신흥주 첫 실적: 매출은 시총의 3~15%(PSR 7~33배), 이익률은 -40%~+5% (대부분 적자) */
+  function ventureBooks(a: AssetState) {
+    a.revenue = (a.shares ? a.shares * a.price : a.price * 1e8) * uni(0.03, 0.15); // capOf는 아래에서 정의된다
+    a.margin = a.outlook = uni(-0.4, 0.05);
+  }
   function addAsset(def: AssetDef) {
     sectorPending[def.sector] ??= [];
     state[def.sym] = {
@@ -230,7 +243,10 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       pending: [], bars: [], rsi: 50, avgGain: 0, avgLoss: 0, lastClose: def.price,
       hi: null, lo: null, volBoost: 0, successes: 0, stage: null, watchUntil: null,
       par: def.parValue ?? null, splitFactor: 1,
+      themes: def.themes ?? (def.market === "venture" ? themesOfTech(def.tech) : []),
+      revenue: null, margin: null, outlook: null,
     };
+    if (def.market === "venture") ventureBooks(state[def.sym]);
     assetsVersion++;
   }
   assets.forEach(addAsset);
@@ -361,15 +377,24 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     for (const a of live()) shiftFair(a, move * a.betaM * FAIR_SHARE);
     publish({ kind: "시장", headline: render(tpl.h, null, { pct: pctOf(move, 10) / 10 }), body: render(tpl.b, null), symbols: [] });
   }
-  function sectorNews() {
-    const members = (key: string) => live().filter(a => a.sector === key).map(a => a.sym);
-    const key = pick(Object.keys(sectors).filter(k => k !== "venture" && members(k).length)), name = sectors[key];
+  /**
+   * 업종 뉴스: 주 업종이 그 업종이거나 테마로 가진 종목이 함께 움직인다.
+   * theme이면 테마 업종(AI·양자·모빌리티)과 신흥주 업종 중 하나 (2026-10-24, 기존 업종 뉴스 빈도는 그대로 두고 따로 3%)
+   */
+  function sectorNews(theme = false) {
+    const inSector = (a: AssetState, key: string) => a.sector === key || a.themes.includes(key);
+    const members = (key: string) => live().filter(a => inSector(a, key)).map(a => a.sym);
+    const isMain = (k: string) => k !== "venture" && live().some(a => a.sector === k);
+    const keys = Object.keys(sectors).filter(k => members(k).length && (theme ? !isMain(k) : isMain(k)));
+    if (!keys.length) return noiseNews();
+    const key = pick(keys), name = sectors[key];
     const good = rand() < 0.80, only = NEWS.sectorOnly[key];
     const tpl = pick([...(good ? NEWS.sector.good : NEWS.sector.bad), ...(only ? (good ? only.good : only.bad) : [])]);
     const move = good ? realize(uni(0.01, 0.026), PRICED_IN) : realize(-uni(0.033, 0.07), 0.08);
     react(sectorPending[key], move);
     for (const a of live()) {
       if (a.sector === key) shiftFair(a, move * a.betaS * FAIR_SHARE);
+      else if (a.themes.includes(key)) shiftFair(a, move * a.betaS * THEME_W[a.market] * FAIR_SHARE);
     }
     const v = { sector: name, pct: pctOf(move, 300) };
     publish({ kind: "업종", sector: key, headline: `${name} 업종 · ${render(tpl.h, null, v)}`, body: render(tpl.b, null, v), symbols: members(key) });
@@ -439,14 +464,15 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const tpl = pick(m[t.outcome]);
     publish({ kind: "지표", headline: render(tpl.h, null, { pct: pctOf(move, 300) }), body: tpl.b, symbols: [], event: { id: t.eventId, index: 1, total: 2, label: "발표" } });
   }
-  /** 실적 시즌: 분기가 시작되면 주식마다 발표 시각을 정해 일정에 올린다 */
+  /** 실적 시즌: 분기가 시작되면 주식·신흥주마다 발표 시각을 정해 일정에 올린다 (신흥주는 2026-10-24부터) */
   function earningsSeason() {
-    const list = stocks();
+    const list = live().filter(x => x.market !== "coin");
     for (const a of list) scheduled.push({ at: tick + Math.round(uni(5 * MIN, QUARTER - 5 * MIN)), kind: "earnings", sym: a.sym, title: `${a.name}(${a.sym}) 실적 발표` });
     publish({ kind: "실적", headline: render(NEWS.earnings.season.h, null, { n: list.length }), body: NEWS.earnings.season.b, symbols: [] });
   }
   function earningsResult(sym: string) {
     const a = state[sym];
+    if (a?.market === "venture") return ventureEarnings(a);
     if (!a || a.market !== "stock") return;
     // 깜짝 실적 60% × 3~20% ≈ 쇼크 40% × 5~30%. 주가는 서프라이즈의 60%만큼(2026-10-23 전: 40%), 적정가에 2배로 남는다
     const good = rand() < 0.6, surprise = good ? uni(3, 20) : uni(5, 30), move = (good ? 1 : -1) * surprise / 100 * 0.6;
@@ -454,6 +480,26 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const tpl = pick(good ? NEWS.earnings.good : NEWS.earnings.bad), v = { pct: Math.round(surprise) };
     publish({ kind: "실적", headline: render(tpl.h, a, v), body: render(tpl.b, a, v), symbols: [a.sym] });
     chain(a, move);
+  }
+  /**
+   * 신흥주 실적: 이익률이 숨은 전망(검증 결과가 움직인다) 쪽으로 60% 다가가고 흔들린다. 매출은 분기 -5%~+25%.
+   * 흑자 전환 +15~40% · 적자 축소/매출 급증 +5~20% · 부합 작게 · 적자 확대 -10~30% · 적자 전환 -20~40%. 적정가(앵커)도 같은 만큼
+   */
+  function ventureEarnings(a: AssetState) {
+    if (a.margin == null || a.outlook == null || a.revenue == null) ventureBooks(a);
+    const before = a.margin!, growth = uni(-0.05, 0.25);
+    a.revenue! *= 1 + growth;
+    a.margin = Math.min(0.35, Math.max(-0.8, before + 0.6 * (a.outlook! - before) + gauss() * 0.05));
+    const after = a.margin, kind = before < 0 && after >= 0 ? "turnaround" : before >= 0 && after < 0 ? "toLoss"
+      : after > before + 0.02 || growth > 0.15 ? "better" : after < before - 0.02 ? "worse" : "inline";
+    const move = kind === "turnaround" ? uni(0.15, 0.4) : kind === "toLoss" ? -uni(0.2, 0.4) : kind === "better" ? uni(0.05, 0.2)
+      : kind === "worse" ? -uni(0.1, 0.3) : gauss() * 0.02;
+    a.anchor *= Math.exp(move);
+    react(a.pending, move);
+    a.volBoost = 16;
+    const tpl = pick(NEWS.ventureEarnings[kind]);
+    const v = { margin: `${after < 0 ? "-" : ""}${Math.abs(Math.round(after * 100))}%`, growth: `${Math.round(growth * 100)}%` };
+    publish({ kind: "실적", headline: render(tpl.h, a, v), body: render(tpl.b, a, v), symbols: [a.sym] });
   }
   function launchAnnounce() {
     const busy = new Set(scheduled.flatMap(t => (t.kind === "launch" ? [t.sym] : [])));
@@ -558,6 +604,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const price = a.price, left = (list: Impulse[]) => list.reduce((t, it) => t + it.total * it.w.slice(it.i).reduce((x, y) => x + y, 0), 0);
     const pull = 1 - Math.exp(-cfg.kappa * (a.market === "coin" ? 0.3 : 1) * SCORE_TICKS);
     const look = () => left(a.pending) + a.betaM * left(marketPending) + a.betaS * left(sectorPending[a.sector] ?? [])
+      + a.betaS * THEME_W[a.market] * a.themes.reduce((t, k) => t + left(sectorPending[k] ?? []), 0)
       + pull * Math.log(fairOf(a) / price) + drift * SCORE_TICKS + gauss() * 0.01;
     let view: number;
     if (an.style === "accurate") view = look();
@@ -617,6 +664,8 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const move = t.success ? uni(0.3, 0.8) * Math.max(0, 1 - gain) : -uni(0.4, 1.0);
     a.anchor *= Math.exp(move);
     react(a.pending, move);
+    // 검증 결과는 다음 실적의 이익률 전망에 남는다: 성공이면 개선, 실패면 악화
+    if (a.outlook != null) a.outlook = Math.min(0.35, Math.max(-0.8, a.outlook + (t.success ? uni(0.08, 0.2) : -uni(0.05, 0.15))));
     if (t.success) a.successes++;
     a.stage = t.success ? "매출검증" : "상장유지심사";
     ventureStage(a, 2, t.success, t.eventId, pick(NEWS.venture[t.success ? 2 : 3]));
@@ -625,7 +674,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     const tpl = pick(NEWS.noise);
     publish({ kind: "잡담", headline: tpl.h, body: tpl.b, symbols: [] });
   }
-  /** 뉴스 한 건. 비중(%): 시장 11 · 업종 19 · 기업/코인 33(+연쇄) · 신흥주 검증 3 · 리포트 6 · 루머 3 · 공시 3 · 고래 3 · 행사 1.5 · ETF 0.5 · 밈 2 · 지표 예고 1 · 잡담 나머지 (실적은 분기마다 따로) */
+  /** 뉴스 한 건. 비중(%): 시장 11 · 업종 19 · 테마·신흥주 업종 3 · 기업/코인 33(+연쇄) · 신흥주 검증 3 · 리포트 6 · 루머 3 · 공시 3 · 고래 3 · 행사 1.5 · ETF 0.5 · 밈 2 · 지표 예고 1 · 잡담 나머지 (실적은 분기마다 따로) */
   function makeNews() {
     const r = rand();
     // 과거 차트 구간 앞 80%에서는 신흥주 검증을 생략해 시작가 맞추기(rebase) 때 비율이 극단적이지 않게
@@ -642,13 +691,15 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     else if (r < 0.83) etfAnnounce();
     else if (r < 0.85) { if (ventureOk) memeNews(); else noiseNews(); }
     else if (r < 0.86) macroAnnounce();
+    else if (r < 0.89) sectorNews(true);
     else noiseNews();
   }
 
   // ---------- 신흥주 승격 · 상장폐지 · 신규 상장 ----------
   function graduate(a: AssetState) {
     const fill = fillOf(a);
-    Object.assign(a, KIND.stock, { market: "stock", sector: "newgrowth", sigma: 0.0016, fairPER: cfg.gradPER, eps: a.price / cfg.gradPER, baseEps: a.price / cfg.gradPER, stage: null });
+    Object.assign(a, KIND.stock, { market: "stock", sector: "newgrowth", sigma: 0.0016, fairPER: cfg.gradPER, eps: a.price / cfg.gradPER, baseEps: a.price / cfg.gradPER, stage: null,
+      revenue: null, margin: null, outlook: null }); // 주식이 되면 PER은 EPS로
     sectorPending.newgrowth ??= [];
     actions.push({ type: "graduate", sym: a.sym });
     nextGradAt = tick + Math.round(cfg.gradCooldown * uni(0.7, 1.3)); // 간격도 조금씩 다르게
@@ -812,7 +863,9 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       const noise = gauss() * a.sigma * Math.sqrt(a.variance);
       // drift: 적정가와 같은 속도로 가격도 오른다. 당김(kappa)이 약해도 시즌 우상향을 따라가게 (당김은 이탈만 되돌린다)
       const crashShock = a.crashPending?.length ? drain(a.crashPending) : 0;
-      let r = drift + a.betaM * m + a.betaS * (sec[a.sector] || 0) + noise + pull + rsiTilt + srTilt(a) + shock + crashShock;
+      let themeMove = 0;
+      for (const k of a.themes) themeMove += sec[k] || 0;
+      let r = drift + a.betaM * m + a.betaS * ((sec[a.sector] || 0) + THEME_W[a.market] * themeMove) + noise + pull + rsiTilt + srTilt(a) + shock + crashShock;
       if (a.jump && rand() < a.jump) r += gauss() * a.sigma * 6;
       const open = a.price;
       a.price = Math.max(0.01, a.price * Math.exp(r));
@@ -825,7 +878,7 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
 
       const vol = Math.round(uni(40, 160) * (1 + Math.abs(r) / a.sigma) * (a.volBoost-- > 0 ? 3 : 1) * (a.market === "venture" ? 2.5 : 1)); // 신흥주는 손바뀜이 많다
       const last = a.bars[a.bars.length - 1];
-      if (barStart || !last) {
+      if (!last || (barStart && last.timestamp !== barTime())) { // 이번 봉 시작에 막 상장한 종목은 이미 이 시각 봉이 있다
         a.bars.push({ timestamp: barTime(), open, high: Math.max(open, a.price), low: Math.min(open, a.price), close: a.price, volume: vol });
         if (a.bars.length > cfg.maxBars) a.bars.splice(0, a.bars.length - cfg.maxBars);
       } else {
@@ -921,7 +974,21 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       const start = cfg.warmupBars * cfg.ticksPerBar, lo = Math.max(tick + 600, start + Math.round(cfg.seasonTicks * 0.3)), hi = start + Math.round(cfg.seasonTicks * 0.8);
       if (lo < hi) scheduled.push({ at: lo + Math.round((hi - lo) * mulberry32(seed ^ 0x5eed).next()), kind: "crash" });
     }
-    for (const a of Object.values(state)) a.dev ??= 0;
+    for (const a of Object.values(state)) {
+      a.dev ??= 0;
+      // 테마·신흥주 실적이 생기기 전 스냅샷 (2026-10-24): 테마는 카탈로그·기술 분야로, 신흥주 실적은 종목 코드로 정한 값으로 채운다
+      // (매출 시총의 3~15%, 이익률 -40%~+5%. 난수를 쓰지 않아 재생 경로가 그대로)
+      a.themes ??= assets.find(d => d.sym === a.sym)?.themes ?? (a.market === "venture" ? themesOfTech(a.tech) : []);
+      if (a.revenue === undefined) {
+        a.revenue = a.margin = a.outlook = null;
+        if (a.market === "venture") {
+          const h = [...a.sym].reduce((t, ch) => (t * 31 + ch.charCodeAt(0)) % 1000, 7) / 1000;
+          a.revenue = (capOf(a) ?? 0) * (0.03 + 0.12 * h);
+          a.margin = a.outlook = -0.4 + 0.45 * ((h * 7) % 1);
+        }
+      }
+      if (a.market === "venture") Object.assign(a, { betaM: KIND.venture.betaM, betaS: KIND.venture.betaS });
+    }
     for (const k in sectors) sectorPending[k] ??= [];
     news = news.filter(n => n.kind !== "세력");
     const lastBarTs = Object.values(state)[0]?.bars.at(-1)?.timestamp ?? barTime(Math.max(1, tick));
@@ -935,11 +1002,13 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
       }
       if (def.market === "coin") {
         Object.assign(a, KIND.coin);
+        a.themes = def.themes ?? [];
         a.eps = null;
         a.baseEps = null;
         a.fairPER = undefined;
       } else if (def.market === "stock") {
         Object.assign(a, KIND.stock);
+        a.themes = def.themes ?? [];
         if (def.fairPER && !a.fairPER) {
           a.fairPER = def.fairPER;
           const refPrice = a.anchor || a.price;
@@ -976,9 +1045,12 @@ export function createMarket({ assets, sectors, spares = [], seed = 20261021, no
     if (a.eps && a.baseEps) a.eps *= Math.exp(permanent); else a.anchor *= Math.exp(permanent);
   }
 
+  /** 신흥주 PER = 가격 / (매출 × 이익률 / 주식 수). 적자면 음수, 이익률 0이면 없음 */
+  const venturePer = (a: AssetState) => (a.revenue && a.margin && a.shares ? a.price / ((a.revenue * a.margin) / a.shares) : null);
   const toQuote = (a: AssetState): Quote => ({
     sym: a.sym, name: a.name, market: a.market, sector: a.sector, price: a.price, prev: a.prev,
-    per: a.eps ? a.price / a.eps : null, cap: capOf(a), stage: a.stage, parValue: a.par, splitFactor: a.splitFactor,
+    per: a.eps ? a.price / a.eps : venturePer(a), cap: capOf(a), stage: a.stage, parValue: a.par, splitFactor: a.splitFactor,
+    revenue: a.revenue, themes: a.themes,
   });
 
   return {
