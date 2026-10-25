@@ -784,6 +784,26 @@ test("단합 받아치기: 2분 안에 사람 3명이 같은 종목을 크게 �
   }
 });
 
+test("시즌이 바뀌어도 세력·고래 파산 초기화가 바로 된다 (전 시즌 tick으로 기억한 대기 시간이 남지 않는다)", () => {
+  const s = setup();
+  let broker = s.broker, exchange = s.exchange;
+  const bots = new BotRunner(s.db, () => broker, () => exchange, { bots: 0, marketMakers: true, seed: 7 });
+  const step = () => { broker.endTick(); const r = exchange.step(); broker.refundCancelled(r.cancelled); broker.settleTrades(r.trades); broker.applyActions(r.actions); broker.runTriggers(); bots.tick(r.news); };
+  const whale = bots.describe().find(d => d.kind === "whale")!.userId;
+  for (let i = 0; i < 600; i++) step();
+  // 파산(기준 $250만 아래) → 초기화. 초기화 뒤 60 tick은 다시 초기화하지 않으므로 70 tick 안에
+  const bustAndWait = () => { broker.reset(whale); broker.account(whale).cash = 1_000_000; for (let i = 0; i < 70 && broker.equity(broker.account(whale)) < 2_500_000; i++) step(); };
+  bustAndWait();
+  assert.ok(broker.equity(broker.account(whale)) > 2_500_000, "첫 시즌 초기화");
+  // 새 시즌: tick이 다시 작은 수부터
+  const next = finishSeason(s.db, s.season, broker.ranking(Infinity), T0 + s.season.lengthMs + 1000);
+  ({ exchange } = bootMarket(s.db, next, FAST, next.startedAt));
+  broker = new Broker(s.db, next, exchange);
+  step();
+  bustAndWait();
+  assert.ok(broker.equity(broker.account(whale)) > 2_500_000, `새 시즌에도 바로 초기화 (tick ${exchange.tick})`);
+});
+
 test("🤖 봇 교대: 활동 중인 사람만큼 봇이 쉬고, 사람이 빠지면 다시 깨어난다", () => {
   const s = setup();
   let humans = 0;

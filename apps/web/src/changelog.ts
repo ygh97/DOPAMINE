@@ -4,6 +4,13 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.8.0", date: "2026-10-26", title: "세력·고래 털기",
+    items: [
+      "세력·고래가 파산 기준(세력 $500만·고래 $250만) 아래로 떨어져도 새 시즌에 다시 시작하지 않던 문제 수정",
+      "고래는 5배·10배로만 들어갑니다. 세력도 대부분 5배 이상으로 (포지션 스캔에서 청산가를 보고 털어 보세요)",
+    ],
+  },
+  {
     version: "1.7.4", date: "2026-10-25", title: "귓속말 알림 수정",
     items: [
       "귓속말이 와도 알림(화면 위 배너·띠링 소리·채팅 탭 🔒 숫자)이 뜨지 않던 문제 수정",
