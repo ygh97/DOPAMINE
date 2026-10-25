@@ -37,6 +37,7 @@ export const useAccount = defineStore("account", () => {
   const m = useMarket();
   const token = ref(readToken());
   const me = ref<Me | null>(null);
+  watch(() => me.value?.name, name => { m.myName = name ?? ""; }); // 귓속말 알림이 내 이름을 안다
   // 체결 알림음: 내 체결 내역에 새 체결이 생기면 (내 주문·걸어 둔 지정가·익절·손절·청산 모두) 한 번 "짤랑".
   // 처음 받은 내역은 소리 없이 기준으로만 삼는다
   let lastFillId: number | null = null;

@@ -4,6 +4,14 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.7.4", date: "2026-10-25", title: "귓속말 알림 수정",
+    items: [
+      "귓속말이 와도 알림(화면 위 배너·띠링 소리·채팅 탭 🔒 숫자)이 뜨지 않던 문제 수정",
+      "다른 탭을 보고 있으면 브라우저 탭 제목에 (🔒1) 귓속말 표시",
+      "내 강제청산 전광판이 작은 금액이어도 내 화면에는 뜨도록 수정",
+    ],
+  },
+  {
     version: "1.7.3", date: "2026-10-25", title: "현물 보유 한도 해제",
     items: ["현물 종목당 보유 한도(가상 유동성의 20%)를 없앴습니다. 크게 살수록 호가를 먹어 평단이 비싸집니다"],
   },

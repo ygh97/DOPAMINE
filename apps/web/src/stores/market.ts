@@ -56,24 +56,35 @@ export const useMarket = defineStore("market", () => {
   const whisperAlert = ref<{ id: number; from: string; text: string } | null>(null);
   const unreadWhispers = ref(0);
   const replyWhisperTo = ref<string | null>(null);
+  /** 로그인한 내 이름 (계좌 스토어가 채운다). 귓속말 알림·내 청산 전광판에 쓴다 (2026-10-25 전에는 아무도 안 쓰는 저장값을 읽어 알림이 울리지 않았다) */
+  const myName = ref("");
   let lastBannerId = 0;
   let lastWhisperId = 0;
+  // 다른 탭을 보고 있을 때 귓속말이 오면 브라우저 탭 제목에 표시하고, 돌아오면 지운다
+  let baseTitle = typeof document !== "undefined" ? document.title : "";
+  let hiddenWhispers = 0;
+  if (typeof document !== "undefined") document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && hiddenWhispers) { hiddenWhispers = 0; document.title = baseTitle; }
+  });
   function checkBanner(msg: ChatMsg) {
     if (msg.name === "⚡전광판" && msg.text.startsWith("[전설]")) void loadBadges(); // 새 전설: 엠블럼이 바로 붙게
-    if (msg.to && msg.id > lastWhisperId) {
-      const myName = (() => { try { return (localStorage.getItem("dc-name") ?? "").toLowerCase(); } catch { return ""; } })();
-      if (myName && msg.to.toLowerCase() === myName && msg.name.toLowerCase() !== myName) {
-        lastWhisperId = msg.id;
+    const me = myName.value.toLowerCase();
+    if (msg.to && msg.id > lastWhisperId && me && msg.to.toLowerCase() === me && msg.name.toLowerCase() !== me) {
+      lastWhisperId = msg.id;
+      if (Date.now() - msg.at < 60_000) { // 접속 때 받아 오는 지난 귓속말에는 알리지 않는다
         whisperAlert.value = { id: msg.id, from: msg.name, text: msg.text };
         if (socialTab.value !== "chat") unreadWhispers.value++;
-        if (Date.now() - msg.at < 15_000) playWhisperDing(); // 접속 때 받는 지난 귓속말에는 울리지 않는다
-        setTimeout(() => { if (whisperAlert.value?.id === msg.id) whisperAlert.value = null; }, 8000);
+        playWhisperDing();
+        if (document.visibilityState !== "visible") {
+          if (!hiddenWhispers) baseTitle = document.title;
+          document.title = `(🔒${++hiddenWhispers}) 귓속말 · ${baseTitle}`;
+        }
+        setTimeout(() => { if (whisperAlert.value?.id === msg.id) whisperAlert.value = null; }, 12_000);
       }
     }
     if (msg.name !== "⚡전광판" || msg.id <= lastBannerId || msg.reacted) return;
     lastBannerId = msg.id;
-    const myName = (() => { try { return localStorage.getItem("dc-name") ?? ""; } catch { return ""; } })();
-    if (!msg.loud && !(myName && msg.text.includes(` ${myName}님`))) return; // 작은 봇 청산은 채팅에만
+    if (!msg.loud && !(myName.value && msg.text.includes(` ${myName.value}님`))) return; // 작은 봇 청산은 채팅에만
     const entry = msg.text.startsWith("[입장]") ? ANT_TIERS.find(t => msg.text.startsWith(`[입장] ${t.name} `)) : undefined;
     const kind: Banner["kind"] = entry ? "entry" : msg.text.startsWith("[강제청산]") ? "liq" : "clear"; // 졸업·전설(예전 100배졸업 포함)
     const text = msg.text.replace(/^\[(졸업|전설|100배졸업|강제청산|입장)\]\s*/, "");
@@ -350,6 +361,6 @@ export const useMarket = defineStore("market", () => {
     orderPreset.value = { mode, side, lev, seq: Date.now() };
   }
 
-  return { quotes, sectors, date, news, tick, connected, viewers, direction, lastBars, barsEpoch, ranking, players, botRanking, botCount, mmRanking, whaleRanking, markReacted, settled, chat, banner, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, frames, tierFor, frameFor, list, current,
+  return { quotes, sectors, date, news, tick, connected, viewers, direction, lastBars, barsEpoch, ranking, players, botRanking, botCount, mmRanking, whaleRanking, markReacted, settled, chat, banner, myName, whisperAlert, unreadWhispers, replyWhisperTo, season, seasonEpoch, tab, selected, newsDialog, floatingNewsOpen, toggleFloatingNews, guideOpen, spyTarget, orderPreset, socialTab, bookPick, bookEpoch, chartJump, research, calendarOpen, loadResearch, badges, loadBadges, isChamp, frames, tierFor, frameFor, list, current,
     loadSnapshot, loadRanking, connect, fetchBars, fetchNewsPage, select, snipe };
 });

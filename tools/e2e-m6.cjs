@@ -49,6 +49,9 @@ const OUT = outDir();
     await page.fill("#chatForm input", "몰래 작전 ㄱ");
     await page.press("#chatForm input", "Enter");
     await page2.waitForSelector('#chatLog .msg.is-whisper:has-text("몰래 작전 ㄱ")');
+    // 받는 사람 화면 위에 귓속말 알림 배너 (보낸 사람·내용)
+    await page2.waitForSelector('#whisperAlertBanner:has-text("몰래 작전 ㄱ")');
+    if (await page.locator("#whisperAlertBanner").count()) throw new Error("보낸 사람 화면에 귓속말 알림이 뜸");
     await page2.waitForTimeout(1100);
     await page2.type("#chatForm input", "/r ");
     await page2.waitForSelector(".whisper-target-bar:has-text('개미왕')");
