@@ -6,3 +6,4 @@ data/
 tools/out/
 screenshot/
 SECRET.md
+.claude/settings.local.json
