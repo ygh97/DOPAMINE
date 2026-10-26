@@ -25,7 +25,7 @@ npm run e2e:m8 -- <스크린샷 폴더>      # 약 15초, 호가창·지정가 �
 - 서버는 매번 임시 DB(`DB_FILE`)로 뜬다. 실제 `data/dopamine.db`는 건드리지 않는다.
 - 두 번째 사용자는 `browser.newContext()`로 새 세션을 만든다 (토큰이 localStorage라 같은 컨텍스트면 섞인다).
 - 서버(4810)와 Vite(5173)를 직접 띄우고 끝나면 정리한다. 이미 떠 있으면 `--strictPort` 때문에 실패하니 먼저 끈다.
-- Playwright는 REA에 들어 있는 `playwright-core`를 쓴다: `%APPDATA%/npm/node_modules/rea-agents/node_modules/playwright-core`. 다른 경로면 `PW` 환경 변수로 지정. 크롬 경로는 `CHROME`.
+- Playwright는 프로젝트 devDependency `playwright-core`를 쓴다 (`npm install`로 같이 깔린다). 다른 경로면 `PW` 환경 변수로 지정. 브라우저는 크롬, 없으면 엣지를 자동으로 쓰고, 직접 고르려면 `CHROME`.
 - 출력은 JSON. 통과 기준: `priceTicks.changed`, `rows` 10, `newsListCount` > 0, `theme` "dark", `drawingKept` ≥ 1, `reconnect.ticking`, `errors` 빈 배열, `failure` 없음. e2e:split은 `check.lineScaled`, `check.parMatches`가 true.
 - 공통 코드(서버·Vite 띄우기, 브라우저 열기)는 `tools/e2e-lib.cjs`. 새 시나리오는 이걸 가져다 쓴다.
 - 스크린샷 `m1-1-main.png`, `m1-2-dark-btc.png`를 열어 화면도 눈으로 본다.

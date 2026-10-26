@@ -7,3 +7,5 @@ tools/out/
 screenshot/
 SECRET.md
 .claude/settings.local.json
+graphify-out/
+.vs/

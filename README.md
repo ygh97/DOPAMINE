@@ -200,7 +200,7 @@ SQLite (node:sqlite, WAL)  계좌·체결·주문 흐름·스냅샷·채팅·명
 
 ## 개발
 
-필요한 것: Node 24 이상, Git. (종단 테스트는 Chrome과 playwright-core를 쓴다)
+필요한 것: Node 24 이상, Git. (종단 테스트는 Chrome 또는 Edge와 playwright-core(devDependency)를 쓴다)
 
 ```bash
 npm install
@@ -242,7 +242,7 @@ powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -Tunnel    # Funnel이
 powershell -ExecutionPolicy Bypass -File tools\deploy.ps1 -NewSeason # 지금 시즌을 끝내고 새 시즌 (원할 때만)
 ```
 
-- 백업: 켤 때, 시즌이 끝날 때, 하루 1회 자동 (`data/backups`, 최근 20개).
+- 백업: 켤 때, 시즌이 끝날 때, 하루 1회 자동 (`BACKUP_DIR`, 기본 `data/backups`, 최근 20개).
 - 클라우드로 옮길 때는 Docker + Caddy 구성이 준비돼 있다 (`Dockerfile`, `docker-compose.yml`, `tools/deploy-oracle.sh`).
 
 자세한 건 [DEPLOY.md](DEPLOY.md).

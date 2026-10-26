@@ -27,6 +27,7 @@
 | `SEED` | 20261021 | 첫 시즌 seed. 이후 시즌은 무작위 |
 | `BOTS` / `MARKET_MAKERS` | 0 / 꺼짐 | 실제 게임에 🤖 봇 N명, `MARKET_MAKERS=1`이면 🏦 세력·🐋 고래를 넣는다. 지금 운영은 `BOTS=100`, `MARKET_MAKERS=1` (사람이 들어오면 그 수만큼 봇이 쉰다). 끄려면 두 줄을 지우고 `deploy.ps1 -SkipPull` |
 | `DB_FILE` | `data/dopamine.db` | 게임 DB 위치 |
+| `BACKUP_DIR` | `data/backups` | 자동 백업 위치. 포맷해도 남게 지금 운영은 다른 디스크 `D:/dopamin-centerdb` (`.env` 사본 `env.txt`도 거기 둔다) |
 
 ---
 
@@ -89,6 +90,8 @@ Invoke-RestMethod -Method Post http://127.0.0.1:4810/api/admin/new-season -Heade
 ### 알아 둘 것
 - **주소는 고정이다.** 서버나 PC를 다시 켜도 `https://desktop-f349cdk.tail24dad6.ts.net` 그대로다. 주소는 Tailscale 관리 화면의 기기 이름(`desktop-f349cdk`)에서 나온다. 기기 이름을 바꾸면 주소도 바뀐다. 주소가 바뀌면 `apps/web/index.html`의 링크 미리보기(`og:url`, `og:image`)도 같이 고친다.
 - 서버는 직접 켠다 (`start-server.cmd`). Funnel은 PC가 켜지면 같이 켜지지만, 서버를 켜기 전에는 502가 난다.
+- 관리자 권한 창(예: Claude Code 세션)에서 `deploy.ps1`로 켠 서버는 일반 권한 `start-server.cmd`로 끌 수 없다 (`Stop-Process … 액세스가 거부되었습니다`). 켠 쪽과 같은 권한에서 다시 배포한다.
+- `tailscale funnel status`에 예전 기기 이름 주소(`desktop-gicba0s…`)가 같이 보여도 실제 주소는 `desktop-f349cdk` 하나다. `deploy.ps1`은 이 기기 이름과 같은 주소만 보여 준다.
 - 예전 Quick Tunnel도 쓸 수 있다: `cloudflared tunnel --url http://127.0.0.1:4810`. 주소는 켤 때마다 바뀐다.
 - 서버가 꺼져 있던 동안은 시세도 멈춘다. 다시 켜면 마지막 tick에서 이어지고, 시즌 끝나는 시각도 꺼져 있던 시간만큼 늦춰진다. (절전은 서버를 안 끄므로 깨어날 때 그 시간만큼 시세를 채운다.)
 - Funnel 주소에서는 SSE가 그대로 된다. `trycloudflare.com` 주소에서만 화면이 SSE 대신 1초 폴링(`/api/poll`)을 자동으로 쓴다.
@@ -118,7 +121,8 @@ curl -X POST -H "x-admin-key: 키" http://127.0.0.1:4810/api/admin/new-season
 
 ## 백업과 복구
 
-- 자동 백업: 서버를 켤 때, 시즌이 끝날 때, 하루 1회 → `data\backups\dopamine-날짜-…db`. 최근 20개만 남는다.
+- 자동 백업: 서버를 켤 때, 시즌이 끝날 때, 하루 1회, `deploy.ps1`로 끌 때 → `BACKUP_DIR`(기본 `data\backups`, 지금 운영은 `D:\dopamin-centerdb`)의 `dopamine-날짜-…db`. 최근 20개만 남는다.
+- 2026-10-26 PC 포맷 때 `data\`와 `.env`가 같이 지워져 예전 DB를 잃었다. 그래서 백업은 프로젝트와 다른 디스크에 둔다.
 - 수동 백업: `Invoke-RestMethod -Method Post http://127.0.0.1:4810/api/admin/backup -Headers @{ 'x-admin-key' = $key } -ContentType 'application/json' -Body '{}'`
 - 복구: 서버를 끄고(`deploy.ps1 -Stop`) `data\dopamine.db`, `dopamine.db-wal`, `dopamine.db-shm`을 다른 곳으로 옮긴 뒤, 원하는 백업 파일을 `data\dopamine.db`로 복사하고 다시 켠다 (`deploy.ps1 -SkipPull`).
 

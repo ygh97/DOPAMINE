@@ -101,7 +101,10 @@ $ts = "C:\Program Files\Tailscale\tailscale.exe"
 if (-not (Test-Path $ts)) { throw "Tailscale이 없습니다: winget install Tailscale.Tailscale" }
 $funnel = (& $ts funnel status 2>&1 | Out-String)
 if ($Tunnel -and $funnel -notmatch "Funnel on") { & $ts funnel --bg $Port | Out-Null; $funnel = (& $ts funnel status 2>&1 | Out-String) }
-$m = [regex]::Match($funnel, "https://[a-z0-9.-]+\.ts\.net")
+# Funnel 목록에 예전 기기 이름 주소가 남아 있을 수 있어, 이 기기의 실제 이름(tailscale status의 DNSName)과 같은 주소만 보여 준다
+$dns = $null
+try { $dns = ((& $ts status --json | Out-String | ConvertFrom-Json).Self.DNSName).TrimEnd(".") } catch {}
+$m = if ($dns) { [regex]::Match($funnel, "https://" + [regex]::Escape($dns)) } else { [regex]::Match($funnel, "https://[a-z0-9.-]+\.ts\.net") }
 if ($funnel -match "Funnel on" -and $m.Success) { Write-Host "주소: $($m.Value)" -ForegroundColor Green }
 else { Write-Host "Funnel이 꺼져 있습니다. -Tunnel을 붙여 다시 실행하거나 직접: tailscale funnel --bg $Port" -ForegroundColor Yellow }
 Write-Host "`n완료" -ForegroundColor Green

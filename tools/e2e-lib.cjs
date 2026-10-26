@@ -1,12 +1,17 @@
 // 종단 테스트 공통: 서버·Vite 띄우기, 기다리기, 정리, 브라우저 열기.
-// Playwright는 REA에 들어 있는 playwright-core를 쓴다 (PW 환경 변수로 경로 변경 가능).
+// Playwright는 프로젝트 devDependency playwright-core를 쓴다 (PW 환경 변수로 경로 변경 가능).
+// 브라우저는 CHROME 환경 변수 → 크롬 → 엣지 순서로 있는 것을 쓴다 (2026-10-27 포맷 뒤 크롬이 없어 엣지로 돌렸다).
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const path = require("node:path");
 
 const ROOT = path.resolve(__dirname, "..");
-const PW = process.env.PW || path.join(process.env.APPDATA || "", "npm/node_modules/rea-agents/node_modules/playwright-core");
-const CHROME = process.env.CHROME || "C:/Program Files/Google/Chrome/Application/chrome.exe";
+const PW = process.env.PW || "playwright-core";
+const CHROME = process.env.CHROME || [
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  "C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+].find(p => fs.existsSync(p)) || "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const VITE = path.join(ROOT, "node_modules/vite/bin/vite.js");
 // 개발 서버(4810·5173)와 겹치지 않게 테스트는 다른 포트를 쓴다
 const API_PORT = Number(process.env.E2E_PORT ?? 4910), WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5273);
