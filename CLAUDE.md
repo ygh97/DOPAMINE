@@ -18,7 +18,7 @@ npm install
 npm run dev:server        # http://127.0.0.1:4810  (8787은 다른 프로그램이 쓰고 있음)
 npm run dev:web           # http://127.0.0.1:5173  (/api는 4810으로 프록시)
 npm run dev:test          # 테스트 서버: 봇 100 + 세력 20 + 고래 10, http://127.0.0.1:5183 (서버 4820, data/test.db)
-npm test                  # 엔진 25개 + 서버 48개 테스트 (node --test, 약 10초)
+npm test                  # 엔진 25개 + 서버 49개 테스트 (node --test, 약 10초)
 npm run typecheck         # engine·server는 tsc, web은 vue-tsc
 npm run check             # 전체 확인: 테스트 + 타입체크 + 1일 시뮬레이션 + E2E 전부 (약 1분 40초). E2E는 4910·5273 포트라 dev 서버를 켜 둔 채 돌려도 된다
 npm run sim:bots          # 봇 100 + 세력으로 시즌 1개를 seed 6개에 돌려 졸업률·거품·호가 봇 손익·tick 시간을 잰다 (약 30초)

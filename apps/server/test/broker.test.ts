@@ -7,7 +7,7 @@ import { Chat, ChatError } from "../src/chat.ts";
 import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { backupDb, openDb } from "../src/db.ts";
+import { archiveSeason, backupDb, openDb } from "../src/db.ts";
 import { liveFrames, peopleRanks, profileOf, settleLp } from "../src/ranks.ts";
 import { badgesOf, bootMarket, currentSeason, finishSeason, hallOfFame, saveSnapshot, setTop3Message, touchSeason } from "../src/season.ts";
 
@@ -592,6 +592,24 @@ test("SQLite 무중단 온라인 백업: 시각이 붙은 파일, 최근 keep개
   const u = restored.prepare("SELECT name FROM users WHERE name = 'backup_user'").get() as { name: string } | undefined;
   restored.close();
   assert.equal(u?.name, "backup_user");
+});
+
+test("시즌 보관: 정산 직전 상태를 시즌 파일로 두 폴더에 남긴다 (백업 정리와 따로)", () => {
+  const s = setup();
+  s.user("archive_user");
+  const root = mkdtempSync(join(tmpdir(), "dc-season-"));
+  const files = archiveSeason(s.db, s.season.id, [join(root, "seasons"), join(root, "backups", "seasons")]);
+  finishSeason(s.db, s.season, s.broker.ranking(Infinity), T0 + 1000); // 보관 뒤에 정산해도 보관 파일은 그대로
+  assert.equal(files.length, 2);
+  for (const f of files) {
+    assert.match(basename(f), new RegExp(`^season${s.season.id}-\\d{8}-\\d{6}\\.db$`));
+    const a = openDb(f);
+    const seasons = a.prepare("SELECT id, ended_at FROM seasons").all() as { id: number; ended_at: number | null }[];
+    const u = a.prepare("SELECT name FROM users WHERE name = 'archive_user'").get() as { name: string } | undefined;
+    a.close();
+    assert.deepEqual(seasons.map(r => [r.id, r.ended_at]), [[s.season.id, null]], "다음 시즌이 생기기 전 상태");
+    assert.equal(u?.name, "archive_user");
+  }
 });
 
 

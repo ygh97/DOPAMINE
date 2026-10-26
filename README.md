@@ -190,7 +190,7 @@ SQLite (node:sqlite, WAL)  계좌·체결·주문 흐름·스냅샷·채팅·명
 | 서버 | Fastify, 1초 GameLoop, SSE 방송. `trycloudflare.com` 같은 SSE를 버퍼링하는 프록시에서는 화면이 1초 폴링으로 바꾼다 |
 | 화면 | Vue 3 + Vite + Pinia, KLineChart 9.8.12 |
 | DB | Node 내장 `node:sqlite`. 네이티브 빌드가 없어 Windows·Docker 그대로 동작 |
-| 테스트 | `node --test` (엔진 25개 + 서버 48개), Playwright 실제 브라우저 종단 테스트 |
+| 테스트 | `node --test` (엔진 25개 + 서버 49개), Playwright 실제 브라우저 종단 테스트 |
 
 설계에서 지키는 것:
 - **주문 경로는 하나**: 사람·봇·세력 모두 `Broker` → `Exchange`. 봇도 특혜 없이 같은 호가를 먹는다.

@@ -4,6 +4,10 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.8.5", date: "2026-10-27", title: "시즌 기록 보관",
+    items: ["시즌이 끝날 때마다 그 시즌 기록을 따로 보관합니다"],
+  },
+  {
     version: "1.8.4", date: "2026-10-27", title: "내부 정리",
     items: ["서버·화면 코드를 정리했습니다. 게임 규칙과 화면은 바뀌지 않습니다"],
   },

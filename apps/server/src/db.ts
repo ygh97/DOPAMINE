@@ -1,5 +1,5 @@
 // SQLite (Node 내장 node:sqlite). 네이티브 빌드가 없어 Windows·Docker 모두 그대로 돈다.
-import { mkdirSync, readdirSync, unlinkSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, backup } from "node:sqlite";
 
@@ -226,5 +226,16 @@ export async function backupDb(db: Db, dir: string, reason = "auto", keep = 20):
   const old = readdirSync(dir).filter(n => /^dopamine-\d{8}-\d{12}-.+\.db$/.test(n)).sort(); // 이름 = 시각이라 정렬 = 시간순
   // rmSync 대신 unlinkSync: Node 24.11.1의 rmSync는 한글이 든 Windows 경로에서 프로세스째 죽는다
   for (const n of old.slice(0, Math.max(0, old.length - keep))) { try { unlinkSync(join(dir, n)); } catch { /* 이미 없음 */ } }
+  return out;
+}
+
+/** 시즌 보관: 시즌 정산 직전 DB를 시즌 파일로 남긴다. VACUUM INTO는 동기라 정산 전 상태 그대로 담기고,
+ *  첫 폴더에 만든 뒤 나머지 폴더(백업 디스크)에 같은 파일을 복사한다. 개수 제한 없이 모두 둔다 */
+export function archiveSeason(db: Db, seasonId: number, dirs: string[]): string[] {
+  const d = new Date().toISOString().replace(/\D/g, ""); // yyyymmddhhmmss (UTC). 새로 시작(S1부터)해도 이름이 안 겹치게
+  const name = `season${seasonId}-${d.slice(0, 8)}-${d.slice(8, 14)}.db`;
+  const out = dirs.map(dir => { mkdirSync(dir, { recursive: true }); return join(dir, name); });
+  db.exec(`VACUUM INTO '${out[0].replaceAll("'", "''")}'`);
+  for (const f of out.slice(1)) copyFileSync(out[0], f);
   return out;
 }

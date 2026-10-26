@@ -121,7 +121,8 @@ curl -X POST -H "x-admin-key: 키" http://127.0.0.1:4810/api/admin/new-season
 
 ## 백업과 복구
 
-- 자동 백업: 서버를 켤 때, 시즌이 끝날 때, 하루 1회, `deploy.ps1`로 끌 때 → `BACKUP_DIR`(기본 `data\backups`, 지금 운영은 `D:\dopamin-centerdb`)의 `dopamine-날짜-…db`. 최근 20개만 남는다.
+- 시즌 보관: 시즌이 끝날 때마다 정산 직전 DB를 `data\seasons\season번호-날짜-시각.db`로 남기고, 같은 파일을 `BACKUP_DIR\seasons`에도 복사한다. 개수 제한 없이 계속 쌓인다 (시즌당 DB 크기만큼, 지금 약 30MB).
+- 자동 백업: 서버를 켤 때, 하루 1회, `deploy.ps1`로 끌 때 → `BACKUP_DIR`(기본 `data\backups`, 지금 운영은 `D:\dopamin-centerdb`)의 `dopamine-날짜-…db`. 최근 20개만 남는다.
 - 2026-10-26 PC 포맷 때 `data\`와 `.env`가 같이 지워져 예전 DB를 잃었다. 그래서 백업은 프로젝트와 다른 디스크에 둔다.
 - 수동 백업: `Invoke-RestMethod -Method Post http://127.0.0.1:4810/api/admin/backup -Headers @{ 'x-admin-key' = $key } -ContentType 'application/json' -Body '{}'`
 - 복구: 서버를 끄고(`deploy.ps1 -Stop`) `data\dopamine.db`, `dopamine.db-wal`, `dopamine.db-shm`을 다른 곳으로 옮긴 뒤, 원하는 백업 파일을 `data\dopamine.db`로 복사하고 다시 켠다 (`deploy.ps1 -SkipPull`).

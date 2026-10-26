@@ -9,7 +9,7 @@ import { Auth, AuthError } from "./auth.ts";
 import { BotRunner } from "./bots.ts";
 import { Broker, OrderError } from "./broker.ts";
 import { Chat, ChatError, checkWords } from "./chat.ts";
-import { backupDb, openDb } from "./db.ts";
+import { archiveSeason, backupDb, openDb } from "./db.ts";
 import { liveFrames, profileOf } from "./ranks.ts";
 import { badgesOf, bootMarket, currentSeason, endTick, finishSeason, hallOfFame, saveSnapshot, seasonStats, setTop3Message, targetTick, touchSeason } from "./season.ts";
 
@@ -22,6 +22,7 @@ const SEASON_MS = process.env.SEASON_MS ? Number(process.env.SEASON_MS) : null;
 const SNAPSHOT_EVERY = 600; // tick마다 엔진 스냅샷 저장 (10분)
 const DB_FILE = process.env.DB_FILE ?? fileURLToPath(new URL("../../../data/dopamine.db", import.meta.url));
 const BACKUP_DIR = process.env.BACKUP_DIR ?? join(dirname(DB_FILE), "backups");
+const SEASON_DIR = join(dirname(DB_FILE), "seasons"); // 시즌이 끝날 때마다 남기는 시즌별 DB
 const WEB_DIST = process.env.WEB_DIST ?? fileURLToPath(new URL("../../web/dist", import.meta.url));
 // ENGINE_OPTIONS: 테스트용 엔진 설정 덮어쓰기 (JSON). 예: {"splitPrice":1000,"warmupBars":120}
 const ENGINE_OPTIONS = {
@@ -85,7 +86,11 @@ const bots = BOTS > 0 || MARKET_MAKERS
 /** 시즌 종료: 백업 → 통계 로그 → 명예의 전당 기록 → 새 시즌 시작 → 모두에게 알림 */
 function rollover() {
   const prev = season.id;
-  backupDb(db, BACKUP_DIR, `season${prev}-end`).catch(e => app.log.error(e)); // 명예의 전당 기록 전 상태
+  // 시즌별 보관 (명예의 전당 기록 전 상태): data/seasons + 백업 디스크 BACKUP_DIR/seasons. 최근 20개 정리와 따로라 계속 남는다
+  try {
+    saveSnapshot(db, season, exchange); // 시즌 끝 엔진·호가창 상태까지 담는다
+    app.log.info({ files: archiveSeason(db, prev, [SEASON_DIR, join(BACKUP_DIR, "seasons")]) }, "시즌 보관");
+  } catch (e) { app.log.error(e); }
   app.log.info({ season: prev, ...seasonStats(broker.ranking(Infinity)) }, "시즌 통계");
   season = finishSeason(db, season, broker.ranking(Infinity), Date.now(), SEASON_MS);
   ({ market, exchange, warmTicks, replayed, fromSnapshot } = bootMarket(db, season, engineOptions(season), Date.now(), EXCHANGE_OPTIONS));
