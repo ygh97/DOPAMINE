@@ -4,6 +4,10 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.8.1", date: "2026-10-27", title: "채팅 탭 잘림 수정",
+    items: ["채팅 탭에서 알림·관리 버튼 때문에 애널리스트 탭이 잘리던 문제 수정 (버튼이 자리가 모자라면 아랫줄로 내려갑니다)"],
+  },
+  {
     version: "1.8.0", date: "2026-10-26", title: "세력·고래 수정",
     items: [
       "세력·고래가 파산 기준(세력 $500만·고래 $250만) 아래로 떨어져도 새 시즌에 다시 시작하지 않던 문제 수정",

@@ -278,8 +278,10 @@ async function toggleBan(name: string, banned: boolean) {
         <button role="tab" data-c="hall" :aria-selected="m.socialTab === 'hall'" @click="m.socialTab = 'hall'">🏆 전당</button>
         <button role="tab" data-c="analyst" :aria-selected="m.socialTab === 'analyst'" @click="m.socialTab = 'analyst'">애널리스트</button>
       </div>
-      <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="chat-sys" :aria-pressed="showSys" title="강제청산·졸업·전설·티배깅 알림을 채팅에서 보이거나 숨깁니다 (내 화면만)" @click="toggleSys">{{ showSys ? "🔔" : "🔕" }}<span class="btn-label">{{ showSys ? " 알림 켬" : " 알림 끔" }}</span></button>
-      <button v-if="m.socialTab === 'chat'" class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>
+      <div v-if="m.socialTab === 'chat'" class="social-actions">
+        <button class="mini-btn" data-act="chat-sys" :aria-pressed="showSys" title="강제청산·졸업·전설·티배깅 알림을 채팅에서 보이거나 숨깁니다 (내 화면만)" @click="toggleSys">{{ showSys ? "🔔" : "🔕" }}<span class="btn-label">{{ showSys ? " 알림 켬" : " 알림 끔" }}</span></button>
+        <button class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>
+      </div>
     </div>
     <div v-if="m.socialTab === 'rank'" class="table-scroll">
       <div class="rank-hint muted">사람 <b>{{ m.players }}명</b><template v-if="myRank"> · 내 순위 <b>{{ myRank }}위</b></template> · 이름을 누르면 보유 종목·레버리지·<b>청산가</b>를 볼 수 있습니다 🔍 (🤖 봇은 옆 탭)</div>
