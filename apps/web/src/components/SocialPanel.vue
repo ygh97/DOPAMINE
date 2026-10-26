@@ -279,8 +279,9 @@ async function toggleBan(name: string, banned: boolean) {
         <button role="tab" data-c="analyst" :aria-selected="m.socialTab === 'analyst'" @click="m.socialTab = 'analyst'">애널리스트</button>
       </div>
       <div v-if="m.socialTab === 'chat'" class="social-actions">
-        <button class="mini-btn" data-act="chat-sys" :aria-pressed="showSys" title="강제청산·졸업·전설·티배깅 알림을 채팅에서 보이거나 숨깁니다 (내 화면만)" @click="toggleSys">{{ showSys ? "🔔" : "🔕" }}<span class="btn-label">{{ showSys ? " 알림 켬" : " 알림 끔" }}</span></button>
-        <button class="mini-btn" data-act="admin-toggle" title="운영자 도구" @click="adminOpen = !adminOpen">관리</button>
+        <!-- 탭과 한 줄에 들어가도록 아이콘만 (뜻은 title) -->
+        <button class="mini-btn" data-act="chat-sys" :aria-pressed="showSys" :aria-label="showSys ? '알림 켬' : '알림 끔'" :title="`${showSys ? '알림 켬' : '알림 끔'}: 강제청산·졸업·전설·티배깅 알림을 채팅에서 보이거나 숨깁니다 (내 화면만)`" @click="toggleSys">{{ showSys ? "🔔" : "🔕" }}</button>
+        <button class="mini-btn" data-act="admin-toggle" aria-label="운영자 도구" title="운영자 도구" @click="adminOpen = !adminOpen">⚙</button>
       </div>
     </div>
     <div v-if="m.socialTab === 'rank'" class="table-scroll">

@@ -4,6 +4,10 @@ export interface Release { version: string; date: string; title: string; items: 
 
 export const RELEASES: Release[] = [
   {
+    version: "1.8.2", date: "2026-10-27", title: "채팅 탭 한 줄로",
+    items: ["채팅 탭의 알림·관리 버튼을 아이콘(🔔·⚙)으로 줄여 탭과 한 줄에 둡니다. 애널리스트 탭이 잘리지 않습니다"],
+  },
+  {
     version: "1.8.1", date: "2026-10-27", title: "채팅 탭 잘림 수정",
     items: ["채팅 탭에서 알림·관리 버튼 때문에 애널리스트 탭이 잘리던 문제 수정 (버튼이 자리가 모자라면 아랫줄로 내려갑니다)"],
   },
